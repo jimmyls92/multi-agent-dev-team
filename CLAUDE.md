@@ -104,6 +104,8 @@ Formato de los commits (Conventional Commits):
 - Cuerpo solo si el porqué no es obvio. No listes archivos; cita los `DEC-NNN` o `IMP-NNN` relacionados.
 - Un cambio lógico por commit. Separa el código de los cambios de proceso o documentación que no tengan relación con él.
 
+**No reescribas el historial ya subido** (`--amend`, `rebase`, `filter-branch` sobre commits que estén en el remoto): obliga a hacer `push --force` y puede invalidar el SHA entregado al evaluador (C1.1). Solo se reescriben commits locales que todavía no se hayan subido.
+
 ## Labs
 
 Cada lab tiene su enunciado en `docs/labs/lab_<n>_<m>_<tema>.md` (por ejemplo, `lab_1_1_memory.md`). **No lo cargues por defecto.** Léelo solo cuando la tarea sea de ese lab, cuando el usuario lo mencione o cuando se toquen los archivos que ese lab trabaja.
