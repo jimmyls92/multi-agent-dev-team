@@ -13,7 +13,7 @@ Original lab README (the full handout lives in the course LMS):
 | `agent.py` | `agents/coder_agent.py` | Coder Agent conversation loop — 1 TODO (`chat()`) |
 | `test_memory.py` | `tests/test_memory.py` | Automated verification |
 
-Adaptations in this project:
+Adaptations in this project (DEC-001, DEC-002, DEC-006 in `docs/decisions.md`):
 - Files live in the project scaffold (C1.1), so the agent runs as a module from the
   repo root: `python -m agents.coder_agent`; verify with `pytest tests/test_memory.py -v`.
 - LLM access goes through OpenRouter (OpenAI-compatible) instead of Helicone; the

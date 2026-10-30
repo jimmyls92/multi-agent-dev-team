@@ -1,5 +1,5 @@
 # test_memory.py
-# Lab 1.1 — Automated verification of the two-tier memory system (C1.2)
+# Lab 1.1 — Automated verification of the two-tier memory system (C1.2, DEC-006)
 #
 # Run from the repo root:  pytest tests/test_memory.py -v
 # No API key or network LLM call is needed: Chroma runs in memory and the

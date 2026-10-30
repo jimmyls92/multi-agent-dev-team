@@ -10,6 +10,7 @@
 import logging
 import os
 import uuid
+from collections import deque
 
 import chromadb
 from dotenv import load_dotenv
@@ -35,7 +36,7 @@ SYSTEM_PROMPT = (
 
 # --- LLM client --------------------------------------------------------------
 
-# OpenRouter exposes an OpenAI-compatible API, so the official OpenAI SDK works
+# DEC-002: OpenRouter exposes an OpenAI-compatible API, so the official OpenAI SDK works
 # by pointing base_url at it. The key is read from the environment, never
 # hard-coded.
 llm_client = OpenAI(
@@ -49,7 +50,7 @@ _collection = None
 
 
 def get_collection():
-    """Return the shared Chroma collection, creating it on first use.
+    """Return the shared Chroma collection, creating it on first use (DEC-003).
 
     Uses the Chroma server when CHROMA_HOST is set (Docker), otherwise a local
     on-disk store so memories survive between runs. Embeddings use Chroma's
@@ -69,21 +70,30 @@ def get_collection():
 
 
 class SlidingWindowBuffer:
-    """Keeps only the most recent conversation turns."""
+    """Keeps only the most recent conversation turns (DEC-004, DEC-005)."""
 
     def __init__(self, max_turns: int = SLIDING_WINDOW_SIZE):
-        # TODO 1a: store max_turns and create the container for the messages.
-        raise NotImplementedError
+        if max_turns < 1:
+            raise ValueError("max_turns must be at least 1")
+        self.max_turns = max_turns
+        self._turns = deque(maxlen=max_turns)  # each item is one turn: a list of messages
 
     def add(self, role: str, content: str) -> None:
-        """Append one message ({"role": ..., "content": ...})."""
-        # TODO 1b: add the message; older messages must fall out of the window.
-        raise NotImplementedError
+        """Append one message ({"role": ..., "content": ...}).
+
+        A "user" message opens a new turn; any other role joins the current one.
+        """
+        message = {"role": role, "content": content}
+        if role == "user":
+            self._turns.append([message])  # the oldest turn falls out when full
+        elif self._turns:
+            self._turns[-1].append(message)
+        else:
+            raise ValueError("A conversation turn must start with a 'user' message")
 
     def get_messages(self) -> list[dict]:
-        """Return the messages currently in the window, oldest first."""
-        # TODO 1c
-        raise NotImplementedError
+        """Return the messages currently in the window, oldest first, as a flat list."""
+        return [dict(message) for turn in self._turns for message in turn]
 
 
 # --- TODO 2: long-term memory (write) ----------------------------------------

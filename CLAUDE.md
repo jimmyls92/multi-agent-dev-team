@@ -96,6 +96,18 @@ Cada lab tiene su enunciado en `docs/labs/lab_<n>_<m>_<tema>.md` (por ejemplo, `
 - Los labs se implementan dentro de la estructura del proyecto, no en archivos sueltos en la raíz.
 - Si un lab y un criterio de la rúbrica no coinciden, se aplica lo que cumpla el criterio.
 
+## Decisiones de diseño
+
+El porqué de cada decisión está en **`docs/decisions.md`** (fichas `DEC-NNN`, en inglés). El código que aplica una decisión lleva un comentario `DEC-NNN`.
+
+- **Antes de modificar código:** busca los `DEC-` del archivo o símbolo afectado (`grep -n "DEC-" <archivo>`) y lee esas fichas. Fíjate en su `Basis`:
+  - `Required`: no se cambia salvo que el requisito lo permita.
+  - `Preferred`: se puede cambiar con una buena razón.
+  - `Provisional`: está pensada para replantearse cuando se cumpla su `Revisit when`.
+- **Si el cambio contradice una decisión:** avisa al usuario y explícale el porqué original *antes* de tocar nada. Si decide cambiarla, crea una ficha nueva y marca la antigua como `superseded by DEC-NNN`; nunca la borres.
+- **Al tomar una decisión nueva** con alternativas razonables: propón la ficha, con su `Basis` y su porqué, incluido si es una simplificación temporal. Cuando el usuario la valide, añade el ancla `DEC-NNN` en el código.
+- **Al empezar un lab:** revisa las decisiones `Provisional` cuyo `Revisit when` se refiera a ese lab.
+
 ## Mejoras (backlog)
 
 Las ideas que van más allá de lo requerido se guardan en **`docs/improvements.md`**, agrupadas por área y en inglés.

@@ -7,7 +7,7 @@
 import os
 from tools.memory import SlidingWindowBuffer, store_memory, build_context, llm_client
 
-# Reuse the same OpenRouter client from memory.py
+# Reuse the same OpenRouter client from memory.py (DEC-002)
 client = llm_client
 MODEL = os.getenv("LLM_MODEL", "openai/gpt-4.1-mini")
 
