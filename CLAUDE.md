@@ -85,9 +85,24 @@ Trabajando en: **Lab 1.1** (memoria de dos capas, C1.2) → leer `docs/labs/lab_
 
 Actualiza esta línea al empezar o cerrar cada lab.
 
+## Flujo de trabajo: Producto → Técnico → Código
+
+Cada TODO o funcionalidad se trabaja siempre en tres fases, en este orden y sin saltarse ninguna:
+
+1. **Producto (funcional/negocio):** decidir cómo se comporta el agente y por qué. Por ejemplo, qué recuerda, qué alcance tiene o qué pasa en los casos límite. Presenta cada decisión con su impacto y tu recomendación; el usuario decide.
+2. **Técnico:** cuando el producto esté cerrado, propón cómo implementarlo: opciones con ventajas e inconvenientes y una recomendación. No le preguntes al usuario el "cómo"; explícale por qué importa.
+3. **Código:** cuando lo técnico esté cerrado, transfórmalo en código **paso a paso**, en piezas pequeñas que el usuario revise antes de seguir.
+
+En cada fase, registra en `docs/decisions.md` las decisiones acordadas con su motivo. Si el usuario no da un motivo explícito, usa el que propusiste. Los tests que fijen comportamiento se proponen y se aprueban antes de escribirlos.
+
 ## Commits
 
 Al terminar un TODO o una tarea grande, propón un commit: qué archivos incluir y el mensaje. No hagas el commit hasta que el usuario lo confirme. Nunca incluyas `.env`, datos de `.chroma/` ni archivos ajenos a la tarea.
+
+Formato de los commits (Conventional Commits):
+- Asunto de ≤ 72 caracteres en imperativo, con prefijo de tipo: `feat`, `fix`, `docs`, `test`, `refactor` o `chore`, y ámbito opcional, por ejemplo `feat(memory): ...`.
+- Cuerpo solo si el porqué no es obvio. No listes archivos; cita los `DEC-NNN` o `IMP-NNN` relacionados.
+- Un cambio lógico por commit. Separa el código de los cambios de proceso o documentación que no tengan relación con él.
 
 ## Labs
 
