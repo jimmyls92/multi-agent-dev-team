@@ -56,8 +56,35 @@ each idea has a stable ID (`IMP-NNN`, never reused).
 - Rubric: C1.2 — every relevant task context must still be stored and
   retrieved; the filter must not drop task information. An extra model call per
   turn adds latency and cost (C4.4).
-- Notes: Jev is a new type of model; details to be clarified by the user.
-  Complements the empty-text validation decided for `store_memory` (D3).
+- Notes: Jev is a new type of model that only makes decisions based on context
+  (as described by the user; details to be clarified). Complements the
+  empty-text validation of DEC-010. Could be one task of the memory curator
+  agent (IMP-004).
+
+### IMP-004 Asynchronous memory curator for semantic deduplication
+- Status: idea
+- Area: Memory (Lab 1.1)
+- Why: exact deduplication (DEC-011) misses paraphrases ("Mi nombre es Jaime" /
+  "Me llamo Jaime"); a similarity threshold alone can merge different facts
+  ("Me llamo Jaime" / "Mi hermano se llama Jaime"). An agent reading the
+  candidates in context can tell them apart. Jev (decides based on context) fits
+  this role.
+- Rubric: C1.2 — must never lose task context: merge or mark as duplicate
+  instead of deleting, keeping an audit trail. If it becomes part of the
+  pipeline it needs tracing (C4.1), retries (C4.2) and cost accounting (C4.4).
+- Notes: running it asynchronously keeps the chat turn fast; the trade-off is
+  eventual consistency (a duplicate can be retrieved until the curator runs).
+  Could also cover IMP-003 (worth storing) and IMP-005 (fact updates).
+
+### IMP-005 Handle updated facts
+- Status: idea
+- Area: Memory (Lab 1.1)
+- Why: "uso Python 3.11" followed later by "ahora uso Python 3.12" is not a
+  duplicate but an update; both are retrieved and the agent may use the stale
+  one.
+- Rubric: C1.2 — retrieval must keep supplying relevant context.
+- Notes: options: rank by recency using the timestamp metadata (DEC-009), or let
+  the memory curator (IMP-004) mark the older fact as superseded.
 
 ## ReACT loop
 

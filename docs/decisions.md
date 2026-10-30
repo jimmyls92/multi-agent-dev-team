@@ -171,3 +171,123 @@ A decision can mix bases; then each part states its own.
   collect it.
 - Revisit when: C1.6 / C4.7 require automated smoke and mocked unit tests.
 - Code: `tests/test_memory.py`
+
+### DEC-008 Long-term memory stores only user messages
+- Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Required (Lab 1.1 template: `chat()` step 1 stores the user input)
+- Context: long-term memory decides what the agent can recall in future
+  sessions, and what can pollute its answers if it is noise.
+- Decision: `store_memory` is called with user messages only; assistant replies
+  are not stored.
+- Why: user messages carry the task context C1.2 asks to embed (requests and
+  facts such as "I use requests"); replies are long (code blocks), take more
+  space and add noise to retrieval.
+- Alternatives: also store assistant replies — lets the agent recall what it
+  built ("add logging to the function you wrote yesterday"), at the cost of
+  noise and size.
+- Revisit when: the agent needs to recall its own past outputs (e.g. from the
+  ReACT loop or multi-agent modules).
+- Implementation: `store_memory` takes `role` as a parameter defaulting to
+  `"user"` instead of hard-coding it. Why (user): it costs nothing and avoids
+  having to remember this detail if other roles are ever stored.
+- Code: `tools/memory.py` — `store_memory`; `agents/coder_agent.py` — `chat()`
+  (pending, TODO 4)
+
+### DEC-009 One global memory, tagged with metadata
+- Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: mixed
+  - One memory shared across sessions — Required (C1.2: a follow-up must
+    retrieve previously stored information)
+  - Metadata on every memory — Preferred
+- Context: a single collection means facts from one project can surface in
+  another; splitting memory fully would break cross-session recall.
+- Decision: keep one global collection, and store metadata with every memory
+  from now on (at least role, timestamp and session id).
+- Why: metadata costs almost nothing now and enables filtering or ranking later
+  (by session, recency...) without redesign; adding it later would leave older
+  memories without tags.
+- Alternatives: separate collection per session/project (breaks C1.2 recall);
+  no metadata (no way to filter later).
+- Revisit when: retrieval needs filtering by session/project or recency.
+- Code: `tools/memory.py` — `store_memory`
+
+### DEC-010 Reject empty text in long-term memory
+- Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Preferred
+- Context: an empty or whitespace-only message carries no information and its
+  embedding is meaningless.
+- Decision: `store_memory` raises `ValueError` for empty or whitespace-only
+  text. Filtering trivial messages ("ok", "thanks") is out of scope (IMP-003).
+- Why: consistent with DEC-005 — invalid input means a bug in the caller and
+  should surface at once instead of silently polluting memory (C4.6 input
+  validation).
+- Alternatives: silently skip (hides caller bugs); store it (noise).
+- Code: `tools/memory.py` — `store_memory`
+
+### DEC-011 Exact deduplication of long-term memories
+- Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Provisional (simplest useful level for the lab)
+- Context: the same message can be stored many times (e.g. running the lab test
+  repeatedly stores "My name is Priya…" once per run); repeated copies fill the
+  `MEMORY_TOP_K` retrieval slots and crowd out other memories.
+- Decision: a memory's id is derived from its normalized text, so storing the
+  exact same text again does not create a second memory. Paraphrases ("Mi
+  nombre es Jaime" / "Me llamo Jaime") remain separate memories.
+- Why: solves literal repetition at almost no cost and with no risk of merging
+  different facts; retrieval stays more varied.
+- Alternatives: no deduplication (repeats crowd retrieval); semantic
+  deduplication by similarity threshold (catches paraphrases but needs tuning
+  and can merge different facts such as "Me llamo Jaime" / "Mi hermano se llama
+  Jaime") — see IMP-004.
+- Revisit when: IMP-004 / IMP-005 are implemented.
+- Code: `tools/memory.py` — `store_memory`
+
+### DEC-012 Memory id = SHA-256 of the normalized text
+- Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Preferred (implements DEC-011)
+- Context: exact deduplication needs the same text to always map to the same id.
+- Decision: id = SHA-256 hex digest of the text after trimming, collapsing
+  inner whitespace and lowercasing. The original text, with surrounding
+  whitespace stripped, is what gets stored.
+- Why: deterministic, standard library (`hashlib`), and trivial variations
+  ("Hola Jaime" / "hola  jaime") count as the same memory.
+- Alternatives: hash of the raw text ("Hola " and "Hola" would be two
+  memories); random ids (no deduplication).
+- Code: `tools/memory.py` — `store_memory`
+
+### DEC-013 Store memories with upsert and two timestamps
+- Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Preferred
+- Context: with DEC-012, storing an already known text hits an existing id.
+  `add` would ignore it; `upsert` updates the existing entry.
+- Decision: use `collection.upsert`; metadata keeps `created_at` (first time
+  stored, preserved on update) and `last_seen_at` (last time stored), ISO 8601
+  UTC.
+- Why (user): it prepares future logic where a newer fact replaces an older one
+  ("now I use Python 3.11" replacing "I use Python 3.10"). Note: with DEC-012
+  those two texts have different ids, so upsert alone does not replace one with
+  the other; it is the mechanism a future rule (IMP-005, memory curator IMP-004)
+  can use by writing the new text under the old id.
+- Why (Claude): `last_seen_at` reflects what was said most recently, enabling
+  recency ranking (IMP-005); `created_at` keeps the original date.
+- Alternatives: `add` (repeats keep the old date); only `last_seen_at` (simpler,
+  loses the first date — `created_at` costs one read before writing).
+- Code: `tools/memory.py` — `store_memory`
+
+### DEC-014 One run id per process
+- Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Provisional (keeps the lab template unchanged)
+- Context: DEC-009 tags memories with the conversation they come from, but
+  `chat()` calls `store_memory(user_input)` without any session information.
+- Decision: a `run_id` is generated once per process (module constant) and
+  stored in every memory's metadata. Today one run = one terminal = one
+  conversation, so it identifies the conversation too.
+- Why: no change to the lab template; matches how the agent is used now.
+- Alternatives: id per window (`conversation_id`), passed by `chat()` to
+  `store_memory` — correct with several conversations per process but changes
+  the template; both ids (user's proposal) — `conversation_id` for
+  multi-user plus `run_id` for traceability (e.g. find memories left by a test
+  run, link to C4.1 traces).
+- Revisit when: one process serves several conversations (e.g. a server in
+  Modules 2–4) — then move to both ids.
+- Code: `tools/memory.py` — `RUN_ID`, `store_memory`

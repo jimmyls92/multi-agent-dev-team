@@ -7,10 +7,12 @@
 # The configuration, LLM client and Chroma setup are already written.
 # TODO: implement the 3 TODOs below.
 
+import hashlib
 import logging
 import os
 import uuid
 from collections import deque
+from datetime import datetime, timezone
 
 import chromadb
 from dotenv import load_dotenv
@@ -98,12 +100,47 @@ class SlidingWindowBuffer:
 
 # --- TODO 2: long-term memory (write) ----------------------------------------
 
+# DEC-014: one id per process run; every memory stored in this run carries it.
+RUN_ID = uuid.uuid4().hex
 
-def store_memory(text: str, collection=None) -> str:
-    """Embed and store text in Chroma. Returns the id of the stored entry."""
-    collection = collection or get_collection()
-    # TODO 2: add the text to the collection with a unique id.
-    raise NotImplementedError
+
+def _memory_id(text: str) -> str:
+    """Same normalized text -> same id, so repeats are deduplicated (DEC-011, DEC-012)."""
+    normalized = " ".join(text.split()).lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def store_memory(text: str, collection=None, role: str = "user") -> str:
+    """Embed and store a message in Chroma. Returns its id.
+
+    Only user messages are stored today (DEC-008), hence the default role.
+    Exact repeats update the existing memory instead of adding a new one
+    (DEC-011..DEC-013).
+    """
+    if not text or not text.strip():
+        raise ValueError("Cannot store an empty memory")  # DEC-010
+    if collection is None:
+        collection = get_collection()
+
+    memory_id = _memory_id(text)
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Keep the original creation date when the memory already exists (DEC-013).
+    existing = collection.get(ids=[memory_id], include=["metadatas"])
+    previous = (existing["metadatas"][0] or {}) if existing["ids"] else {}
+
+    collection.upsert(
+        ids=[memory_id],
+        documents=[text.strip()],
+        metadatas=[{
+            "role": role,
+            "run_id": RUN_ID,
+            "created_at": previous.get("created_at", now),
+            "last_seen_at": now,
+        }],
+    )
+    logger.debug("Stored memory %s (run %s)", memory_id[:8], RUN_ID)
+    return memory_id
 
 
 # --- TODO 3: long-term memory (read) + context assembly ----------------------
@@ -115,7 +152,8 @@ def build_context(user_input: str, window: SlidingWindowBuffer, collection=None)
     Order: system prompt (with retrieved memories) -> sliding window.
     The current user_input is already the last message of the window.
     """
-    collection = collection or get_collection()
+    if collection is None:
+        collection = get_collection()
     # TODO 3: query Chroma for memories relevant to user_input, build the
     # system message with them, and return it followed by the window messages.
     raise NotImplementedError
