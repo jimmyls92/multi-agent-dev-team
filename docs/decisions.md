@@ -136,7 +136,7 @@ A decision can mix bases; then each part states its own.
 - Code: `tools/memory.py` — `SlidingWindowBuffer.__init__`, `SlidingWindowBuffer.add`
 
 ### DEC-006 Own memory tests with fake LLM and in-memory Chroma
-- Date: 2026-10-30 · Area: Tests (Lab 1.1) · Status: accepted
+- Date: 2026-10-30 · Area: Tests (Lab 1.1) · Status: superseded by DEC-007
 - Basis: Preferred (the lab's own `test_memory.py` was not provided)
 - Context: the lab README points to a `test_memory.py` for verification, but
   only the README was available.
@@ -149,3 +149,25 @@ A decision can mix bases; then each part states its own.
 - Revisit when: the official lab test becomes available (align with it), and in
   C1.6 / C4.7, which additionally need a real agent run (smoke / E2E test).
 - Code: `tests/test_memory.py`, `pytest.ini`
+
+### DEC-007 Lab 1.1 is verified with the official lab test
+- Date: 2026-10-30 · Area: Tests (Lab 1.1) · Status: accepted
+- Basis: Required (Lab 1.1 verification); import paths Required (DEC-001)
+- Context: the official lab `test_memory.py` became available. It is a single
+  integration script with the real LLM and the real Chroma store: it plants a
+  fact, pushes it out of the window with `SLIDING_WINDOW_SIZE + 1` filler turns
+  and checks that the reply recalls it. The own tests of DEC-006 had fixed
+  design choices (unique ids for duplicate text, memories inside the system
+  message, `store_memory` returning an id) without agreement.
+- Decision: `tests/test_memory.py` is the lab test, changed only in its import
+  paths (`tools.memory`, `agents.coder_agent`) and run command
+  (`python -m tests.test_memory`). The DEC-006 tests are dropped for now (kept
+  in git history).
+- Why: the lab test is what defines success for the lab; the dropped tests
+  encoded decisions that are now taken explicitly (TODO 2 and TODO 3).
+- Implications: needs a real `OPENROUTER_API_KEY` (8 LLM calls, not
+  deterministic); writes to the real `.chroma/` store; `SLIDING_WINDOW_SIZE`
+  must stay ≤ 6 (only 7 filler messages); it is a script, so `pytest` does not
+  collect it.
+- Revisit when: C1.6 / C4.7 require automated smoke and mocked unit tests.
+- Code: `tests/test_memory.py`

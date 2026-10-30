@@ -13,12 +13,12 @@ Original lab README (the full handout lives in the course LMS):
 | `agent.py` | `agents/coder_agent.py` | Coder Agent conversation loop — 1 TODO (`chat()`) |
 | `test_memory.py` | `tests/test_memory.py` | Automated verification |
 
-Adaptations in this project (DEC-001, DEC-002, DEC-006 in `docs/decisions.md`):
+Adaptations in this project (DEC-001, DEC-002, DEC-007 in `docs/decisions.md`):
 - Files live in the project scaffold (C1.1), so the agent runs as a module from the
-  repo root: `python -m agents.coder_agent`; verify with `pytest tests/test_memory.py -v`.
+  repo root: `python -m agents.coder_agent`; verify with `python -m tests.test_memory`.
 - LLM access goes through OpenRouter (OpenAI-compatible) instead of Helicone; the
   client is `llm_client` and the key comes from `OPENROUTER_API_KEY` in `.env`.
-- The lab `test_memory.py` was not provided, so `tests/test_memory.py` was written
-  against C1.2: it covers the 3 memory TODOs and `chat()` (fake LLM, in-memory Chroma).
+- `tests/test_memory.py` is the official lab test with imports adapted to the
+  scaffold. It needs a real `OPENROUTER_API_KEY` and keeps `SLIDING_WINDOW_SIZE` ≤ 6.
 
 Extra ideas for this area: `docs/improvements.md` → section "Memory (Lab 1.1)".

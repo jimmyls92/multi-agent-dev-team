@@ -48,6 +48,17 @@ each idea has a stable ID (`IMP-NNN`, never reused).
 - Notes: decide whether the whole first turn or only the user message is pinned,
   and how it interacts with IMP-001 (does it count towards the token budget?).
 
+### IMP-003 Decide what is worth storing with Jev
+- Status: idea
+- Area: Memory (Lab 1.1)
+- Why: trivial messages ("ok", "thanks") add noise to semantic retrieval;
+  a model could judge whether a message is worth keeping in long-term memory.
+- Rubric: C1.2 — every relevant task context must still be stored and
+  retrieved; the filter must not drop task information. An extra model call per
+  turn adds latency and cost (C4.4).
+- Notes: Jev is a new type of model; details to be clarified by the user.
+  Complements the empty-text validation decided for `store_memory` (D3).
+
 ## ReACT loop
 
 _No ideas yet._
