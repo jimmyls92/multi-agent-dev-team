@@ -1,0 +1,13 @@
+.env
+.venv/
+.chroma/
+__pycache__/
+.pytest_cache/
+
+# IDE config (Continue)
+config.yaml
+.continue/
+
+# Course materials (local reference only)
+*.pdf
+docs/course_reference.txt

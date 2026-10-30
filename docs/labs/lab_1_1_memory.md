@@ -1,0 +1,22 @@
+# Lab 1.1 — Memory System with Conversation History & Semantic Retrieval
+
+**Course:** Build Autonomous Multi-Agent Systems
+**Module:** 1 · Section 5 · Lab 1.1 — covers rubric criterion **C1.2**
+**Use when:** working on two-tier memory (`tools/memory.py`, the `chat()` TODO in
+`agents/coder_agent.py`, `tests/test_memory.py`) or when Lab 1.1 is mentioned.
+
+Original lab README (the full handout lives in the course LMS):
+
+| Lab file | Project file | Task |
+|------|------|------|
+| `memory.py` | `tools/memory.py` | Two-tier memory system — 3 TODOs |
+| `agent.py` | `agents/coder_agent.py` | Coder Agent conversation loop — 1 TODO (`chat()`) |
+| `test_memory.py` | `tests/test_memory.py` | Automated verification |
+
+Adaptations in this project:
+- Files live in the project scaffold (C1.1), so the agent runs as a module from the
+  repo root: `python -m agents.coder_agent`; verify with `pytest tests/test_memory.py -v`.
+- LLM access goes through OpenRouter (OpenAI-compatible) instead of Helicone; the
+  client is `llm_client` and the key comes from `OPENROUTER_API_KEY` in `.env`.
+- The lab `test_memory.py` was not provided, so `tests/test_memory.py` was written
+  against C1.2: it covers the 3 memory TODOs and `chat()` (fake LLM, in-memory Chroma).
