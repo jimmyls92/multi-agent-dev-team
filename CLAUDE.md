@@ -95,3 +95,12 @@ Cada lab tiene su enunciado en `docs/labs/lab_<n>_<m>_<tema>.md` (por ejemplo, `
 
 - Los labs se implementan dentro de la estructura del proyecto, no en archivos sueltos en la raíz.
 - Si un lab y un criterio de la rúbrica no coinciden, se aplica lo que cumpla el criterio.
+
+## Mejoras (backlog)
+
+Las ideas que van más allá de lo requerido se guardan en **`docs/improvements.md`**, agrupadas por área y en inglés.
+
+- **Cuándo leerlo:** cuando el usuario pregunte por mejoras o ideas, sean generales o de un área concreta ("¿qué mejoras tenía para la memoria?"), y siempre al cerrar un lab.
+- **Registrar:** el usuario explica la idea como quiera. Pásala a una ficha en inglés con el siguiente `IMP-NNN` y la plantilla del archivo. Indica qué criterio toca y avisa si hay riesgo de romperlo.
+- **Al cerrar un lab:** recuerda al usuario las mejoras de esa área que estén en `idea` o `planned`.
+- **Implementar:** solo cuando el usuario lo pida, en cualquier momento, cada mejora en su propio commit y sin romper ningún criterio. Después, actualiza su `Status`.

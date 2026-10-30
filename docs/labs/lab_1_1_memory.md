@@ -20,3 +20,5 @@ Adaptations in this project:
   client is `llm_client` and the key comes from `OPENROUTER_API_KEY` in `.env`.
 - The lab `test_memory.py` was not provided, so `tests/test_memory.py` was written
   against C1.2: it covers the 3 memory TODOs and `chat()` (fake LLM, in-memory Chroma).
+
+Extra ideas for this area: `docs/improvements.md` → section "Memory (Lab 1.1)".
