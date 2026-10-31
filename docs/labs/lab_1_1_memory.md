@@ -20,5 +20,8 @@ Adaptations in this project (DEC-001, DEC-002, DEC-007 in `docs/decisions.md`):
   client is `llm_client` and the key comes from `OPENROUTER_API_KEY` in `.env`.
 - `tests/test_memory.py` is the official lab test with imports adapted to the
   scaffold. It needs a real `OPENROUTER_API_KEY` and keeps `SLIDING_WINDOW_SIZE` ≤ 6.
+- Run the lab test against a separate store so its planted fact does not end up
+  in the real memory (DEC-018):
+  `CHROMA_PATH=.chroma-test python -m tests.test_memory`
 
 Extra ideas for this area: `docs/improvements.md` → section "Memory (Lab 1.1)".

@@ -1,4 +1,4 @@
 python-dotenv
-chromadb
+chromadb>=1.0,<2  # DEC-024
 openai
 pytest
