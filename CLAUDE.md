@@ -86,22 +86,16 @@ Trabajando en: **Lab 1.1** (memoria de dos capas, C1.2) → leer `docs/labs/lab_
 Progreso:
 - ✅ TODO 1 `SlidingWindowBuffer` (DEC-004, DEC-005)
 - ✅ TODO 2 `store_memory` (DEC-008..DEC-014)
-- ⏭️ **Siguiente: TODO 3 `build_context`**, empezando por la fase de **producto**. Hay que decidir:
-  - dónde se inyectan los recuerdos (hoy la estructura asume que van en el mensaje `system`);
-  - si se excluye de la búsqueda el mensaje recién guardado (con `store_memory` devolviendo su id);
-  - cuántos recuerdos se recuperan (`MEMORY_TOP_K`);
-  - cómo se registra en el log lo recuperado (evidencia de C1.2);
-  - si el test del lab debe escribir en `.chroma/` real.
-
-  Lo que evalúa el test del lab: encontrar el dato aunque se pregunte con otras palabras (L3) y que el LLM lo use en su respuesta (L4). Ver DEC-007.
-- ⬜ TODO 4 `chat()` en `agents/coder_agent.py`
-- ⬜ Ejecutar `python -m tests.test_memory` con una API key real y cerrar el lab: recordar las mejoras IMP-001..IMP-005 y actualizar esta sección.
+- ✅ TODO 3 `build_context` (DEC-015..DEC-026). Escrito pero sin ejecutar: falta el entorno.
+- ⏭️ **Siguiente: TODO 4 `chat()`**. Ya decidido: guardar el input al principio (DEC-019) y configurar el logging en `main()` con `LOG_LEVEL` (DEC-023, pendiente de código).
+- ⬜ Ejecutar `CHROMA_PATH=.chroma-test python -m tests.test_memory` (DEC-018) con una API key real y cerrar el lab: recordar las mejoras IMP-001..IMP-005 y actualizar esta sección.
 
 Pendientes fuera del lab:
 - Entorno sin instalar: falta `pip`/`venv` en WSL (`sudo apt install python3-venv python3-pip`), crear `.venv`, instalar dependencias y crear `.env`.
 - El repo aún no tiene remoto. Tras el primer push no se reescribe historial.
 - "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
+- Elegir framework (LangGraph / AutoGen / CrewAI) al cerrar el lab y antes del bucle ReACT (C1.4).
 
 Actualiza esta sección al terminar cada TODO y al empezar o cerrar cada lab.
 
