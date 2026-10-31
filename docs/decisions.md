@@ -186,7 +186,8 @@ A decision can mix bases; then each part states its own.
   built ("add logging to the function you wrote yesterday"), at the cost of
   noise and size.
 - Revisit when: the agent needs to recall its own past outputs (e.g. from the
-  ReACT loop or multi-agent modules).
+  ReACT loop or multi-agent modules). Storing replies also changes when
+  memory is written in `chat()`: see DEC-019.
 - Implementation: `store_memory` takes `role` as a parameter defaulting to
   `"user"` instead of hard-coding it. Why (user): it costs nothing and avoids
   having to remember this detail if other roles are ever stored.
@@ -291,3 +292,195 @@ A decision can mix bases; then each part states its own.
 - Revisit when: one process serves several conversations (e.g. a server in
   Modules 2–4) — then move to both ids.
 - Code: `tools/memory.py` — `RUN_ID`, `store_memory`
+
+### DEC-015 Retrieved memories go in the system message
+- Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: mixed
+  - Retrieved context reaches the LLM — Required (C1.2)
+  - Placed in the system message — Preferred
+- Context: retrieved memories must be injected into the prompt; they can go in
+  the system message or be attached to the current user message.
+- Decision: memories are added to the system message, under a heading that
+  marks them as past context that may not be relevant.
+- Why: inside the user message the model may read them as something the user
+  is saying or asking now; in the system message they act as background. The
+  lab template already assumes this structure.
+- Alternatives: append them to the user message (mixes past and present
+  intent).
+- Code: `tools/memory.py` — `build_context`
+
+### DEC-016 Retrieval skips memories already in the window
+- Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Preferred
+- Context: the current message (and the rest of the window) is also stored in
+  Chroma, so the top results would repeat what the LLM already sees in the
+  window, wasting `MEMORY_TOP_K` slots.
+- Decision: memories whose text is already in the sliding window are excluded
+  from the retrieved results, not only the current message.
+- Why: long-term memory exists to bring back what the window no longer holds;
+  this way every retrieved slot adds new information.
+- Alternatives: no exclusion (top slot always repeats the current message);
+  exclude only the current message (other window messages can still repeat).
+- Code: `tools/memory.py` — `build_context`
+
+### DEC-017 Top-K retrieval without a relevance threshold
+- Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Provisional
+- Context: retrieval returns the K closest memories even when none is related
+  to the question.
+- Decision: inject up to `MEMORY_TOP_K` memories (default 3, from `.env`) with
+  no similarity threshold; the system prompt tells the model it may ignore
+  irrelevant context.
+- Why: a threshold needs calibration, and a badly tuned one can drop exactly
+  the paraphrased fact the lab checks (recall with different wording).
+- Alternatives: distance threshold (less noise, needs tuning, risk of missing
+  the fact).
+- Revisit when: irrelevant memories noticeably degrade answers, or retrieval
+  quality is tuned (see also DEC-003 embeddings).
+- Code: `tools/memory.py` — `MEMORY_TOP_K`, `_retrieve_memories`
+
+### DEC-018 Lab test runs against a separate Chroma store
+- Date: 2026-10-31 · Area: Tests (Lab 1.1) · Status: accepted
+- Basis: Preferred
+- Context: the lab test stores "My name is Priya…" in long-term memory; in the
+  real `.chroma/` store it would surface in normal conversations.
+- Decision: run the test with `CHROMA_PATH=.chroma-test python -m
+  tests.test_memory`; the test file stays unchanged (DEC-007) and
+  `.chroma-test/` is git-ignored.
+- Why: keeps test data out of the real memory without modifying the official
+  test; `load_dotenv` does not override a variable already set in the shell.
+- Alternatives: run against `.chroma/` (pollutes real memory); edit the test to
+  use a temporary store (breaks DEC-007).
+- Code: `docs/labs/lab_1_1_memory.md`, `.gitignore`
+
+### DEC-019 User input is stored before the LLM call
+- Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Preferred (matches the lab template order)
+- Context: the flow can store the message at any point; with DEC-016 the order
+  no longer affects retrieval (the current message is in the window and is
+  excluded either way). It only matters when the LLM call fails.
+- Decision: `chat()` stores the user input in long-term memory first, before
+  building the context and calling the LLM.
+- Why: user facts are kept even if the LLM call fails; since only user
+  messages are stored (DEC-008), nothing depends on the LLM reply.
+- Alternatives: store at the end of the turn (only completed turns are kept,
+  but a failed call loses the user's facts).
+- Revisit when: assistant output starts being stored (DEC-008). Then the
+  reply can only be stored after the call succeeds, so storing splits in two
+  moments (user input first, reply after the call), and a failure mid-turn
+  leaves the user message stored without its reply.
+- Code: `agents/coder_agent.py` — `chat()` (pending, TODO 4)
+
+### DEC-020 Log retrieved memories at INFO on every LLM call
+- Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: superseded by DEC-025
+- Basis: Required (C1.2 evidence: "observed Chroma retrieval; instrumented call
+  showing retrieved context"); format Preferred
+- Context: a run only shows the agent's reply; nothing shows that Chroma was
+  queried before the call or what reached the LLM.
+- Decision: `build_context` logs one INFO line per call with the number of
+  retrieved memories and, for each, its short id, distance and the first ~80
+  characters of its text. Zero results are logged too.
+- Why: makes retrieval observable in a real run (the rubric accepts empty
+  first-run retrieval, so logging "0 memories" proves the query happened) and
+  helps debug odd answers; truncation keeps the log readable.
+- Alternatives: DEBUG level (hidden by default, evidence lost); full texts
+  (noisy); no log (C1.2 evidence depends on reading the code).
+- Revisit when: Module 4 tracing (C4.1) records retrieval in spans.
+- Code: `tools/memory.py` — `build_context`
+
+### DEC-021 Window exclusion by over-fetching and filtering ids
+- Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Preferred (implements DEC-016)
+- Context: local Chroma cannot exclude ids in `collection.query`: `where`
+  filters metadata only, and the Search API with `K.ID.not_in` is Chroma
+  Cloud only (local support "planned"). Every record needs an id, and the
+  text hash must stay the id for deduplication (DEC-011..DEC-013).
+- Decision: `build_context` computes `_memory_id()` of each user message in
+  the window, asks Chroma for `MEMORY_TOP_K + <number of those distinct ids>`
+  results (capped at `collection.count()`), drops the window ids and keeps the
+  first `MEMORY_TOP_K`. With an empty collection it does not query.
+- Why: exact (at most one result per window id is dropped, so K results are
+  returned whenever they exist), no change to `store_memory`, no duplicated
+  data; the extra results (≤ N) cost nothing. Capping `n_results` avoids the
+  errors/warnings some versions raise when asking for more than stored.
+- Alternatives: copy the id into metadata and filter with
+  `where={"memory_id": {"$nin": ids}}` (filtered inside Chroma, but stores the
+  hash twice and needs a guard for an empty list); random ids with the hash
+  only in metadata (breaks upsert-based deduplication).
+- Revisit when: the Search API (`K.ID.not_in`) is available in local Chroma.
+- Code: `tools/memory.py` — `build_context`
+
+### DEC-022 System message layout with retrieved memories
+- Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Preferred (implements DEC-015)
+- Decision: when memories are retrieved, the system message is
+  `SYSTEM_PROMPT`, a blank line, the heading "Relevant context from past
+  conversations (may not be relevant):" and one "- <text>" line per memory.
+  With no memories it is `SYSTEM_PROMPT` alone. Only the text is included, no
+  dates.
+- Why: an empty heading could confuse the model; dates would help with
+  updated facts but belong to IMP-005.
+- Code: `tools/memory.py` — `build_context`
+
+### DEC-023 Logging is configured by the entry point
+- Date: 2026-10-31 · Area: General (Lab 1.1) · Status: accepted
+- Basis: Preferred (needed for DEC-020 to be visible)
+- Context: Python shows only WARNING and above by default, so the INFO
+  retrieval log of DEC-020 would be invisible.
+- Decision: `main()` in `agents/coder_agent.py` calls
+  `logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))`; `LOG_LEVEL` is
+  added to `.env.example`. Library modules (`tools/`) only create loggers.
+- Why: configuring global logging is the job of whoever runs the program, not
+  of a library; logs go to stderr, separate from the chat output on stdout.
+- Code: `agents/coder_agent.py` — `main()`, `.env.example` (pending)
+
+### DEC-024 Pin chromadb to the 1.x series
+- Date: 2026-10-31 · Area: General (Lab 1.1) · Status: accepted
+- Basis: Preferred
+- Decision: `requirements.txt` requires `chromadb>=1.0,<2`.
+- Why: guarantees the API the memory code relies on and prevents a future 2.x
+  with breaking changes from breaking fresh installs or Docker builds (C4.8).
+- Revisit when: dependencies are pinned for the Docker image (Module 4).
+- Code: `requirements.txt`
+
+### DEC-025 Log window state, retrieved memories and the LLM input
+- Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Required (C1.2 evidence: "observed buffer contents and Chroma
+  retrieval; LLM input or instrumented call showing retrieved context");
+  format Preferred
+- Context: DEC-020 logged only the Chroma retrieval; the C1.2 evidence also
+  asks to observe the buffer contents and the LLM input. The rubric does not
+  ask for evidence from the lab test, so the test is run without logging.
+- Decision: on every call `build_context` logs:
+  - INFO: one line with the window state (turns used / max, number of
+    messages) and the retrieved memories (count; short id and distance of
+    each), no texts. Zero results are logged too.
+  - DEBUG: the full message list sent to the LLM, system message included,
+    so the memory texts appear there.
+- Why: INFO shows in any normal run that the window slides and that Chroma is
+  queried before each call (empty first-run retrieval is valid evidence);
+  DEBUG shows the memories really reach the LLM without flooding the default
+  output. Enabled with `LOG_LEVEL=DEBUG` (DEC-023).
+- Why (user): one line per call keeps INFO readable when many memories are
+  retrieved or a ReACT loop calls the LLM several times per turn.
+- Alternatives: retrieval only (DEC-020, misses buffer contents and LLM
+  input); memory texts or full messages at INFO (floods the log: e.g. 7
+  memories × 5 ReACT iterations).
+- Revisit when: Module 4 tracing (C4.1) records retrieval in spans.
+- Code: `tools/memory.py` — `build_context`, `SlidingWindowBuffer.__len__`
+
+### DEC-026 MEMORY_TOP_K below 1 disables retrieval with a warning
+- Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Preferred
+- Context: `MEMORY_TOP_K` comes from `.env`; a value of 0 (or negative)
+  turns long-term retrieval off, which breaks C1.2.
+- Decision: when `MEMORY_TOP_K < 1`, retrieval logs a WARNING on every call
+  and returns no memories without querying Chroma; the agent keeps working
+  with the sliding window only.
+- Why (user): unlike `max_turns < 1` (DEC-005), it does not corrupt anything —
+  the agent still works — so a warning is enough. Why (Claude): warning on
+  every call keeps it next to the retrieval log (DEC-025); at import time
+  logging is not configured yet (DEC-023).
+- Alternatives: raise `ValueError` like DEC-005 (stops the agent for a value
+  that may be intentional); warn once at import (easy to miss).
+- Code: `tools/memory.py` — `_retrieve_memories`

@@ -8,6 +8,7 @@
 # TODO: implement the 3 TODOs below.
 
 import hashlib
+import json
 import logging
 import os
 import uuid
@@ -97,6 +98,10 @@ class SlidingWindowBuffer:
         """Return the messages currently in the window, oldest first, as a flat list."""
         return [dict(message) for turn in self._turns for message in turn]
 
+    def __len__(self) -> int:
+        """Number of turns currently in the window."""
+        return len(self._turns)
+
 
 # --- TODO 2: long-term memory (write) ----------------------------------------
 
@@ -145,6 +150,46 @@ def store_memory(text: str, collection=None, role: str = "user") -> str:
 
 # --- TODO 3: long-term memory (read) + context assembly ----------------------
 
+MEMORY_HEADING = "Relevant context from past conversations (may not be relevant):"
+
+
+def _retrieve_memories(user_input: str, window: SlidingWindowBuffer, collection) -> list[dict]:
+    """Return up to MEMORY_TOP_K memories relevant to user_input that are not
+    already in the window (DEC-016, DEC-021).
+
+    Each memory is {"id", "text", "distance"}, closest first.
+    """
+    if MEMORY_TOP_K < 1:
+        # DEC-026: retrieval is disabled, which breaks C1.2; warn but keep chatting.
+        logger.warning("MEMORY_TOP_K=%d: long-term memory retrieval is disabled", MEMORY_TOP_K)
+        return []
+
+    stored = collection.count()
+    if stored == 0:
+        return []  # first run: nothing to retrieve yet
+
+    # Only user messages are stored (DEC-008), so only their ids can come back.
+    in_window = {
+        _memory_id(message["content"])
+        for message in window.get_messages()
+        if message["role"] == "user"
+    }
+
+    # Ask for extra results to make up for the ones we drop (DEC-021).
+    results = collection.query(
+        query_texts=[user_input],
+        n_results=min(MEMORY_TOP_K + len(in_window), stored),
+        include=["documents", "distances"],
+    )
+    memories = [
+        {"id": memory_id, "text": text, "distance": distance}
+        for memory_id, text, distance in zip(
+            results["ids"][0], results["documents"][0], results["distances"][0]
+        )
+        if memory_id not in in_window
+    ]
+    return memories[:MEMORY_TOP_K]
+
 
 def build_context(user_input: str, window: SlidingWindowBuffer, collection=None) -> list[dict]:
     """Assemble the message list sent to the LLM.
@@ -154,6 +199,21 @@ def build_context(user_input: str, window: SlidingWindowBuffer, collection=None)
     """
     if collection is None:
         collection = get_collection()
-    # TODO 3: query Chroma for memories relevant to user_input, build the
-    # system message with them, and return it followed by the window messages.
-    raise NotImplementedError
+    memories = _retrieve_memories(user_input, window, collection)
+
+    # DEC-015, DEC-022: memories go in the system message; no heading when empty.
+    system_content = SYSTEM_PROMPT
+    if memories:
+        lines = "\n".join(f"- {memory['text']}" for memory in memories)
+        system_content += f"\n\n{MEMORY_HEADING}\n{lines}"
+
+    window_messages = window.get_messages()
+    messages = [{"role": "system", "content": system_content}, *window_messages]
+
+    # DEC-025: C1.2 evidence — one INFO line per call; full LLM input at DEBUG.
+    retrieved = ", ".join(f'{m["id"][:8]} ({m["distance"]:.2f})' for m in memories)
+    logger.info("Context: window %d/%d turns, %d msgs | %d memories%s",
+                len(window), window.max_turns, len(window_messages),
+                len(memories), f": {retrieved}" if memories else "")
+    logger.debug("LLM input:\n%s", json.dumps(messages, ensure_ascii=False, indent=2))
+    return messages
