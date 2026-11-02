@@ -91,7 +91,7 @@ Progreso:
 - ⏭️ **Siguiente:** ejecutar `CHROMA_PATH=.chroma-test python -m tests.test_memory` (DEC-018) con una API key real y cerrar el lab: recordar las mejoras IMP-001..IMP-005 y actualizar esta sección.
 
 Pendientes fuera del lab:
-- Entorno sin instalar: falta `pip`/`venv` en WSL (`sudo apt install python3-venv python3-pip`), crear `.venv`, instalar dependencias y crear `.env`.
+- Entorno: `.venv` con Python 3.11 vía `uv` ya creado e instalado (DEC-032). Falta crear `.env` con la key real y documentar el setup en el README.
 - El repo aún no tiene remoto. Tras el primer push no se reescribe historial.
 - "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
