@@ -192,7 +192,6 @@ A decision can mix bases; then each part states its own.
   `"user"` instead of hard-coding it. Why (user): it costs nothing and avoids
   having to remember this detail if other roles are ever stored.
 - Code: `tools/memory.py` — `store_memory`; `agents/coder_agent.py` — `chat()`
-  (pending, TODO 4)
 
 ### DEC-009 One global memory, tagged with metadata
 - Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
@@ -369,7 +368,7 @@ A decision can mix bases; then each part states its own.
   reply can only be stored after the call succeeds, so storing splits in two
   moments (user input first, reply after the call), and a failure mid-turn
   leaves the user message stored without its reply.
-- Code: `agents/coder_agent.py` — `chat()` (pending, TODO 4)
+- Code: `agents/coder_agent.py` — `chat()`
 
 ### DEC-020 Log retrieved memories at INFO on every LLM call
 - Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: superseded by DEC-025
@@ -408,6 +407,8 @@ A decision can mix bases; then each part states its own.
   hash twice and needs a guard for an empty list); random ids with the hash
   only in metadata (breaks upsert-based deduplication).
 - Revisit when: the Search API (`K.ID.not_in`) is available in local Chroma.
+- Note: since DEC-031 the current input is not in the window yet, so its id
+  is added to the excluded ids as well.
 - Code: `tools/memory.py` — `build_context`
 
 ### DEC-022 System message layout with retrieved memories
@@ -484,3 +485,65 @@ A decision can mix bases; then each part states its own.
 - Alternatives: raise `ValueError` like DEC-005 (stops the agent for a value
   that may be intentional); warn once at import (easy to miss).
 - Code: `tools/memory.py` — `_retrieve_memories`
+
+### DEC-027 A failed LLM call raises instead of returning a reply
+- Date: 2026-10-31 · Area: Coder Agent (Lab 1.1) · Status: accepted
+- Basis: Preferred (prepares C3.3 and C4.2)
+- Context: the LLM call in `chat()` can fail (network, invalid key, rate
+  limit). `chat()` can either raise or return some text.
+- Decision: `chat()` lets the error propagate; it never returns an error
+  message as if it were a reply. No retries yet.
+- Why: a caller must be able to tell a failed turn from a real answer. An
+  error disguised as a reply would clash with C3.3 (never report success
+  with failures) and hide the exception that C4.2 retries need to see.
+- Alternatives: return "Error: …" as the reply (looks like a valid answer).
+- Revisit when: Module 4 adds retries and the circuit breaker (C4.2, C4.3).
+- Code: `agents/coder_agent.py` — `chat()`
+
+### DEC-028 A failed turn is undone in the sliding window
+- Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Preferred
+- Context: the user turn is added to the window before the LLM call (the
+  context is built from the window). If the call fails, the turn would stay
+  without a reply.
+- Decision: when the turn fails, the user turn is removed from the window.
+  Long-term memory keeps the message (DEC-019).
+- Why: the window only holds conversation that really happened; an orphan
+  turn would take one of the N slots and duplicate the message in the
+  context when the user retypes it.
+- Alternatives: leave the orphan turn in the window.
+- Code: implemented by DEC-031 — `agents/coder_agent.py` — `chat()`
+
+### DEC-029 An empty LLM reply counts as a failed turn
+- Date: 2026-10-31 · Area: Coder Agent (Lab 1.1) · Status: accepted
+- Basis: Preferred
+- Context: the API can return `None` or blank content.
+- Decision: an empty or `None` reply is treated as a failure: same path as
+  DEC-027 and DEC-028.
+- Why: an empty assistant turn adds nothing to the window and would look
+  like a successful answer.
+- Alternatives: return "" and store it in the window.
+- Code: `agents/coder_agent.py` — `chat()`
+
+### DEC-031 The window is updated only after a successful turn
+- Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
+- Basis: Preferred (implements DEC-028)
+- Context: the lab template adds the user turn to the window before
+  `build_context`, so a failed LLM call leaves it there. With a full window,
+  `deque(maxlen=N)` has already evicted the oldest turn by then.
+- Decision: `build_context` receives the current input separately and appends
+  it after the window; `chat()` adds the user and assistant messages to the
+  window together, only after a valid reply. Retrieval excludes the current
+  input by id (`_memory_id(user_input)`), on top of the window ids (DEC-016,
+  DEC-021).
+- Why: a failed turn never touches the window, so there is nothing to undo
+  and no extra buffer API. The current input is already in Chroma (DEC-019)
+  and would come back as a "past" memory with distance ~0, taking a top-K
+  slot; excluding it inside `build_context` holds regardless of call order.
+- Alternatives: snapshot/restore the buffer around the turn (exact, but adds
+  API and copies); `pop_last_turn()` (loses the turn evicted when the window
+  is full); build the context before storing the input (misses repeated
+  messages already in Chroma, stops protecting from the second ReACT
+  iteration on (C1.4), and would change DEC-019).
+- Code: `tools/memory.py` — `build_context`, `_retrieve_memories`;
+  `agents/coder_agent.py` — `chat()`

@@ -154,8 +154,8 @@ MEMORY_HEADING = "Relevant context from past conversations (may not be relevant)
 
 
 def _retrieve_memories(user_input: str, window: SlidingWindowBuffer, collection) -> list[dict]:
-    """Return up to MEMORY_TOP_K memories relevant to user_input that are not
-    already in the window (DEC-016, DEC-021).
+    """Return up to MEMORY_TOP_K memories relevant to user_input that are
+    neither user_input itself nor already in the window (DEC-016, DEC-021, DEC-031).
 
     Each memory is {"id", "text", "distance"}, closest first.
     """
@@ -169,16 +169,18 @@ def _retrieve_memories(user_input: str, window: SlidingWindowBuffer, collection)
         return []  # first run: nothing to retrieve yet
 
     # Only user messages are stored (DEC-008), so only their ids can come back.
-    in_window = {
+    # The current input is already stored (DEC-019) but not in the window yet (DEC-031).
+    excluded = {
         _memory_id(message["content"])
         for message in window.get_messages()
         if message["role"] == "user"
     }
+    excluded.add(_memory_id(user_input))
 
     # Ask for extra results to make up for the ones we drop (DEC-021).
     results = collection.query(
         query_texts=[user_input],
-        n_results=min(MEMORY_TOP_K + len(in_window), stored),
+        n_results=min(MEMORY_TOP_K + len(excluded), stored),
         include=["documents", "distances"],
     )
     memories = [
@@ -186,7 +188,7 @@ def _retrieve_memories(user_input: str, window: SlidingWindowBuffer, collection)
         for memory_id, text, distance in zip(
             results["ids"][0], results["documents"][0], results["distances"][0]
         )
-        if memory_id not in in_window
+        if memory_id not in excluded
     ]
     return memories[:MEMORY_TOP_K]
 
@@ -194,8 +196,9 @@ def _retrieve_memories(user_input: str, window: SlidingWindowBuffer, collection)
 def build_context(user_input: str, window: SlidingWindowBuffer, collection=None) -> list[dict]:
     """Assemble the message list sent to the LLM.
 
-    Order: system prompt (with retrieved memories) -> sliding window.
-    The current user_input is already the last message of the window.
+    Order: system prompt (with retrieved memories) -> sliding window ->
+    current user_input. The window does not hold user_input yet; chat() adds
+    it only after a successful reply (DEC-031).
     """
     if collection is None:
         collection = get_collection()
@@ -208,7 +211,11 @@ def build_context(user_input: str, window: SlidingWindowBuffer, collection=None)
         system_content += f"\n\n{MEMORY_HEADING}\n{lines}"
 
     window_messages = window.get_messages()
-    messages = [{"role": "system", "content": system_content}, *window_messages]
+    messages = [
+        {"role": "system", "content": system_content},
+        *window_messages,
+        {"role": "user", "content": user_input},
+    ]
 
     # DEC-025: C1.2 evidence — one INFO line per call; full LLM input at DEBUG.
     retrieved = ", ".join(f'{m["id"][:8]} ({m["distance"]:.2f})' for m in memories)

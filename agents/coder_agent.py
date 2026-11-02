@@ -1,8 +1,7 @@
 # agent.py
 # Lab 1.1 — Coder Agent with two-tier memory
 #
-# The main loop is already written.
-# TODO: implement the body of the chat() function.
+# chat() runs one conversation turn; main() is the interactive loop.
 
 import os
 from tools.memory import SlidingWindowBuffer, store_memory, build_context, llm_client
@@ -12,18 +11,32 @@ client = llm_client
 MODEL = os.getenv("LLM_MODEL", "openai/gpt-4.1-mini")
 
 
+class EmptyReplyError(RuntimeError):
+    """The LLM answered with no content; the turn counts as failed (DEC-029)."""
+
+
 def chat(user_input: str, window: SlidingWindowBuffer) -> str:
     """
     Single agent turn. Steps in order:
-      1. Call store_memory() to save the user input to long-term memory.
-      2. Call window.add() to add the user turn to the sliding window.
-      3. Call build_context() to assemble the full message list.
-      4. Call the OpenAI API with the assembled messages.
-      5. Call window.add() to add the assistant reply to the sliding window.
-      6. Return the reply string.
+      1. Call store_memory() to save the user input to long-term memory (DEC-019).
+      2. Call build_context() to assemble the full message list.
+      3. Call the LLM with the assembled messages.
+      4. Add the user turn and the assistant reply to the sliding window (DEC-031).
+      5. Return the reply string.
+
+    Any failure propagates (DEC-027) and leaves the window untouched (DEC-028).
     """
-    # TODO: implement
-    raise NotImplementedError
+    store_memory(user_input)
+    messages = build_context(user_input, window)
+
+    response = client.chat.completions.create(model=MODEL, messages=messages)
+    reply = response.choices[0].message.content
+    if not reply or not reply.strip():
+        raise EmptyReplyError(f"{MODEL} returned an empty reply")
+
+    window.add("user", user_input)
+    window.add("assistant", reply)
+    return reply
 
 
 def main():
