@@ -558,3 +558,18 @@ A decision can mix bases; then each part states its own.
   iteration on (C1.4), and would change DEC-019).
 - Code: `tools/memory.py` — `build_context`, `_retrieve_memories`;
   `agents/coder_agent.py` — `chat()`
+
+### DEC-032 Local environment uses Python 3.11 via uv
+- Date: 2026-11-02 · Area: General (Lab 1.1) · Status: accepted
+- Basis: Preferred (parity with the Docker image, C4.8)
+- Context: WSL ships Python 3.14 without pip or venv support, installing them
+  needs sudo, and the Docker image is pinned to Python 3.11 (C4.8).
+- Decision: install `uv` in user space and create `.venv` with Python 3.11
+  (`uv venv --python 3.11 .venv`, then `uv pip install -r requirements.txt`).
+  On `/mnt/c` set `UV_LINK_MODE=copy` (hardlinks do not work across
+  filesystems).
+- Why: local runs behave like the container; no sudo needed; native
+  dependencies of `chromadb` (e.g. `onnxruntime`) have wheels for 3.11.
+- Alternatives: system Python 3.14 with `apt install python3-venv
+  python3-pip` (simpler, but differs from Docker and risks missing wheels).
+- Code: `.venv/` (git-ignored); setup to be documented in `README.md`
