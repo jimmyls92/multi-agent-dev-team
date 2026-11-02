@@ -81,21 +81,20 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Trabajando en: **Lab 1.1** (memoria de dos capas, C1.2) → leer `docs/labs/lab_1_1_memory.md`.
+Trabajando en: **Lab 1.2** (tools de archivos y ejecución, C1.3) → leer `docs/labs/lab_1_2_tools.md`.
 
 Progreso:
-- ✅ TODO 1 `SlidingWindowBuffer` (DEC-004, DEC-005)
-- ✅ TODO 2 `store_memory` (DEC-008..DEC-014)
-- ✅ TODO 3 `build_context` (DEC-015..DEC-026). Escrito pero sin ejecutar: falta el entorno.
-- ✅ TODO 4 `chat()` + logging en `main()` (DEC-019, DEC-023, DEC-027..DEC-031). Escrito pero sin ejecutar: falta el entorno.
-- ⏭️ **Siguiente:** ejecutar `CHROMA_PATH=.chroma-test python -m tests.test_memory` (DEC-018) con una API key real y cerrar el lab: recordar las mejoras IMP-001..IMP-005 y actualizar esta sección.
+- ✅ Lab 1.1 cerrado: memoria de dos capas (C1.2), DEC-004..DEC-031. El test oficial pasa con una key real.
+- ⏭️ **Siguiente:** Lab 1.2. Falta añadir al repo los archivos del scaffold del lab (`schemas.py`, `agent.py`, `llm_client.py` y los tests) y decidir dónde va cada uno.
 
 Pendientes fuera del lab:
-- Entorno: `.venv` con Python 3.11 vía `uv` ya creado e instalado (DEC-032). Falta crear `.env` con la key real y documentar el setup en el README.
+- Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032). Falta documentar el setup en el README.
+- Tests mockeados de la memoria (sin LLM real), a proponer y aprobar antes de escribirlos: el input actual nunca vuelve como recuerdo (DEC-031), un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029) y los duplicados exactos se actualizan (DEC-011). Como tarde en C1.6.
+- Mejoras de memoria IMP-001..IMP-005: siguen en `idea`.
 - El repo aún no tiene remoto. Tras el primer push no se reescribe historial.
 - "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
-- Elegir framework (LangGraph / AutoGen / CrewAI) al cerrar el lab y antes del bucle ReACT (C1.4).
+- Elegir framework (LangGraph / AutoGen / CrewAI) antes del bucle ReACT (Lab 1.3, C1.4).
 
 Actualiza esta sección al terminar cada TODO y al empezar o cerrar cada lab.
 
