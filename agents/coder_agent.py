@@ -3,12 +3,15 @@
 #
 # chat() runs one conversation turn; main() is the interactive loop.
 
+import logging
 import os
 from tools.memory import SlidingWindowBuffer, store_memory, build_context, llm_client
 
 # Reuse the same OpenRouter client from memory.py (DEC-002)
 client = llm_client
 MODEL = os.getenv("LLM_MODEL", "openai/gpt-4.1-mini")
+
+logger = logging.getLogger(__name__)
 
 
 class EmptyReplyError(RuntimeError):
@@ -40,6 +43,9 @@ def chat(user_input: str, window: SlidingWindowBuffer) -> str:
 
 
 def main():
+    # DEC-023: the entry point configures logging; an invalid LOG_LEVEL fails here.
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+
     from tools.memory import SLIDING_WINDOW_SIZE
     print("=== Coder Agent — Lab 1.1 ===")
     print(f"Short-term window: {SLIDING_WINDOW_SIZE} turns | Long-term: Chroma semantic store")
@@ -54,7 +60,14 @@ def main():
             break
         if not user_input:
             continue
-        reply = chat(user_input, window)
+        try:
+            reply = chat(user_input, window)
+        except Exception as exc:
+            # DEC-030: a failed turn is reported and the conversation goes on.
+            logger.error("Turn failed: %s: %s", type(exc).__name__, exc)
+            logger.debug("Turn failure traceback", exc_info=True)
+            print("Agent: [error] this turn failed, please try again.\n")
+            continue
         turn += 1
         print(f"Agent: {reply}\n")
 

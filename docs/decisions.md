@@ -433,7 +433,7 @@ A decision can mix bases; then each part states its own.
   added to `.env.example`. Library modules (`tools/`) only create loggers.
 - Why: configuring global logging is the job of whoever runs the program, not
   of a library; logs go to stderr, separate from the chat output on stdout.
-- Code: `agents/coder_agent.py` — `main()`, `.env.example` (pending)
+- Code: `agents/coder_agent.py` — `main()`, `.env.example`
 
 ### DEC-024 Pin chromadb to the 1.x series
 - Date: 2026-10-31 · Area: General (Lab 1.1) · Status: accepted
@@ -524,6 +524,17 @@ A decision can mix bases; then each part states its own.
   like a successful answer.
 - Alternatives: return "" and store it in the window.
 - Code: `agents/coder_agent.py` — `chat()`
+
+### DEC-030 The interactive loop survives a failed turn
+- Date: 2026-10-31 · Area: Coder Agent (Lab 1.1) · Status: accepted
+- Basis: Preferred
+- Context: with DEC-027, an error in `chat()` would end the program.
+- Decision: `main()` catches the error, shows a short message to the user,
+  logs it at ERROR and keeps the conversation going.
+- Why: a transient network error should not lose the session. Callers that
+  use `chat()` directly (e.g. the lab test) still see the failure.
+- Alternatives: let the program exit.
+- Code: `agents/coder_agent.py` — `main()`
 
 ### DEC-031 The window is updated only after a successful turn
 - Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
