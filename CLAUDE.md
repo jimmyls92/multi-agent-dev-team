@@ -87,8 +87,8 @@ Progreso:
 - ✅ TODO 1 `SlidingWindowBuffer` (DEC-004, DEC-005)
 - ✅ TODO 2 `store_memory` (DEC-008..DEC-014)
 - ✅ TODO 3 `build_context` (DEC-015..DEC-026). Escrito pero sin ejecutar: falta el entorno.
-- ⏭️ **Siguiente: TODO 4 `chat()`**. Ya decidido: guardar el input al principio (DEC-019) y configurar el logging en `main()` con `LOG_LEVEL` (DEC-023, pendiente de código).
-- ⬜ Ejecutar `CHROMA_PATH=.chroma-test python -m tests.test_memory` (DEC-018) con una API key real y cerrar el lab: recordar las mejoras IMP-001..IMP-005 y actualizar esta sección.
+- ✅ TODO 4 `chat()` + logging en `main()` (DEC-019, DEC-023, DEC-027..DEC-031). Escrito pero sin ejecutar: falta el entorno.
+- ⏭️ **Siguiente:** ejecutar `CHROMA_PATH=.chroma-test python -m tests.test_memory` (DEC-018) con una API key real y cerrar el lab: recordar las mejoras IMP-001..IMP-005 y actualizar esta sección.
 
 Pendientes fuera del lab:
 - Entorno sin instalar: falta `pip`/`venv` en WSL (`sudo apt install python3-venv python3-pip`), crear `.venv`, instalar dependencias y crear `.env`.
