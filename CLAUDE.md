@@ -81,7 +81,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Trabajando en: **Lab 1.2** (tools de archivos y ejecución, C1.3) → leer `docs/labs/lab_1_2_tools.md`.
+Trabajando en: **Lab 1.3** (bucle ReACT del Coder, C1.4) → leer `docs/labs/` del Lab 1.3 al empezar.
 
 Progreso:
 - ✅ Lab 1.1 cerrado: memoria de dos capas (C1.2), DEC-004..DEC-031. El test oficial pasa con una key real.
@@ -90,7 +90,8 @@ Progreso:
 - ✅ `read_file`/`write_file` (`tools/file_io.py`) implementados; `tests/test_file_io.py` pasa.
 - ✅ `exec_python` (`tools/code_executor.py`) implementado; `tests/test_code_executor.py` pasa.
 - ✅ Wrappers Pydantic estrictos + confinamiento a `workspace/` en `tools/handlers.py` (DEC-036, DEC-042); `workspace/` en `.gitignore` y variables en `.env.example`.
-- ⏭️ **Siguiente:** `python -m agents.tools_demo` con key real (criterio de éxito del lab) y cierre del Lab 1.2.
+- ✅ Lab 1.2 cerrado: `python -m agents.tools_demo` con key real escribe `workspace/word_freq.py`, lo ejecuta y termina con DONE (C1.3).
+- ⏭️ **Siguiente:** empezar el Lab 1.3. Antes del bucle ReACT hay que elegir el framework y revisar DEC-004 (ventana por turnos con mensajes `tool`) y DEC-034 (destino de la demo), cuyo `Revisit when` apunta a este lab.
 Pendientes fuera del lab:
 - Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032). Falta documentar el setup en el README.
 - Tests mockeados de la memoria (sin LLM real), a proponer y aprobar antes de escribirlos: el input actual nunca vuelve como recuerdo (DEC-031), un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029) y los duplicados exactos se actualizan (DEC-011). Como tarde en C1.6.
