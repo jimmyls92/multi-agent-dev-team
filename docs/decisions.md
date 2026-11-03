@@ -39,7 +39,7 @@ A decision can mix bases; then each part states its own.
 ---
 
 ### DEC-001 Labs are implemented inside the project scaffold
-- Date: 2026-10-30 · Area: General · Status: accepted (refined by DEC-033)
+- Date: 2026-10-30 · Area: General · Status: accepted (refined by DEC-033, DEC-035)
 - Basis: Required (C1.1 folder structure; the rubric is what gets graded)
 - Context: lab handouts assume a flat repo (`agent.py`, `memory.py`,
   `test_memory.py` at the root), while C1.1 requires `agents/`, `tools/`,
@@ -73,7 +73,7 @@ A decision can mix bases; then each part states its own.
 - Revisit when: Module 4 tracing/cost (C4.1, C4.4) or role allocation (C4.5)
   needs provider features OpenRouter lacks. Document the model choice in the
   README.
-- Code: `tools/memory.py` — `llm_client`; `agents/coder_agent.py` — `client`, `MODEL`
+- Code: `memory.py` — `llm_client`; `agents/coder_agent.py` — `client`, `MODEL`
 
 ### DEC-003 Chroma client and embeddings
 - Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
@@ -96,7 +96,7 @@ A decision can mix bases; then each part states its own.
   embeddings through an API (extra key and cost).
 - Revisit when: retrieval quality is poor for code-heavy content, or when
   Module 4 adds cost accounting for embeddings.
-- Code: `tools/memory.py` — `get_collection`
+- Code: `memory.py` — `get_collection`
 
 ### DEC-004 Sliding window stores whole turns
 - Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
@@ -118,7 +118,7 @@ A decision can mix bases; then each part states its own.
 - Revisit when: the ReACT loop (C1.4) adds `assistant`/`tool` messages inside a
   turn — check tool calls stay paired with their results. Also IMP-001 and
   IMP-002 in `docs/improvements.md` build on this structure.
-- Code: `tools/memory.py` — `SlidingWindowBuffer`
+- Code: `memory.py` — `SlidingWindowBuffer`
 
 ### DEC-005 Fail fast on invalid window usage
 - Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
@@ -133,7 +133,7 @@ A decision can mix bases; then each part states its own.
   (`maxlen=0` would discard every message). In line with C4.6 input validation.
 - Alternatives: open a turn with the non-user message (hides the misuse); let
   Python raise `IndexError` (cryptic).
-- Code: `tools/memory.py` — `SlidingWindowBuffer.__init__`, `SlidingWindowBuffer.add`
+- Code: `memory.py` — `SlidingWindowBuffer.__init__`, `SlidingWindowBuffer.add`
 
 ### DEC-006 Own memory tests with fake LLM and in-memory Chroma
 - Date: 2026-10-30 · Area: Tests (Lab 1.1) · Status: superseded by DEC-007
@@ -191,7 +191,7 @@ A decision can mix bases; then each part states its own.
 - Implementation: `store_memory` takes `role` as a parameter defaulting to
   `"user"` instead of hard-coding it. Why (user): it costs nothing and avoids
   having to remember this detail if other roles are ever stored.
-- Code: `tools/memory.py` — `store_memory`; `agents/coder_agent.py` — `chat()`
+- Code: `memory.py` — `store_memory`; `agents/coder_agent.py` — `chat()`
 
 ### DEC-009 One global memory, tagged with metadata
 - Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
@@ -209,7 +209,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: separate collection per session/project (breaks C1.2 recall);
   no metadata (no way to filter later).
 - Revisit when: retrieval needs filtering by session/project or recency.
-- Code: `tools/memory.py` — `store_memory`
+- Code: `memory.py` — `store_memory`
 
 ### DEC-010 Reject empty text in long-term memory
 - Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
@@ -222,7 +222,7 @@ A decision can mix bases; then each part states its own.
   should surface at once instead of silently polluting memory (C4.6 input
   validation).
 - Alternatives: silently skip (hides caller bugs); store it (noise).
-- Code: `tools/memory.py` — `store_memory`
+- Code: `memory.py` — `store_memory`
 
 ### DEC-011 Exact deduplication of long-term memories
 - Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
@@ -240,7 +240,7 @@ A decision can mix bases; then each part states its own.
   and can merge different facts such as "Me llamo Jaime" / "Mi hermano se llama
   Jaime") — see IMP-004.
 - Revisit when: IMP-004 / IMP-005 are implemented.
-- Code: `tools/memory.py` — `store_memory`
+- Code: `memory.py` — `store_memory`
 
 ### DEC-012 Memory id = SHA-256 of the normalized text
 - Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
@@ -253,7 +253,7 @@ A decision can mix bases; then each part states its own.
   ("Hola Jaime" / "hola  jaime") count as the same memory.
 - Alternatives: hash of the raw text ("Hola " and "Hola" would be two
   memories); random ids (no deduplication).
-- Code: `tools/memory.py` — `store_memory`
+- Code: `memory.py` — `store_memory`
 
 ### DEC-013 Store memories with upsert and two timestamps
 - Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
@@ -272,7 +272,7 @@ A decision can mix bases; then each part states its own.
   recency ranking (IMP-005); `created_at` keeps the original date.
 - Alternatives: `add` (repeats keep the old date); only `last_seen_at` (simpler,
   loses the first date — `created_at` costs one read before writing).
-- Code: `tools/memory.py` — `store_memory`
+- Code: `memory.py` — `store_memory`
 
 ### DEC-014 One run id per process
 - Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
@@ -290,7 +290,7 @@ A decision can mix bases; then each part states its own.
   run, link to C4.1 traces).
 - Revisit when: one process serves several conversations (e.g. a server in
   Modules 2–4) — then move to both ids.
-- Code: `tools/memory.py` — `RUN_ID`, `store_memory`
+- Code: `memory.py` — `RUN_ID`, `store_memory`
 
 ### DEC-015 Retrieved memories go in the system message
 - Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
@@ -306,7 +306,7 @@ A decision can mix bases; then each part states its own.
   lab template already assumes this structure.
 - Alternatives: append them to the user message (mixes past and present
   intent).
-- Code: `tools/memory.py` — `build_context`
+- Code: `memory.py` — `build_context`
 
 ### DEC-016 Retrieval skips memories already in the window
 - Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
@@ -320,7 +320,7 @@ A decision can mix bases; then each part states its own.
   this way every retrieved slot adds new information.
 - Alternatives: no exclusion (top slot always repeats the current message);
   exclude only the current message (other window messages can still repeat).
-- Code: `tools/memory.py` — `build_context`
+- Code: `memory.py` — `build_context`
 
 ### DEC-017 Top-K retrieval without a relevance threshold
 - Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
@@ -336,7 +336,7 @@ A decision can mix bases; then each part states its own.
   the fact).
 - Revisit when: irrelevant memories noticeably degrade answers, or retrieval
   quality is tuned (see also DEC-003 embeddings).
-- Code: `tools/memory.py` — `MEMORY_TOP_K`, `_retrieve_memories`
+- Code: `memory.py` — `MEMORY_TOP_K`, `_retrieve_memories`
 
 ### DEC-018 Lab test runs against a separate Chroma store
 - Date: 2026-10-31 · Area: Tests (Lab 1.1) · Status: accepted
@@ -385,7 +385,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: DEBUG level (hidden by default, evidence lost); full texts
   (noisy); no log (C1.2 evidence depends on reading the code).
 - Revisit when: Module 4 tracing (C4.1) records retrieval in spans.
-- Code: `tools/memory.py` — `build_context`
+- Code: `memory.py` — `build_context`
 
 ### DEC-021 Window exclusion by over-fetching and filtering ids
 - Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
@@ -409,7 +409,7 @@ A decision can mix bases; then each part states its own.
 - Revisit when: the Search API (`K.ID.not_in`) is available in local Chroma.
 - Note: since DEC-031 the current input is not in the window yet, so its id
   is added to the excluded ids as well.
-- Code: `tools/memory.py` — `build_context`
+- Code: `memory.py` — `build_context`
 
 ### DEC-022 System message layout with retrieved memories
 - Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
@@ -421,7 +421,7 @@ A decision can mix bases; then each part states its own.
   dates.
 - Why: an empty heading could confuse the model; dates would help with
   updated facts but belong to IMP-005.
-- Code: `tools/memory.py` — `build_context`
+- Code: `memory.py` — `build_context`
 
 ### DEC-023 Logging is configured by the entry point
 - Date: 2026-10-31 · Area: General (Lab 1.1) · Status: accepted
@@ -468,7 +468,7 @@ A decision can mix bases; then each part states its own.
   input); memory texts or full messages at INFO (floods the log: e.g. 7
   memories × 5 ReACT iterations).
 - Revisit when: Module 4 tracing (C4.1) records retrieval in spans.
-- Code: `tools/memory.py` — `build_context`, `SlidingWindowBuffer.__len__`
+- Code: `memory.py` — `build_context`, `SlidingWindowBuffer.__len__`
 
 ### DEC-026 MEMORY_TOP_K below 1 disables retrieval with a warning
 - Date: 2026-10-31 · Area: Memory (Lab 1.1) · Status: accepted
@@ -484,7 +484,7 @@ A decision can mix bases; then each part states its own.
   logging is not configured yet (DEC-023).
 - Alternatives: raise `ValueError` like DEC-005 (stops the agent for a value
   that may be intentional); warn once at import (easy to miss).
-- Code: `tools/memory.py` — `_retrieve_memories`
+- Code: `memory.py` — `_retrieve_memories`
 
 ### DEC-027 A failed LLM call raises instead of returning a reply
 - Date: 2026-10-31 · Area: Coder Agent (Lab 1.1) · Status: accepted
@@ -556,7 +556,7 @@ A decision can mix bases; then each part states its own.
   is full); build the context before storing the input (misses repeated
   messages already in Chroma, stops protecting from the second ReACT
   iteration on (C1.4), and would change DEC-019).
-- Code: `tools/memory.py` — `build_context`, `_retrieve_memories`;
+- Code: `memory.py` — `build_context`, `_retrieve_memories`;
   `agents/coder_agent.py` — `chat()`
 
 ### DEC-032 Local environment uses Python 3.11 via uv
@@ -618,3 +618,21 @@ A decision can mix bases; then each part states its own.
   (the demo may then be removed).
 - Code: `llm_client.py`, `tools/schemas.py`, `agents/tools_demo.py`,
   `agents/coder_agent.py` — `chat()`
+
+### DEC-035 Memory lives at the repo root, outside `tools/`
+- Date: 2026-11-03 · Area: Memory (Lab 1.2) · Status: accepted
+- Basis: Preferred (C5.3 separation by responsibility; allowed by DEC-033)
+- Context: DEC-001 mapped the lab's `memory.py` to `tools/memory.py`. With
+  Lab 1.2, `tools/` becomes the package of tools the LLM calls
+  (`TOOL_HANDLERS`, `tools/schemas.py`); memory is not one of them, it runs
+  around every LLM call.
+- Decision: move `tools/memory.py` to `memory.py` at the root, next to
+  `llm_client.py`; imports become `import memory` / `from memory import ...`.
+  The `Code:` lines of earlier entries were updated to the new path; their
+  decision texts keep the path they had when they were taken.
+- Why: `tools/` holds only what the agent can invoke, so its contents match
+  the tool schemas; shared infrastructure (LLM client, memory) sits together
+  at the root.
+- Alternatives: keep it in `tools/` (mixes infrastructure with LLM tools);
+  a new package such as `core/` (more structure than two modules need today).
+- Code: `memory.py`, `agents/coder_agent.py`, `tests/test_memory.py`

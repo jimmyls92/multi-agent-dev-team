@@ -5,10 +5,9 @@
 
 import logging
 import os
-from tools.memory import SlidingWindowBuffer, store_memory, build_context, llm_client
+from llm_client import get_client
+from memory import SlidingWindowBuffer, store_memory, build_context
 
-# Reuse the same OpenRouter client from memory.py (DEC-002)
-client = llm_client
 MODEL = os.getenv("LLM_MODEL", "openai/gpt-4.1-mini")
 
 logger = logging.getLogger(__name__)
@@ -32,7 +31,7 @@ def chat(user_input: str, window: SlidingWindowBuffer) -> str:
     store_memory(user_input)
     messages = build_context(user_input, window)
 
-    response = client.chat.completions.create(model=MODEL, messages=messages)
+    response = get_client().chat.completions.create(model=MODEL, messages=messages)
     reply = response.choices[0].message.content
     if not reply or not reply.strip():
         raise EmptyReplyError(f"{MODEL} returned an empty reply")
@@ -46,7 +45,7 @@ def main():
     # DEC-023: the entry point configures logging; an invalid LOG_LEVEL fails here.
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
 
-    from tools.memory import SLIDING_WINDOW_SIZE
+    from memory import SLIDING_WINDOW_SIZE
     print("=== Coder Agent — Lab 1.1 ===")
     print(f"Short-term window: {SLIDING_WINDOW_SIZE} turns | Long-term: Chroma semantic store")
     print("Type 'quit' to exit.\n")

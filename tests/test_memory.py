@@ -7,7 +7,7 @@ import sys
 
 
 def run():
-    import tools.memory as mem
+    import memory as mem
     importlib.reload(mem)
     import agents.coder_agent as ag
     importlib.reload(ag)

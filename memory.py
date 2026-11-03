@@ -4,7 +4,8 @@
 #   Short-term: SlidingWindowBuffer keeps the last N conversation turns.
 #   Long-term:  Chroma semantic store, queried before every LLM call.
 #
-# The configuration, LLM client and Chroma setup are already written.
+# The configuration and Chroma setup are already written. The LLM client lives
+# in llm_client.py (DEC-034); memory is shared infrastructure, not a tool (DEC-035).
 # TODO: implement the 3 TODOs below.
 
 import hashlib
@@ -17,7 +18,6 @@ from datetime import datetime, timezone
 
 import chromadb
 from dotenv import load_dotenv
-from openai import OpenAI
 
 load_dotenv()
 
@@ -35,16 +35,6 @@ COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "coder_memory")
 SYSTEM_PROMPT = (
     "You are an expert Python coding assistant. "
     "Use the relevant past context when it helps answer the user."
-)
-
-# --- LLM client --------------------------------------------------------------
-
-# DEC-002: OpenRouter exposes an OpenAI-compatible API, so the official OpenAI SDK works
-# by pointing base_url at it. The key is read from the environment, never
-# hard-coded.
-llm_client = OpenAI(
-    base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-    api_key=os.getenv("OPENROUTER_API_KEY"),
 )
 
 # --- Chroma ------------------------------------------------------------------
