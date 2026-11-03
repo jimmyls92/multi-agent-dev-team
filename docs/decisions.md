@@ -670,7 +670,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: argument only (the lab's version; configurable only by the
   LLM); env var only, ignoring the argument (drops a parameter the schema
   exposes).
-- Code: pending (Lab 1.2 tools)
+- Code: `tools/code_executor.py` — `EXEC_TIMEOUT`, `exec_python`
 
 ### DEC-038 What `exec_python` returns to the agent
 - Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
@@ -699,7 +699,7 @@ A decision can mix bases; then each part states its own.
   tracebacks); inherit stdin (a script calling `input()` hangs until the
   timeout). Human-in-the-loop, if ever needed, belongs in the orchestrator,
   not in the script's stdin.
-- Code: pending (Lab 1.2 tools)
+- Code: `tools/code_executor.py` — `exec_python`, `_keep_start`, `_keep_end`
 
 ### DEC-039 Executed scripts run without the agent's credentials
 - Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
@@ -717,7 +717,7 @@ A decision can mix bases; then each part states its own.
   container isolation closes that (see DEC-036).
 - Revisit when: Module 4 adds Docker (the executor container may not hold the
   credentials at all).
-- Code: pending (Lab 1.2 tools)
+- Code: `tools/code_executor.py` — `_script_env`
 
 ### DEC-040 Scripts run with their own directory as working directory
 - Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
@@ -732,7 +732,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: inherit the agent's working directory (the lab's default);
   always use the `workspace/` root (breaks relative paths of scripts in
   subfolders).
-- Code: pending (Lab 1.2 tools)
+- Code: `tools/code_executor.py` — `exec_python`
 
 ### DEC-041 `read_file` returns at most 20,000 characters
 - Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
@@ -747,7 +747,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: no limit (the lab's default); a limit in tokens (exact only
   with each model's tokenizer, extra dependency, approximate for non-OpenAI
   models behind OpenRouter).
-- Code: pending (Lab 1.2 tools)
+- Code: `tools/file_io.py` — `READ_MAX_CHARS`, `read_file`
 
 ### DEC-042 Tool arguments are validated by Pydantic wrappers in `TOOL_HANDLERS`
 - Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
@@ -780,7 +780,7 @@ A decision can mix bases; then each part states its own.
   Module 4) are excluded without anyone remembering to list them.
 - Alternatives: a denylist of names containing KEY/TOKEN/SECRET (misses
   secrets with other names, e.g. a `DATABASE_URL` with a password).
-- Code: pending (Lab 1.2 tools)
+- Code: `tools/code_executor.py` — `_ENV_ALLOWLIST`, `_script_env`
 
 ### DEC-044 The timeout kills the script's whole process group
 - Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
@@ -789,14 +789,23 @@ A decision can mix bases; then each part states its own.
 - Context: `subprocess.run` kills only the direct child on timeout; processes
   the script started survive and keep the output pipes open, so the call can
   hang past the timeout.
-- Decision: `exec_python` starts the script with `Popen` in a new session and,
-  on timeout, kills the whole process group (`os.killpg`). POSIX only: Linux,
-  WSL and Docker are the project's environments.
+- Decision: `exec_python` starts the script with `Popen` in a new session and
+  waits for the script itself to exit, not for its output pipes to close
+  (they are read in threads meanwhile). When the script exits or the timeout
+  expires, the whole process group is killed (`os.killpg`), so nothing it
+  started survives. POSIX only: Linux, WSL and Docker are the project's
+  environments.
 - Why: the assessor's timeout probe must stop every process the script
-  created, not just the first one.
+  created, not just the first one. A background process holds the pipes
+  open, so waiting for them would make a script that finished correctly
+  wait until the timeout and be reported as killed, a false diagnosis the
+  agent would try to "fix".
 - Alternatives: `subprocess.run` as the lab hints (can hang with child
-  processes).
-- Code: pending (Lab 1.2 tools)
+  processes); `communicate()` with a timeout (kills the whole group, but a
+  successful script that leaves a background process is reported as a
+  timeout); output to temporary files instead of threads (no pipes, but an
+  endless print loop fills the disk).
+- Code: `tools/code_executor.py` — `exec_python`
 
 ### DEC-045 Tool configuration through environment variables, checked at startup
 - Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
@@ -819,4 +828,4 @@ A decision can mix bases; then each part states its own.
 - Alternatives: silently clamp `EXEC_TIMEOUT` to 30 (the configured value is
   not the applied one); let `EXEC_TIMEOUT` raise the cap (drops the lab's
   fixed limit).
-- Code: pending (Lab 1.2 tools)
+- Code: `tools/code_executor.py` — `EXEC_TIMEOUT`; `tools/file_io.py` — `READ_MAX_CHARS`; `WORKSPACE_DIR` pending
