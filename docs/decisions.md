@@ -636,3 +636,187 @@ A decision can mix bases; then each part states its own.
 - Alternatives: keep it in `tools/` (mixes infrastructure with LLM tools);
   a new package such as `core/` (more structure than two modules need today).
 - Code: `memory.py`, `agents/coder_agent.py`, `tests/test_memory.py`
+
+### DEC-036 The agent's file tools work only inside a workspace directory
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Basis: Preferred (CLAUDE.md: validate tool arguments; C4.6 no leaked secrets)
+- Context: `read_file`, `write_file` and `exec_python` accept any path, so the
+  agent could overwrite its own code (`agents/`, `tools/`), read `.env` or
+  touch the Chroma data. The lab does not mention it and C1.3 does not
+  require it.
+- Decision: when the agent calls the tools, paths are confined to a dedicated
+  working directory (`workspace/`, ignored by git); a path outside it gets an
+  error string and the tool does not run. This covers the tool arguments only:
+  the code run by `exec_python` is not confined (no OS-level sandbox).
+- Why: the agent cannot break the system it runs on or read its secrets
+  through the tools, and its outputs stay in one place.
+- Alternatives: no confinement (the lab's default; the agent can edit its own
+  code); a full sandbox for executed code (needs container isolation,
+  Docker arrives in Module 4).
+- Revisit when: Module 4 adds Docker (executed code could then be isolated
+  too).
+- Code: pending (Lab 1.2 tools)
+
+### DEC-037 Execution timeout: operator default by env var, LLM capped at 30 s
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Basis: Required (C1.3: configurable timeout, 10 s default; lab: 30 s cap);
+  Preferred (environment variable as the configuration mechanism)
+- Context: C1.3 asks for a configurable timeout and the assessor probes it.
+  The lab's `exec_python` only takes it as an argument from the LLM.
+- Decision: the default comes from `EXEC_TIMEOUT` (10 if unset); the LLM may
+  ask for another value per call, always clamped to 30 s.
+- Why: the operator or assessor can change the timeout without touching code,
+  and the LLM still gets more time for slow scripts within a hard limit.
+- Alternatives: argument only (the lab's version; configurable only by the
+  LLM); env var only, ignoring the argument (drops a parameter the schema
+  exposes).
+- Code: pending (Lab 1.2 tools)
+
+### DEC-038 What `exec_python` returns to the agent
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Basis: Preferred
+- Context: the agent only sees the string the tool returns; the lab returns
+  stdout on success (possibly `""`) and cuts long output from the end.
+- Decision:
+  - A failed run returns the exit code, stderr and any stdout printed before
+    the failure.
+  - A successful run returns stdout, plus stderr (labeled) when it is not
+    empty, e.g. warnings.
+  - A successful run with no output returns an explicit message saying it ran
+    successfully with no output, never an empty string.
+  - Truncation keeps the beginning of a successful output and the end of an
+    error output.
+  - The script's stdin is closed, so `input()` fails at once with `EOFError`
+    instead of waiting for the timeout.
+- Why: the agent debugs from this string alone, so partial output and
+  warnings save it extra reads; an empty result is the lab's documented cause
+  of agents looping; in a traceback the actual error is in the last lines;
+  nobody can type into the script (no human after the initial prompt), and
+  closing stdin is the usual practice for unattended execution.
+- Alternatives: stdout only on success and stderr only on failure (the lab's
+  version; loses warnings and partial output); return `""` (the agent may
+  retry forever); always keep the beginning (loses the error line of long
+  tracebacks); inherit stdin (a script calling `input()` hangs until the
+  timeout). Human-in-the-loop, if ever needed, belongs in the orchestrator,
+  not in the script's stdin.
+- Code: pending (Lab 1.2 tools)
+
+### DEC-039 Executed scripts run without the agent's credentials
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Basis: Preferred (C4.6 no leaked secrets)
+- Context: the agent loads `.env` into its environment and a subprocess
+  inherits a copy of it, so generated code could read `OPENROUTER_API_KEY`
+  and print it (it would then reach the LLM context, logs, traces and memory)
+  or send it out.
+- Decision: `exec_python` starts the script with a copy of the environment
+  without the credential variables.
+- Why: generated code cannot read the key from its environment. None of the
+  project's target programs needs an API key.
+- Alternatives: inherit the full environment (the lab's default; exposes the
+  key). Reading `.env` from disk is still possible for the script; only
+  container isolation closes that (see DEC-036).
+- Revisit when: Module 4 adds Docker (the executor container may not hold the
+  credentials at all).
+- Code: pending (Lab 1.2 tools)
+
+### DEC-040 Scripts run with their own directory as working directory
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Basis: Preferred
+- Context: relative paths inside a script resolve against the process working
+  directory, not the script's location. Launched from the repo root, a script
+  writing `result.txt` would create it at the root.
+- Decision: `exec_python` runs each script with the script's directory as its
+  working directory.
+- Why: files the script creates land next to it, inside `workspace/`
+  (DEC-036), instead of polluting the repo.
+- Alternatives: inherit the agent's working directory (the lab's default);
+  always use the `workspace/` root (breaks relative paths of scripts in
+  subfolders).
+- Code: pending (Lab 1.2 tools)
+
+### DEC-041 `read_file` returns at most 20,000 characters
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Basis: Preferred
+- Context: the lab's `read_file` returns the whole file; a large file fills
+  the LLM context and raises the cost of every following call.
+- Decision: the content is cut at a limit configurable by environment
+  variable, 20,000 characters by default, with a mark saying it was truncated.
+- Why: protects context and cost; characters keep the limit simple,
+  deterministic and model-independent, consistent with `exec_python`'s
+  2,000-character output limit.
+- Alternatives: no limit (the lab's default); a limit in tokens (exact only
+  with each model's tokenizer, extra dependency, approximate for non-OpenAI
+  models behind OpenRouter).
+- Code: pending (Lab 1.2 tools)
+
+### DEC-042 Tool arguments are validated by Pydantic wrappers in `TOOL_HANDLERS`
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Basis: Required (C1.3, C4.6: validate LLM output and tool arguments with
+  Pydantic); Preferred (wrapper layer)
+- Context: the workspace confinement (DEC-036) must apply to the LLM's tool
+  calls, but the lab's tests call `read_file`, `write_file` and `exec_python`
+  directly with temporary paths outside any workspace.
+- Decision: one Pydantic model per tool validates the arguments (types,
+  timeout >= 1) and resolves the path: relative paths go under the workspace,
+  and any path that ends up outside it (`../`, absolute path, symlink) is
+  rejected. `TOOL_HANDLERS` maps each tool name to a wrapper that validates
+  first and returns an error string on invalid arguments, without calling the
+  tool. The lab functions stay unconfined.
+- Why: the lab's tests and contract stay unchanged, and every caller of
+  `TOOL_HANDLERS` (`agents/tools_demo.py`, later the Coder Agent) gets
+  validation and confinement without code of its own.
+- Alternatives: confine inside the tool functions (breaks the lab's tests);
+  validate in each agent's dispatch (duplicated, easy to forget).
+- Code: pending (Lab 1.2 tools)
+
+### DEC-043 The script's environment is an allowlist
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Basis: Preferred (implements DEC-039)
+- Context: DEC-039 removes credentials from the executed script's
+  environment.
+- Decision: the script receives only the variables it needs to run (`PATH`,
+  `HOME`, `LANG`/`LC_*`, `TMPDIR`) plus `PYTHONIOENCODING=utf-8`.
+- Why: deny by default; credentials added later (e.g. tracing keys in
+  Module 4) are excluded without anyone remembering to list them.
+- Alternatives: a denylist of names containing KEY/TOKEN/SECRET (misses
+  secrets with other names, e.g. a `DATABASE_URL` with a password).
+- Code: pending (Lab 1.2 tools)
+
+### DEC-044 The timeout kills the script's whole process group
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Basis: Required (C1.3: a non-terminating execution is stopped by the
+  timeout); Preferred (mechanism)
+- Context: `subprocess.run` kills only the direct child on timeout; processes
+  the script started survive and keep the output pipes open, so the call can
+  hang past the timeout.
+- Decision: `exec_python` starts the script with `Popen` in a new session and,
+  on timeout, kills the whole process group (`os.killpg`). POSIX only: Linux,
+  WSL and Docker are the project's environments.
+- Why: the assessor's timeout probe must stop every process the script
+  created, not just the first one.
+- Alternatives: `subprocess.run` as the lab hints (can hang with child
+  processes).
+- Code: pending (Lab 1.2 tools)
+
+### DEC-045 Tool configuration through environment variables, checked at startup
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Basis: Required (C1.3: configurable timeout, 10 s default; lab: 30 s cap);
+  Preferred (mechanism and startup check)
+- Context: DEC-036, DEC-037 and DEC-041 introduce settings the operator or the
+  assessor must be able to change without touching code.
+- Decision:
+  - `EXEC_TIMEOUT` (default 10), `READ_MAX_CHARS` (default 20000) and
+    `WORKSPACE_DIR` (default `workspace`, resolved against the repo root) are
+    read at module level with `os.getenv`, like the memory settings.
+  - A value that is not a number, or an `EXEC_TIMEOUT` outside 1–30, stops the
+    program at startup with a clear error.
+  - `exec_python(path, timeout=None)` uses `EXEC_TIMEOUT` when no timeout is
+    given; a value from the LLM is clamped to 30.
+- Why: an impossible setting is an operator error and must show at once
+  instead of being silently replaced (same approach as `LOG_LEVEL`, DEC-023);
+  resolving the workspace against the repo root keeps it in one place
+  whatever directory the agent is started from.
+- Alternatives: silently clamp `EXEC_TIMEOUT` to 30 (the configured value is
+  not the applied one); let `EXEC_TIMEOUT` raise the cap (drops the lab's
+  fixed limit).
+- Code: pending (Lab 1.2 tools)

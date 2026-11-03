@@ -85,13 +85,14 @@ Trabajando en: **Lab 1.2** (tools de archivos y ejecución, C1.3) → leer `docs
 
 Progreso:
 - ✅ Lab 1.1 cerrado: memoria de dos capas (C1.2), DEC-004..DEC-031. El test oficial pasa con una key real.
-- ✅ Lab 1.2 scaffold en el repo (DEC-033..DEC-035): `tools/schemas.py`, `agents/tools_demo.py`, `llm_client.py` (cliente compartido) y `memory.py` en la raíz.
-- ⏭️ **Siguiente:** implementar `read_file`/`write_file` (`tools/file_io.py`) y `exec_python` (`tools/code_executor.py`) hasta que pasen `tests/test_file_io.py` y `tests/test_code_executor.py`; después, `python -m agents.tools_demo`.
-- Pendiente: ejecutar `tests/test_memory.py` con key real para confirmar que el refactor DEC-035 no rompe C1.2.
-
+- ✅ Lab 1.2 scaffold en el repo (DEC-033..DEC-035): `tools/schemas.py`, `agents/tools_demo.py`, `llm_client.py` (cliente compartido) y `memory.py` en la raíz. El test de memoria sigue pasando con key real tras el refactor.
+- ✅ Producto y técnico de las tools cerrados: DEC-036..DEC-045 (workspace, timeout, salida de `exec_python`, entorno, `cwd`, tope de lectura, wrappers Pydantic, grupo de procesos, configuración).
+- ✅ `read_file`/`write_file` (`tools/file_io.py`) implementados; `tests/test_file_io.py` pasa.
+- ⏭️ **Siguiente (código, pieza a pieza):** 1) `exec_python` en `tools/code_executor.py` (DEC-037, DEC-038, DEC-039/043, DEC-040, DEC-044, DEC-045) hasta que pase `tests/test_code_executor.py`; 2) wrappers Pydantic + confinamiento en `TOOL_HANDLERS` (DEC-036, DEC-042), `workspace/` en `.gitignore` y variables en `.env.example`; 3) `python -m agents.tools_demo`.
 Pendientes fuera del lab:
 - Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032). Falta documentar el setup en el README.
 - Tests mockeados de la memoria (sin LLM real), a proponer y aprobar antes de escribirlos: el input actual nunca vuelve como recuerdo (DEC-031), un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029) y los duplicados exactos se actualizan (DEC-011). Como tarde en C1.6.
+- Tests propios de las tools (Lab 1.2), aplazados: confinamiento a `workspace/` (DEC-036, DEC-042), entorno sin credenciales (DEC-039, DEC-043), `cwd` del script (DEC-040), stdin cerrado, mensaje sin salida y truncado por el final (DEC-038), tope de lectura (DEC-041) y muerte del grupo de procesos (DEC-044). Proponer y aprobar antes de escribirlos; como tarde en C1.6.
 - Mejoras de memoria IMP-001..IMP-005: siguen en `idea`.
 - El repo aún no tiene remoto. Tras el primer push no se reescribe historial.
 - "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
