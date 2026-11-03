@@ -88,7 +88,9 @@ Progreso:
 - ✅ Lab 1.2 scaffold en el repo (DEC-033..DEC-035): `tools/schemas.py`, `agents/tools_demo.py`, `llm_client.py` (cliente compartido) y `memory.py` en la raíz. El test de memoria sigue pasando con key real tras el refactor.
 - ✅ Producto y técnico de las tools cerrados: DEC-036..DEC-045 (workspace, timeout, salida de `exec_python`, entorno, `cwd`, tope de lectura, wrappers Pydantic, grupo de procesos, configuración).
 - ✅ `read_file`/`write_file` (`tools/file_io.py`) implementados; `tests/test_file_io.py` pasa.
-- ⏭️ **Siguiente (código, pieza a pieza):** 1) `exec_python` en `tools/code_executor.py` (DEC-037, DEC-038, DEC-039/043, DEC-040, DEC-044, DEC-045) hasta que pase `tests/test_code_executor.py`; 2) wrappers Pydantic + confinamiento en `TOOL_HANDLERS` (DEC-036, DEC-042), `workspace/` en `.gitignore` y variables en `.env.example`; 3) `python -m agents.tools_demo`.
+- ✅ `exec_python` (`tools/code_executor.py`) implementado; `tests/test_code_executor.py` pasa.
+- ✅ Wrappers Pydantic estrictos + confinamiento a `workspace/` en `tools/handlers.py` (DEC-036, DEC-042); `workspace/` en `.gitignore` y variables en `.env.example`.
+- ⏭️ **Siguiente:** `python -m agents.tools_demo` con key real (criterio de éxito del lab) y cierre del Lab 1.2.
 Pendientes fuera del lab:
 - Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032). Falta documentar el setup en el README.
 - Tests mockeados de la memoria (sin LLM real), a proponer y aprobar antes de escribirlos: el input actual nunca vuelve como recuerdo (DEC-031), un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029) y los duplicados exactos se actualizan (DEC-011). Como tarde en C1.6.
@@ -98,6 +100,7 @@ Pendientes fuera del lab:
 - "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
 - Elegir framework (LangGraph / AutoGen / CrewAI) antes del bucle ReACT (Lab 1.3, C1.4).
+- Lab 1.3: el dispatch de tools del Coder debe devolver un error si los argumentos del LLM no son un objeto JSON. El `dispatch_tool` de `agents/tools_demo.py` hace `handler(**args)` y lanza `TypeError` con `[]` o `"texto"`; se deja como lo da el lab.
 
 Actualiza esta sección al terminar cada TODO y al empezar o cerrar cada lab.
 
