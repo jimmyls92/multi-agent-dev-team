@@ -39,7 +39,7 @@ A decision can mix bases; then each part states its own.
 ---
 
 ### DEC-001 Labs are implemented inside the project scaffold
-- Date: 2026-10-30 · Area: General · Status: accepted
+- Date: 2026-10-30 · Area: General · Status: accepted (refined by DEC-033)
 - Basis: Required (C1.1 folder structure; the rubric is what gets graded)
 - Context: lab handouts assume a flat repo (`agent.py`, `memory.py`,
   `test_memory.py` at the root), while C1.1 requires `agents/`, `tools/`,
@@ -573,3 +573,48 @@ A decision can mix bases; then each part states its own.
 - Alternatives: system Python 3.14 with `apt install python3-venv
   python3-pip` (simpler, but differs from Docker and risks missing wheels).
 - Code: `.venv/` (git-ignored); setup to be documented in `README.md`
+
+### DEC-033 The required structure is a minimum, not a closed list
+- Date: 2026-11-03 · Area: General (Lab 1.2) · Status: accepted
+- Basis: Required (C1.1 structure, C5.3 separation by responsibility);
+  Preferred (where extra files go)
+- Context: DEC-001 maps lab files into the scaffold, which was read as "only
+  the files of section 1.5 may exist". The guide says the structure must be
+  there from day one and "you will expand it each module"; C1.1 only checks
+  that the listed folders and files exist; C5.3 asks for code separated by
+  responsibility, with shared behavior factored.
+- Decision: files beyond the section 1.5 structure can be added, at the root
+  or inside the folders, as long as each one has a clear responsibility and
+  does not duplicate another. The required folders and files are never
+  removed or renamed.
+- Why: matches what the rubric actually checks; the real risk for C5.3 is
+  confusing or duplicated responsibilities, not extra files.
+- Alternatives: forcing every file into the five folders (no rubric basis;
+  e.g. shared infrastructure like the LLM client would end up inside an
+  unrelated module).
+- Code: `llm_client.py`, `pytest.ini`
+
+### DEC-034 Placement of the Lab 1.2 scaffold files
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Basis: Preferred (C5.3); OpenRouter Required by DEC-002
+- Context: the lab ships `schemas.py`, `agent.py` and `llm_client.py` for a
+  flat repo, and `llm_client.py` requires `HELICONE_API_KEY`. The OpenRouter
+  client currently lives in `tools/memory.py`, and `agents/coder_agent.py`
+  imports it from there.
+- Decision:
+  - `llm_client.py` stays at the root as the single shared LLM client,
+    adapted to OpenRouter (DEC-002); the agents get the client from it and
+    the memory module no longer defines one.
+  - `schemas.py` moves to `tools/schemas.py`, next to `TOOL_HANDLERS`.
+  - `agent.py` moves to `agents/tools_demo.py` (`python -m
+    agents.tools_demo`), adapted to the shared client and `LLM_MODEL`.
+- Why: the memory module should not own the LLM client (C5.3 shared behavior
+  factored); tool schemas belong with their handlers; a root `agent.py` next
+  to `agents/coder_agent.py` would make it unclear which agent is the system.
+- Alternatives: keep the files at the root unchanged (Helicone client fails
+  with the available credentials; two "agents"); drop `llm_client.py` and keep
+  the client in `memory.py` (memory keeps owning infrastructure).
+- Revisit when: Lab 1.3 moves the demo loop into `agents/coder_agent.py`
+  (the demo may then be removed).
+- Code: `llm_client.py`, `tools/schemas.py`, `agents/tools_demo.py`,
+  `agents/coder_agent.py` — `chat()`

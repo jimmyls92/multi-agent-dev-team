@@ -14,9 +14,10 @@ Adaptations in this project (see `docs/decisions.md`):
   the key comes from `OPENROUTER_API_KEY` in `.env` (DEC-002).
 - C1.3 requires the execution timeout to be configurable with a **10-second
   default**, and no direct `eval()`/`exec()`.
-- The lab scaffold files (`schemas.py`, `agent.py`, `llm_client.py` and the
-  tests `test_file_io.py`, `test_code_executor.py`) are not in the repo yet;
-  where each one goes is decided when they are added.
+- Lab scaffold files (DEC-034): `schemas.py` → `tools/schemas.py`;
+  `agent.py` → `agents/tools_demo.py` (`python -m agents.tools_demo`);
+  `llm_client.py` stays at the root as the shared client, adapted to
+  OpenRouter; the tests go to `tests/`.
 
 ---
 
