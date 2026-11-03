@@ -655,7 +655,7 @@ A decision can mix bases; then each part states its own.
   Docker arrives in Module 4).
 - Revisit when: Module 4 adds Docker (executed code could then be isolated
   too).
-- Code: pending (Lab 1.2 tools)
+- Code: `tools/handlers.py` — `WORKSPACE_DIR`, `_resolve_in_workspace`; `.gitignore`
 
 ### DEC-037 Execution timeout: operator default by env var, LLM capped at 30 s
 - Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
@@ -762,12 +762,24 @@ A decision can mix bases; then each part states its own.
   rejected. `TOOL_HANDLERS` maps each tool name to a wrapper that validates
   first and returns an error string on invalid arguments, without calling the
   tool. The lab functions stay unconfined.
+  - The models and wrappers live in their own module, `tools/handlers.py`;
+    `tools/__init__.py` only exports `TOOL_HANDLERS`.
+  - Validation is strict: no type coercion (`"10"`, `10.0` or `true` are not
+    a valid `timeout`) and extra arguments are rejected.
 - Why: the lab's tests and contract stay unchanged, and every caller of
   `TOOL_HANDLERS` (`agents/tools_demo.py`, later the Coder Agent) gets
-  validation and confinement without code of its own.
+  validation and confinement without code of its own. A separate module
+  keeps the lab's files and the tool list readable and the validation
+  testable on its own. Strict mode accepts exactly what the schema tells the
+  LLM, so a wrong type is an invalid output that never reaches the tool
+  (C1.3, C4.6) instead of a silent conversion (`true` would become a 1 s
+  timeout).
 - Alternatives: confine inside the tool functions (breaks the lab's tests);
-  validate in each agent's dispatch (duplicated, easy to forget).
-- Code: pending (Lab 1.2 tools)
+  validate in each agent's dispatch (duplicated, easy to forget); wrappers
+  inside `tools/__init__.py` (where the lab defines `TOOL_HANDLERS`; mixes
+  the tool list with validation logic); lax validation (saves the LLM a
+  retry when it sends `"10"`, but converts values silently).
+- Code: `tools/handlers.py` — `TOOL_HANDLERS`, `_validated`; `tools/__init__.py`
 
 ### DEC-043 The script's environment is an allowlist
 - Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
@@ -828,4 +840,5 @@ A decision can mix bases; then each part states its own.
 - Alternatives: silently clamp `EXEC_TIMEOUT` to 30 (the configured value is
   not the applied one); let `EXEC_TIMEOUT` raise the cap (drops the lab's
   fixed limit).
-- Code: `tools/code_executor.py` — `EXEC_TIMEOUT`; `tools/file_io.py` — `READ_MAX_CHARS`; `WORKSPACE_DIR` pending
+- Code: `tools/code_executor.py` — `EXEC_TIMEOUT`; `tools/file_io.py` — `READ_MAX_CHARS`;
+  `tools/handlers.py` — `WORKSPACE_DIR`; `.env.example`

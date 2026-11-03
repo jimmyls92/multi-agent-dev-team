@@ -12,3 +12,6 @@ config.yaml
 # Course materials (local reference only)
 *.pdf
 docs/course_reference.txt
+
+# Agent working directory (Lab 1.2 tools, DEC-036)
+workspace/
