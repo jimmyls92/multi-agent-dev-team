@@ -105,7 +105,7 @@ Progreso:
   4. ✅ **Coder (2):** `run_agent(task, window) -> CoderResult`: bucle de 10, estados (DEC-055, DEC-056), `code` leído del disco (DEC-052), plan = primer Thought (DEC-053), guardado de tarea y resultado (DEC-049).
   5. ✅ **Coder (3):** `chat()` devuelve la explicación y `main()` interactivo o de una tarea con argumento (DEC-064); borrar `agents/tools_demo.py` (DEC-051).
   Hecho: además DEC-067 (`dispatch_tool` devuelve `ToolOutcome`); una ejecución real de una tarea con `python -m agents.coder_agent "..."` termina en `success` en 3 iteraciones.
-  6. **Tests:** `tests/conftest.py` + `tests/test_smoke.py` (DEC-054, DEC-066), ejecutarlo con key real; volver a pasar `CHROMA_PATH=.chroma-test python -m tests.test_memory` (C1.2) y `pytest tests/` (Lab 1.2).
+  6. ✅ **Tests:** `pytest tests/test_smoke.py --run-llm` pasa con key real; `tests.test_memory` pasa con key real; `pytest tests/` 24 passed + 1 skipped. Detalle original: `tests/conftest.py` + `tests/test_smoke.py` (DEC-054, DEC-066), ejecutarlo con key real; volver a pasar `CHROMA_PATH=.chroma-test python -m tests.test_memory` (C1.2) y `pytest tests/` (Lab 1.2).
   Al terminar: comparar con `lab_1_3_src/agent_solution.py` (no abrirlo antes) y actualizar el README (framework pendiente, cómo ejecutar el Coder y el smoke test).
 Pendientes fuera del lab:
 - Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032). Falta documentar el setup en el README.
