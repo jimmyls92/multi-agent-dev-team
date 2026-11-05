@@ -891,7 +891,7 @@ A decision can mix bases; then each part states its own.
   name the chosen framework and it must not contradict the code — and at the
   latest in Module 2, when C2.3 puts PM and Coder in one graph (a change of
   framework is justified in the README, C2.6).
-- Code: pending (Lab 1.3)
+- Code: `agents/coder_agent.py` — `run_agent` (plain Python loop)
 
 ### DEC-048 The Coder works in sessions: one ReACT run per user message
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
@@ -926,7 +926,8 @@ A decision can mix bases; then each part states its own.
   its first iterations and "turn" is stretched to mean "iteration").
 - Revisit when: Module 2/3 design what the Coder keeps between PM tasks
   and QA feedback rounds.
-- Code: pending (Lab 1.3)
+- Code: `agents/coder_agent.py` — `run_agent`, `chat`, `main`; `memory.py` —
+  `SlidingWindowBuffer.add_turn`
 
 ### DEC-049 Long-term memory also stores the outcome of each completed task
 - Date: 2026-11-05 · Area: Memory (Lab 1.3) · Status: accepted
@@ -953,7 +954,8 @@ A decision can mix bases; then each part states its own.
 - Revisit when: the stored answers turn out too long or noisy for
   retrieval (e.g. summarise them), or Module 2/3 change what the Coder
   needs to recall.
-- Code: pending (Lab 1.3)
+- Code: `memory.py` — `store_memory`, `store_outcome`; `agents/coder_agent.py` —
+  `run_agent`
 
 ### DEC-050 Retrieval runs before every loop iteration, queried by the task
 - Date: 2026-11-05 · Area: Memory (Lab 1.3) · Status: accepted
@@ -972,7 +974,8 @@ A decision can mix bases; then each part states its own.
   happens, but long observations distort the query and results are harder
   to evidence; kept as IMP-006); retrieve once per task as the lab does
   (calls 2-10 run without retrieval: C1.2 at risk).
-- Code: pending (Lab 1.3)
+- Code: `agents/coder_agent.py` — `run_agent` (calls `build_context` before every
+  LLM call)
 
 ### DEC-051 One Coder agent in `agents/coder_agent.py`
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
@@ -1004,7 +1007,8 @@ A decision can mix bases; then each part states its own.
   loops).
 - Revisit when: how the lab's pieces are organised inside `coder_agent.py`
   is decided in the technical phase.
-- Code: pending (Lab 1.3) — `agents/coder_agent.py`, `agents/tools_demo.py`
+- Code: `agents/coder_agent.py` — `run_agent`, `chat`; `agents/tools_demo.py`
+  removed
 
 ### DEC-052 The LLM declares the deliverable; the system reads its code from disk
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
@@ -1023,7 +1027,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: every file written in the task (mixes the deliverable with
   test scripts; `code` stops being a text); the code the LLM writes in its
   final answer (may differ from the file: C1.5 at risk).
-- Code: pending (Lab 1.3)
+- Code: `agents/coder_agent.py` — `FinalStep`, `_read_main_file`, `run_agent`
 
 ### DEC-053 The plan is the agent's first Thought, kept apart from the action record
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
@@ -1043,7 +1047,7 @@ A decision can mix bases; then each part states its own.
   answer (written after acting, weaker C1.4 evidence).
 - Revisit when: the initial plan often differs from what the agent ends up
   doing (e.g. keep the last stated plan instead).
-- Code: pending (Lab 1.3)
+- Code: `agents/coder_agent.py` — `REACT_SYSTEM_PROMPT`, `run_agent`
 
 ### DEC-054 The smoke test runs a real task and checks the generated code works
 - Date: 2026-11-05 · Area: Tests (Lab 1.3) · Status: accepted
@@ -1090,7 +1094,7 @@ A decision can mix bases; then each part states its own.
   file that only defines functions prints nothing, and it runs something
   the agent did not ask for); trust the LLM's report of the result (C1.5
   Not Yet); raise on the limit (the assessor probe ends in a crash).
-- Code: pending (Lab 1.3)
+- Code: `agents/coder_agent.py` — `_final_status`, `run_agent`
 
 ### DEC-056 A final answer without code has its own status, `answered`
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
@@ -1117,7 +1121,7 @@ A decision can mix bases; then each part states its own.
   risk; consumers that read only the status are misled); classify the
   message before the loop and answer questions without it (part of the
   messages skip ReACT, C1.4 at risk; an extra LLM call, C4.4).
-- Code: pending (Lab 1.3)
+- Code: `agents/coder_agent.py` — `FinalStep`, `run_agent`, `chat`
 
 ### DEC-057 The ReACT loop adds each task to the window as one whole turn
 - Date: 2026-11-05 · Area: Memory / Coder Agent (Lab 1.3) · Status: accepted
@@ -1141,8 +1145,8 @@ A decision can mix bases; then each part states its own.
   turn); `add()` does not open a turn for text starting with
   "OBSERVATION:" (depends on message text, breaks silently if the prefix
   changes).
-- Code: `memory.py` — `SlidingWindowBuffer.add_turn`; the loop that uses it
-  is pending (Lab 1.3)
+- Code: `memory.py` — `SlidingWindowBuffer.add_turn`; `agents/coder_agent.py` —
+  `run_agent`
 
 ### DEC-058 `build_context()` is reused for every loop iteration
 - Date: 2026-11-05 · Area: Memory / Coder Agent (Lab 1.3) · Status: accepted
@@ -1210,7 +1214,8 @@ A decision can mix bases; then each part states its own.
   parsing, but the Thought becomes optional: weaker C1.4 evidence; moves
   away from the lab); a JSON-only response with `response_format` (not
   supported by every OpenRouter model).
-- Code: pending (Lab 1.3)
+- Code: `agents/coder_agent.py` — `ToolStep`, `FinalStep`, `ParseFailure`,
+  `parse_llm_response`
 
 ### DEC-061 Tools are described in the prompt, generated from the schemas
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
@@ -1226,7 +1231,7 @@ A decision can mix bases; then each part states its own.
   drift, so the LLM sends arguments the wrappers reject); the lab's
   `tools=` with `tool_choice="none"` (sends unusable schemas on every call,
   extra tokens for C4.4; some OpenRouter models ignore or reject it).
-- Code: pending (Lab 1.3)
+- Code: `agents/coder_agent.py` — `_describe_tools`, `REACT_SYSTEM_PROMPT`
 
 ### DEC-062 `dispatch_tool` returns errors instead of raising
 - Date: 2026-11-05 · Area: Tools (Lab 1.3) · Status: accepted
@@ -1266,7 +1271,7 @@ A decision can mix bases; then each part states its own.
   changes); make `exec_python` return an object (breaks its contract and
   the Lab 1.2 tests; the LLM would get an object instead of text).
 - Code: `tools/code_executor.py` — `ExecutionResult`, `run_python`,
-  `exec_python`
+  `exec_python`; `agents/coder_agent.py` — `run_agent`
 
 ### DEC-064 The whole Coder lives in `agents/coder_agent.py`
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
@@ -1291,7 +1296,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: a package `agents/coder/` with prompt, parsing and models
   modules (the guide names a single file; premature split).
 - Revisit when: another agent needs the parser or the models (Module 2/3).
-- Code: pending (Lab 1.3)
+- Code: `agents/coder_agent.py` — `chat`, `main`
 
 ### DEC-065 `CoderResult` is the Pydantic output of a whole task
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
@@ -1311,7 +1316,7 @@ A decision can mix bases; then each part states its own.
   until a second agent uses them, DEC-064).
 - Revisit when: Module 2 defines the shared state (C2.2); the model moves
   there.
-- Code: pending (Lab 1.3)
+- Code: `agents/coder_agent.py` — `StepRecord`, `CoderResult`
 
 ### DEC-066 The smoke test is a pytest test that runs only with `--run-llm`
 - Date: 2026-11-05 · Area: Tests (Lab 1.3) · Status: accepted

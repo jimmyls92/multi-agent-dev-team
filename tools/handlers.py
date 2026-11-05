@@ -45,7 +45,7 @@ if not _workspace_setting.strip():
 WORKSPACE_DIR = (_REPO_ROOT / _workspace_setting).resolve()
 
 
-def _resolve_in_workspace(path: str) -> str:
+def resolve_in_workspace(path: str) -> str:
     """Resolves a path inside the workspace.
 
     Args:
@@ -100,7 +100,7 @@ class _PathArgs(BaseModel):
         Raises:
             ValueError: If the path is empty or outside the workspace.
         """
-        return _resolve_in_workspace(path)
+        return resolve_in_workspace(path)
 
 
 class ReadFileArgs(_PathArgs):
