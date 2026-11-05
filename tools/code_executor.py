@@ -3,6 +3,9 @@
 exec_python runs a script in a child process, never with exec() or eval(),
 so an infinite loop is killed by the timeout, a crash in the script does not
 reach the agent, and the agent always gets a useful string back (DEC-038).
+run_python does the work and returns an ExecutionResult, so the Coder can tell
+a clean run from a failure without reading the text (DEC-063); exec_python
+returns only that text.
 
 Attributes:
     MAX_OUTPUT_CHARS: Characters of output returned to the agent.
@@ -18,6 +21,7 @@ import sys
 import threading
 
 from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict
 
 load_dotenv()
 
@@ -130,8 +134,46 @@ def _combine(stdout: str, stderr: str) -> str:
     return "\n".join(parts)
 
 
+class ExecutionResult(BaseModel):
+    """Structured outcome of one script execution (DEC-063).
+
+    Attributes:
+        output: Text for the agent, exactly what exec_python returns.
+        exit_code: Exit code of the script, or None when it did not finish
+            (timeout) or did not run (missing file, unexpected error).
+        timed_out: Whether the script was killed by the timeout.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    output: str
+    exit_code: int | None = None
+    timed_out: bool = False
+
+    @property
+    def ok(self) -> bool:
+        """Returns whether the script ran to the end with exit code 0."""
+        return self.exit_code == 0 and not self.timed_out
+
+
 def exec_python(path: str, timeout: int | None = None) -> str:
     """Runs a Python script in a child process and reports the outcome.
+
+    Wraps run_python and keeps only its text (DEC-063), so the agent and the
+    Lab 1.2 contract always get a string.
+
+    Args:
+        path: Path to the .py file to execute.
+        timeout: Maximum seconds to allow. Defaults to EXEC_TIMEOUT; values
+            above MAX_TIMEOUT are clamped to it (DEC-037).
+
+    Returns:
+        The output text described in run_python, never empty.
+    """
+    return run_python(path, timeout).output
+
+
+def run_python(path: str, timeout: int | None = None) -> ExecutionResult:
+    """Runs a Python script in a child process and returns its outcome.
 
     The script runs with the agent's interpreter, its own directory as working
     directory (DEC-040), stdin closed and an environment without credentials
@@ -144,7 +186,8 @@ def exec_python(path: str, timeout: int | None = None) -> str:
             above MAX_TIMEOUT are clamped to it (DEC-037).
 
     Returns:
-        A non-empty string for the agent (DEC-038):
+        An ExecutionResult (DEC-063) whose output is a non-empty string for
+        the agent (DEC-038):
 
         - Success: stdout, plus labeled stderr when it is not empty, or a
           message saying the script ran with no output. Long output keeps its
@@ -155,11 +198,16 @@ def exec_python(path: str, timeout: int | None = None) -> str:
           example "Error: script 'loop.py' exceeded timeout of 2s and was
           killed.", followed by any output produced until then.
         - Any other error: a descriptive error string; nothing is raised.
+
+        exit_code is set only when the script finished; timed_out only on
+        timeout.
     """
     abs_path = os.path.abspath(path)
     try:
         if not os.path.isfile(abs_path):
-            return f"Error: script '{abs_path}' does not exist or is not a file."
+            return ExecutionResult(
+                output=f"Error: script '{abs_path}' does not exist or is not a file."
+            )
 
         # DEC-037: the LLM may ask for another value, never above the cap.
         effective_timeout = min(
@@ -205,17 +253,24 @@ def exec_python(path: str, timeout: int | None = None) -> str:
                 f"of {effective_timeout}s and was killed."
             )
             partial = _combine(stdout, stderr)
-            return f"{message}\n{_keep_end(partial)}" if partial else message
+            return ExecutionResult(
+                output=f"{message}\n{_keep_end(partial)}" if partial else message,
+                timed_out=True,
+            )
 
         if proc.returncode != 0:
             # DEC-038: exit code, stderr and any stdout printed before failing.
             details = _combine(stdout, stderr) or "(no output)"
-            return f"Error (exit code {proc.returncode}):\n{_keep_end(details)}"
+            return ExecutionResult(
+                output=f"Error (exit code {proc.returncode}):\n{_keep_end(details)}",
+                exit_code=proc.returncode,
+            )
 
         # DEC-038: stdout plus labeled stderr (e.g. warnings), never "".
         if not stdout and not stderr:
-            return "Script ran successfully with no output."
-        output = stdout if not stderr else f"{stdout}\n[stderr]\n{stderr}"
-        return _keep_start(output)
+            output = "Script ran successfully with no output."
+        else:
+            output = stdout if not stderr else f"{stdout}\n[stderr]\n{stderr}"
+        return ExecutionResult(output=_keep_start(output), exit_code=0)
     except Exception as e:
-        return f"Error executing script '{abs_path}': {e}"
+        return ExecutionResult(output=f"Error executing script '{abs_path}': {e}")

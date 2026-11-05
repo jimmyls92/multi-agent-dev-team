@@ -1243,7 +1243,7 @@ A decision can mix bases; then each part states its own.
   of `tools_demo.py` and other agents can reuse it.
 - Alternatives: keep the lab's version (a `[1, 2]` argument crashes the
   agent).
-- Code: pending (Lab 1.3)
+- Code: `tools/handlers.py` — `dispatch_tool`
 
 ### DEC-063 Execution has a structured result underneath `exec_python`
 - Date: 2026-11-05 · Area: Tools / Coder Agent (Lab 1.3) · Status: accepted
@@ -1263,7 +1263,8 @@ A decision can mix bases; then each part states its own.
   "Error: ..." looks like a failure; breaks silently if the message
   changes); make `exec_python` return an object (breaks its contract and
   the Lab 1.2 tests; the LLM would get an object instead of text).
-- Code: pending (Lab 1.3)
+- Code: `tools/code_executor.py` — `ExecutionResult`, `run_python`,
+  `exec_python`
 
 ### DEC-064 The whole Coder lives in `agents/coder_agent.py`
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
@@ -1328,3 +1329,21 @@ A decision can mix bases; then each part states its own.
   would run, and cost, on every `pytest`); a script like
   `tests/test_memory.py` (weaker evidence of an "automated smoke test").
 - Code: pending (Lab 1.3)
+
+### DEC-067 `dispatch_tool` returns a `ToolOutcome`, not a bare string
+- Date: 2026-11-05 · Area: Tools (Lab 1.3) · Status: accepted
+- Basis: Preferred (refines DEC-062 and DEC-063)
+- Context: DEC-062 makes `dispatch_tool` the single entry point for tool
+  calls and DEC-063 needs the loop to see the structured result of each
+  execution; a dispatcher that returns only text hides that result.
+- Decision: `dispatch_tool` returns `ToolOutcome(observation: str,
+  execution: ExecutionResult | None)`. `execution` is set only when
+  `exec_python` actually ran the script, after validating its arguments
+  with the same `ExecPythonArgs` as the wrapper.
+- Why: one entry point and one validation for every tool call; the loop
+  gets the DEC-063 result without special-casing `exec_python` or
+  validating twice.
+- Alternatives: return `str` and let the loop call `run_python` itself for
+  `exec_python` (two code paths, arguments validated twice, the paths can
+  drift); return a tuple (untyped, against the Pydantic-everywhere rule).
+- Code: `tools/handlers.py` — `ToolOutcome`, `dispatch_tool`

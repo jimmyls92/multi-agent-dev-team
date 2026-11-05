@@ -6,6 +6,11 @@ workspace. Invalid arguments return an error string and the tool is not
 called. The lab functions in file_io.py and code_executor.py stay
 unconfined, so their tests keep calling them with any path.
 
+dispatch_tool is the single entry point for the agents: it never raises and
+always returns a ToolOutcome, whose observation goes back to the LLM
+(DEC-062) and whose execution carries the structured result of exec_python
+(DEC-063).
+
 Attributes:
     WORKSPACE_DIR: Absolute path of the agent's working directory, from the
         WORKSPACE_DIR environment variable resolved against the repo root
@@ -14,8 +19,9 @@ Attributes:
 
 Typical usage example:
 
-    from tools import TOOL_HANDLERS
-    result = TOOL_HANDLERS["write_file"](path="hello.py", content="print(1)")
+    from tools import dispatch_tool
+    outcome = dispatch_tool("write_file", {"path": "hello.py", "content": "print(1)"})
+    print(outcome.observation)
 """
 
 import os
@@ -25,7 +31,7 @@ from typing import Callable
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from .code_executor import exec_python
+from .code_executor import ExecutionResult, exec_python, run_python
 from .file_io import read_file, write_file
 
 load_dotenv()
@@ -135,6 +141,26 @@ def _describe(error: ValidationError) -> str:
     )
 
 
+def _validate(
+    model: type[BaseModel], tool_name: str, kwargs: dict
+) -> BaseModel | str:
+    """Validates the LLM's arguments for one tool.
+
+    Args:
+        model: Pydantic model that validates the tool's arguments.
+        tool_name: Name of the tool, used in the error message.
+        kwargs: Arguments sent by the LLM.
+
+    Returns:
+        The validated model, or an error string for the LLM if the
+        arguments are invalid.
+    """
+    try:
+        return model.model_validate(kwargs)
+    except ValidationError as e:
+        return f"Error: invalid arguments for {tool_name}: {_describe(e)}"
+
+
 def _validated(model: type[BaseModel], tool: Callable[..., str]) -> Callable[..., str]:
     """Wraps a tool so its arguments are validated before it runs.
 
@@ -155,10 +181,9 @@ def _validated(model: type[BaseModel], tool: Callable[..., str]) -> Callable[...
             The tool's result, or an error string without calling the tool
             if the arguments are invalid.
         """
-        try:
-            args = model.model_validate(kwargs)
-        except ValidationError as e:
-            return f"Error: invalid arguments for {tool.__name__}: {_describe(e)}"
+        args = _validate(model, tool.__name__, kwargs)
+        if isinstance(args, str):
+            return args
         return tool(**args.model_dump())
 
     handler.__name__ = tool.__name__
@@ -170,3 +195,60 @@ TOOL_HANDLERS = {
     "write_file": _validated(WriteFileArgs, write_file),
     "exec_python": _validated(ExecPythonArgs, exec_python),
 }
+
+
+class ToolOutcome(BaseModel):
+    """Result of one tool call made through dispatch_tool (DEC-067).
+
+    Attributes:
+        observation: Text returned to the LLM; never empty (DEC-062).
+        execution: Structured result when exec_python ran the script
+            (DEC-063); None for any other tool or when the call was rejected
+            before running.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    observation: str
+    execution: ExecutionResult | None = None
+
+
+def dispatch_tool(name: str, args: object) -> ToolOutcome:
+    """Runs a tool requested by the LLM without ever raising (DEC-062).
+
+    Args:
+        name: Tool name chosen by the LLM.
+        args: Arguments already parsed from the LLM's JSON. Anything that is
+            not a dict is rejected; missing, extra or mistyped arguments are
+            rejected by the Pydantic wrappers (DEC-042).
+
+    Returns:
+        A ToolOutcome. Unknown tools, non-object arguments, invalid arguments
+        and unexpected errors give an "Error: ..." observation and no
+        execution.
+    """
+    try:
+        if name not in TOOL_HANDLERS:
+            return ToolOutcome(
+                observation=(
+                    f"Error: unknown tool '{name}'. "
+                    f"Available tools: {', '.join(TOOL_HANDLERS)}"
+                )
+            )
+        if not isinstance(args, dict):
+            return ToolOutcome(
+                observation=(
+                    f"Error: arguments for {name} must be a JSON object, "
+                    f"got {type(args).__name__}"
+                )
+            )
+        if name == "exec_python":
+            # DEC-063: same validation as the wrapper, but keep the
+            # structured result for the agent's loop.
+            parsed = _validate(ExecPythonArgs, name, args)
+            if isinstance(parsed, str):
+                return ToolOutcome(observation=parsed)
+            execution = run_python(**parsed.model_dump())
+            return ToolOutcome(observation=execution.output, execution=execution)
+        return ToolOutcome(observation=TOOL_HANDLERS[name](**args))
+    except Exception as e:
+        return ToolOutcome(observation=f"Error: tool '{name}' failed: {e}")
