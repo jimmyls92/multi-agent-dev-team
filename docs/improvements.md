@@ -88,7 +88,19 @@ each idea has a stable ID (`IMP-NNN`, never reused).
 
 ## ReACT loop
 
-_No ideas yet._
+### IMP-006 Retrieval query adapted to the latest observation
+- Status: idea
+- Area: ReACT loop (Lab 1.3)
+- Why: during a task the query is always the task (DEC-050), so the
+  retrieved memories do not change between iterations; adding the latest
+  observation could bring back, e.g., how a similar error was fixed before.
+- Rubric: C1.2 — retrieval must still run before every LLM call and return
+  context relevant to the task, so the observation is added to the task in
+  the query, it does not replace it. Harder to evidence because results
+  change per iteration; keep the DEC-025 log.
+- Notes: a long observation (traceback, file contents) can dominate the
+  query: consider using only its last lines or a size cap. Try it once the
+  Coder works end to end, comparing retrieval with and without it.
 
 ## General
 

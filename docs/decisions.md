@@ -173,7 +173,7 @@ A decision can mix bases; then each part states its own.
 - Code: `tests/test_memory.py`
 
 ### DEC-008 Long-term memory stores only user messages
-- Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
+- Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: superseded by DEC-049
 - Basis: Required (Lab 1.1 template: `chat()` step 1 stores the user input)
 - Context: long-term memory decides what the agent can recall in future
   sessions, and what can pollute its answers if it is noise.
@@ -595,7 +595,7 @@ A decision can mix bases; then each part states its own.
 - Code: `llm_client.py`, `pytest.ini`
 
 ### DEC-034 Placement of the Lab 1.2 scaffold files
-- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted
+- Date: 2026-11-03 · Area: Tools (Lab 1.2) · Status: accepted (refined by DEC-051)
 - Basis: Preferred (C5.3); OpenRouter Required by DEC-002
 - Context: the lab ships `schemas.py`, `agent.py` and `llm_client.py` for a
   flat repo, and `llm_client.py` requires `HELICONE_API_KEY`. The OpenRouter
@@ -892,3 +892,116 @@ A decision can mix bases; then each part states its own.
   latest in Module 2, when C2.3 puts PM and Coder in one graph (a change of
   framework is justified in the README, C2.6).
 - Code: pending (Lab 1.3)
+
+### DEC-048 The Coder works in sessions: one ReACT run per user message
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Basis: mixed
+  - Window of the last N conversation turns, observable — Required (C1.2)
+  - One task per user message, its iterations grouped in one turn —
+    Preferred
+  - Window owned by the Coder, never shared with other agents — Preferred
+- Context: the Lab 1.3 `run_agent(task)` solves one task with a fresh
+  window, so the window would only ever hold one turn: the last-N-turns
+  behavior C1.2 asks to observe would never happen, and the Lab 1.1 recall
+  test (`tests/test_memory.py`) would lose its meaning. DEC-004 asked to
+  revisit the window when the loop adds tool/observation messages.
+- Decision:
+  - The Coder keeps an interactive session (as `chat()` in Lab 1.1). Each
+    user message is a task that runs the ReACT loop (up to 10 iterations,
+    C1.4); the window persists between messages of the session.
+  - A turn is one task plus all its iterations (Thought/Action and
+    Observation messages); the window keeps the last N turns. Observations
+    must not open a new turn.
+  - Older turns and earlier sessions come back through long-term memory,
+    which is still queried before every LLM call (C1.2).
+  - A one-shot run (lab test, C1.6 smoke test) is a session with a single
+    task.
+  - The window belongs to the Coder; other agents (QA) never see it. What
+    passes between agents is the shared state and the handoff (C2.2, C2.3).
+- Why: the most literal reading of C1.2 ("conversation turns"); keeps what
+  Lab 1.1 already meets; the task never leaves the window while the agent
+  works on it.
+- Alternatives: fresh window per task (window never slides, C1.2 evidence
+  at risk); one iteration per turn with the task pinned (the agent forgets
+  its first iterations and "turn" is stretched to mean "iteration").
+- Revisit when: Module 2/3 design what the Coder keeps between PM tasks
+  and QA feedback rounds.
+- Code: pending (Lab 1.3)
+
+### DEC-049 Long-term memory also stores the outcome of each completed task
+- Date: 2026-11-05 · Area: Memory (Lab 1.3) · Status: accepted
+- Basis: Preferred (C1.2 is met by every option; this one makes the
+  follow-up recall useful for a coding agent)
+- Context: DEC-008 stores only user messages, which with DEC-048 are the
+  tasks. Its `Revisit when` pointed to the ReACT loop: the agent may need to
+  recall what it built (e.g. "add logging to yesterday's function"). The
+  lab stores the final answer and every non-error observation.
+- Decision:
+  - The task is stored before the first LLM call, as today (DEC-019).
+  - When the task ends with a FINAL ANSWER, one memory "task + final
+    answer" is stored after the loop. A task that hits the iteration limit
+    stores no answer.
+  - Observations are not stored.
+  - While a task is still in the window, its outcome memory is not
+    retrieved (same principle as DEC-016).
+- Why: the agent can recall what it delivered and where, in a later
+  session; storing one outcome per task keeps the noise DEC-008 avoided
+  low; an unfinished task is not remembered as a success.
+- Alternatives: also store non-error observations as the lab does (file
+  contents and script outputs crowd out the 3 retrieval slots); only the
+  task (the agent cannot recall what it built or where).
+- Revisit when: the stored answers turn out too long or noisy for
+  retrieval (e.g. summarise them), or Module 2/3 change what the Coder
+  needs to recall.
+- Code: pending (Lab 1.3)
+
+### DEC-050 Retrieval runs before every loop iteration, queried by the task
+- Date: 2026-11-05 · Area: Memory (Lab 1.3) · Status: accepted
+- Basis: Required (C1.2: retrieval before every LLM call); query by the
+  task — Preferred
+- Context: in the ReACT loop only the first LLM call follows a user
+  message; iterations 2-10 follow observations. The lab retrieves once,
+  when it builds the system prompt.
+- Decision: long-term memory is queried before every LLM call of the loop,
+  always with the current task as the query, and the result is injected
+  in the system message as today (DEC-015).
+- Why: meets C1.2 literally and stays visible in the per-call log
+  (DEC-025); same behavior as `build_context()` in Lab 1.1; stable results
+  and no cost, since embeddings are local (DEC-003).
+- Alternatives: query by task plus latest observation (adapts to what
+  happens, but long observations distort the query and results are harder
+  to evidence; kept as IMP-006); retrieve once per task as the lab does
+  (calls 2-10 run without retrieval: C1.2 at risk).
+- Code: pending (Lab 1.3)
+
+### DEC-051 One Coder agent in `agents/coder_agent.py`
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Basis: mixed
+  - A single Coder whose loop is the orchestration code — Preferred
+    (C1.4 evidence, C5.3 no duplicated responsibilities)
+  - `chat()` kept as the entry point of one session message — Preferred
+    (the official Lab 1.1 test, C1.2 evidence per DEC-007, keeps passing
+    unchanged)
+- Context: the project has `agents/coder_agent.py` (Lab 1.1 conversation)
+  and `agents/tools_demo.py` (Lab 1.2 function-calling demo, DEC-034), and
+  Lab 1.3 ships its own `agent.py` with the ReACT loop. DEC-034 asked to
+  revisit the demo in this lab.
+- Decision:
+  - The project ends with a single agent file for the Coder:
+    `agents/coder_agent.py` holds the ReACT loop (DEC-048). The lab's
+    `agent.py` is not added as a separate file.
+  - `chat(user_input, window)` stays as the entry point for one message of
+    the session: it runs the loop and returns the final answer text.
+    `python -m agents.coder_agent` stays interactive.
+  - `agents/tools_demo.py` is removed once the Coder uses the tools.
+- Why: one Coder, where the assessor looks for the loop; the Lab 1.1 recall
+  test keeps testing the same entry point, so C1.2 has no regression; the
+  Coder invoking the tools is what C1.3 checks, so the demo becomes a
+  duplicated loop with another style (native function calling).
+- Alternatives: a new `agents/react_agent.py` next to `coder_agent.py` (two
+  "Coders", unclear which is the system); drop `chat()` and adapt the
+  official test (touches the C1.2 evidence); keep the demo (two agent
+  loops).
+- Revisit when: how the lab's pieces are organised inside `coder_agent.py`
+  is decided in the technical phase.
+- Code: pending (Lab 1.3) — `agents/coder_agent.py`, `agents/tools_demo.py`

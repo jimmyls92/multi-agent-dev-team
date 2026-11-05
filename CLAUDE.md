@@ -93,7 +93,9 @@ Progreso:
 - ✅ `exec_python` (`tools/code_executor.py`) implementado; `tests/test_code_executor.py` pasa.
 - ✅ Wrappers Pydantic estrictos + confinamiento a `workspace/` en `tools/handlers.py` (DEC-036, DEC-042); `workspace/` en `.gitignore` y variables en `.env.example`.
 - ✅ Lab 1.2 cerrado: `python -m agents.tools_demo` con key real escribe `workspace/word_freq.py`, lo ejecuta y termina con DONE (C1.3).
-- ⏭️ **Siguiente:** empezar el Lab 1.3. Antes del bucle ReACT hay que elegir el framework y revisar DEC-004 (ventana por turnos con mensajes `tool`) y DEC-034 (destino de la demo), cuyo `Revisit when` apunta a este lab.
+- ✅ Lab 1.3: handout en `docs/labs/lab_1_3_react_agent.md`. El código del lab (incluido `agent_solution.py`) está en `lab_1_3_src/`, que **nunca se commitea**.
+- ✅ Lab 1.3, producto cerrado: sin framework por ahora (DEC-047); sesión con un bucle ReACT por mensaje y una tarea con sus iteraciones = un turno (DEC-048); se guarda también "tarea + respuesta final" (DEC-049, sustituye a DEC-008); consulta antes de cada iteración por la tarea (DEC-050, mejora IMP-006); un único Coder en `agents/coder_agent.py`, `chat()` como entrada y `tools_demo.py` se elimina (DEC-051).
+- ⏭️ **Siguiente:** fase técnica del Lab 1.3: inventario pieza a pieza de qué se toma del lab y qué se conserva, y cómo se organiza dentro de `coder_agent.py`. `agent_solution.py` solo se abre al terminar, para comparar (decisión del usuario).
 Pendientes fuera del lab:
 - Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032). Falta documentar el setup en el README.
 - Tests mockeados de la memoria (sin LLM real), a proponer y aprobar antes de escribirlos: el input actual nunca vuelve como recuerdo (DEC-031), un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029) y los duplicados exactos se actualizan (DEC-011). Como tarde en C1.6.
@@ -102,8 +104,9 @@ Pendientes fuera del lab:
 - El repo aún no tiene remoto. Tras el primer push no se reescribe historial.
 - "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
-- Elegir framework (LangGraph / AutoGen / CrewAI) antes del bucle ReACT (Lab 1.3, C1.4).
+- Elegir framework (LangGraph / AutoGen / CrewAI) antes de entregar el Módulo 1 (C1.1 exige nombrarlo en el README) y como tarde en el Módulo 2 (C2.3); ver DEC-047.
 - Lab 1.3: el dispatch de tools del Coder debe devolver un error si los argumentos del LLM no son un objeto JSON. El `dispatch_tool` de `agents/tools_demo.py` hace `handler(**args)` y lanza `TypeError` con `[]` o `"texto"`; se deja como lo da el lab.
+- C1.5 y C1.6 (salida Pydantic con `code`, `explanation`, `plan`, `result` y smoke test que los compruebe) no los cubre el Lab 1.3; pendientes antes de entregar el Módulo 1.
 
 Actualiza esta sección al terminar cada TODO y al empezar o cerrar cada lab.
 
