@@ -870,3 +870,25 @@ A decision can mix bases; then each part states its own.
   the test name); keep the hints as a `Note` (describes things the code does
   not do).
 - Code: all `*.py` files; rule in `CLAUDE.md`
+
+### DEC-047 Lab 1.3 ReACT loop in plain Python; framework chosen later
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Provisional (C1.4 needs no framework; C1.1 needs one named in the
+  README; C2.3 needs PM and Coder in one orchestration graph)
+- Context: the Lab 1.3 handout builds the ReACT loop in plain Python with a
+  text protocol (`Thought:` / `Action:` / `Action Input:` / `FINAL ANSWER:`).
+  The course guide asks to choose LangGraph, AutoGen or CrewAI in Module 1
+  ("you may switch in later modules"), and CLAUDE.md planned to choose it
+  before the loop.
+- Decision: implement the Lab 1.3 loop as the handout does, without a
+  framework; choose the framework later.
+- Why: least friction now, since the lab's code and tests are written for
+  plain Python; C1.4 only requires a bounded action/observation loop.
+- Alternatives: choose the framework now and build the loop with it (README
+  truthful from Module 1 and Module 2 starts from the same graph, but the
+  lab's code and tests would have to be adapted).
+- Revisit when: before the Module 1 submission — C1.1 requires the README to
+  name the chosen framework and it must not contradict the code — and at the
+  latest in Module 2, when C2.3 puts PM and Coder in one graph (a change of
+  framework is justified in the README, C2.6).
+- Code: pending (Lab 1.3)
