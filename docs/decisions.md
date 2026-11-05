@@ -1005,3 +1005,116 @@ A decision can mix bases; then each part states its own.
 - Revisit when: how the lab's pieces are organised inside `coder_agent.py`
   is decided in the technical phase.
 - Code: pending (Lab 1.3) — `agents/coder_agent.py`, `agents/tools_demo.py`
+
+### DEC-052 The LLM declares the deliverable; the system reads its code from disk
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Required (C1.5: code matches the artifact written by the tools;
+  C4.6: LLM outputs validated before use); how — Preferred
+- Context: C1.5 requires an output with `code`, `explanation`, `plan` and
+  `result`; the lab's `AgentResult` has none of them and returns the
+  LLM's free-text final answer.
+- Decision: the final answer states the main file of the deliverable and
+  an explanation; it is validated with Pydantic before use. `code` is the
+  content of that file read from disk after the loop; `explanation` comes
+  from the final answer. A declared file that does not exist is never a
+  success.
+- Why: `code` matches the written artifact by construction; the LLM's
+  claim is checked, not trusted.
+- Alternatives: every file written in the task (mixes the deliverable with
+  test scripts; `code` stops being a text); the code the LLM writes in its
+  final answer (may differ from the file: C1.5 at risk).
+- Code: pending (Lab 1.3)
+
+### DEC-053 The plan is the agent's first Thought, kept apart from the action record
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Required (C1.4 evidence: "concise plan and action/observation
+  record"; C1.5 `plan` field); how — Preferred
+- Context: the output needs a `plan`; ReACT decides each step from the
+  last observation, so the plan must not turn the loop into
+  Plan-and-Execute.
+- Decision: the agent's first response states a short step plan, which is
+  kept as `plan`. The record of actions and observations (tool, arguments,
+  result) is kept separately. The plan guides; it does not bind: later
+  steps are chosen from the observations (C1.4).
+- Why: gives both pieces of C1.4 evidence and a plan that describes the
+  task (C1.5) while staying ReACT.
+- Alternatives: rebuild the plan from the actions taken (a record, not a
+  plan; duplicates the action record); ask for the plan in the final
+  answer (written after acting, weaker C1.4 evidence).
+- Revisit when: the initial plan often differs from what the agent ends up
+  doing (e.g. keep the last stated plan instead).
+- Code: pending (Lab 1.3)
+
+### DEC-054 The smoke test runs a real task and checks the generated code works
+- Date: 2026-11-05 · Area: Tests (Lab 1.3) · Status: accepted
+- Basis: Required (C1.6: smoke test asserting the structured-output fields;
+  an observed run produces working code)
+- Context: the lab's end-to-end test only checks that a file exists and
+  contains `def word_frequency`, not the C1.5 fields; its `--run-llm` flag
+  does not work.
+- Decision: a smoke test with the real LLM gives the Coder a short coding
+  task, asserts the four fields and a success status, and imports and runs
+  the generated code to check its behavior. Its exact content is proposed
+  and approved before writing it.
+- Why: covers both halves of C1.6 and follows the project rule that tests
+  check behavior, not fixed objects or text.
+- Alternatives: only check that the fields exist and are not empty (the
+  "working code" half rests on a manual run).
+- Code: pending (Lab 1.3)
+
+### DEC-055 `result` comes from a real execution; the output always has a status
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Required (C1.5: result reflects actual execution, no success
+  claimed without it; C1.4: the iteration limit is probed); the statuses —
+  Preferred
+- Context: the agent can finish without running its code, change files
+  after the last run, declare a missing file, finish with a failing run,
+  or hit the 10-iteration limit. The lab only has `stopped_early`.
+- Decision:
+  - `result` is the output of the last `exec_python` call, valid only if
+    no file was written after it.
+  - The output is always the same Pydantic model, with whatever fields are
+    known, and a status:
+    - `success`: FINAL ANSWER, the main file exists, and the last valid
+      execution ended without error.
+    - `failed_execution`: FINAL ANSWER, but the last valid execution ended
+      with an error.
+    - `unverified`: FINAL ANSWER without a valid execution (never ran,
+      files changed afterwards, or the declared file does not exist).
+    - `max_iterations`: 10 iterations without FINAL ANSWER.
+  - Reaching the limit or failing never raises; it returns the model.
+- Why: success is only reported when the system has checked it; the
+  assessor's limit probe ends cleanly; later agents (QA, C3.3) can tell
+  success from failure without reading text.
+- Alternatives: the system runs the main file itself after the loop (a
+  file that only defines functions prints nothing, and it runs something
+  the agent did not ask for); trust the LLM's report of the result (C1.5
+  Not Yet); raise on the limit (the assessor probe ends in a crash).
+- Code: pending (Lab 1.3)
+
+### DEC-056 A final answer without code has its own status, `answered`
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Required (C1.2: the official Lab 1.1 recall test sends
+  conversational messages through `chat()` and must keep passing; C1.5: no
+  success without a real execution); the status name — Preferred
+- Context: with DEC-048 every message runs the ReACT loop, but some
+  messages are questions, not coding tasks ("What is my name and what am I
+  building?"). Under DEC-052/DEC-055 a final answer with no main file
+  would be `unverified`, as if a coding task had failed.
+- Decision: the final answer may omit the main file. Then the status is
+  `answered`, `code` and `result` are empty and `chat()` returns the
+  explanation text. The status describes the evidence behind the answer,
+  not its quality: `success` always means a written file whose last run
+  succeeded; `answered` means text only, checked by nothing. Whether an
+  answer meets the request is QA's job (Module 3, C3.1).
+- Why: the agent decides inside the ReACT loop whether code is needed; the
+  recall test passes unchanged; a coding task "solved" in text without a
+  file never shows as `success`, so the orchestrator (Module 2) and QA
+  (C3.3) can detect it from the status alone.
+- Alternatives: every message is a coding task and questions end as
+  `unverified` (misleading status); a single `success` with an empty
+  `main_file` meaning "no code" (a success without execution, C1.5 at
+  risk; consumers that read only the status are misled); classify the
+  message before the loop and answer questions without it (part of the
+  messages skip ReACT, C1.4 at risk; an extra LLM call, C4.4).
+- Code: pending (Lab 1.3)

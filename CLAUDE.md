@@ -95,6 +95,7 @@ Progreso:
 - ✅ Lab 1.2 cerrado: `python -m agents.tools_demo` con key real escribe `workspace/word_freq.py`, lo ejecuta y termina con DONE (C1.3).
 - ✅ Lab 1.3: handout en `docs/labs/lab_1_3_react_agent.md`. El código del lab (incluido `agent_solution.py`) está en `lab_1_3_src/`, que **nunca se commitea**.
 - ✅ Lab 1.3, producto cerrado: sin framework por ahora (DEC-047); sesión con un bucle ReACT por mensaje y una tarea con sus iteraciones = un turno (DEC-048); se guarda también "tarea + respuesta final" (DEC-049, sustituye a DEC-008); consulta antes de cada iteración por la tarea (DEC-050, mejora IMP-006); un único Coder en `agents/coder_agent.py`, `chat()` como entrada y `tools_demo.py` se elimina (DEC-051).
+- ✅ C1.5/C1.6, producto cerrado dentro del Lab 1.3 (no hay más labs en el Módulo 1): el LLM declara el archivo principal y `code` se lee del disco (DEC-052); el plan es el primer Thought (DEC-053); smoke test con LLM real que ejecuta el código generado (DEC-054); `result` de la última ejecución válida y estados `success`/`failed_execution`/`unverified`/`max_iterations` (DEC-055) y `answered` para respuestas sin código (DEC-056).
 - ⏭️ **Siguiente:** fase técnica del Lab 1.3: inventario pieza a pieza de qué se toma del lab y qué se conserva, y cómo se organiza dentro de `coder_agent.py`. `agent_solution.py` solo se abre al terminar, para comparar (decisión del usuario).
 Pendientes fuera del lab:
 - Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032). Falta documentar el setup en el README.
@@ -106,7 +107,6 @@ Pendientes fuera del lab:
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
 - Elegir framework (LangGraph / AutoGen / CrewAI) antes de entregar el Módulo 1 (C1.1 exige nombrarlo en el README) y como tarde en el Módulo 2 (C2.3); ver DEC-047.
 - Lab 1.3: el dispatch de tools del Coder debe devolver un error si los argumentos del LLM no son un objeto JSON. El `dispatch_tool` de `agents/tools_demo.py` hace `handler(**args)` y lanza `TypeError` con `[]` o `"texto"`; se deja como lo da el lab.
-- C1.5 y C1.6 (salida Pydantic con `code`, `explanation`, `plan`, `result` y smoke test que los compruebe) no los cubre el Lab 1.3; pendientes antes de entregar el Módulo 1.
 
 Actualiza esta sección al terminar cada TODO y al empezar o cerrar cada lab.
 
