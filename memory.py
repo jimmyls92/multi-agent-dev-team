@@ -1,8 +1,10 @@
 """Two-tier memory for the Coder Agent (Lab 1.1, C1.2).
 
-Short-term: SlidingWindowBuffer keeps the last N conversation turns.
+Short-term: SlidingWindowBuffer keeps the last N conversation turns; in the
+ReACT loop a turn is one task with all its iterations (DEC-048, DEC-057).
 Long-term: a Chroma semantic store, queried before every LLM call, whose
-retrieved memories are injected into the system prompt.
+retrieved memories are injected into the system prompt. It holds the user's
+tasks and, for each finished task, one outcome memory (DEC-049, DEC-059).
 
 The LLM client lives in llm_client.py (DEC-034); memory is shared
 infrastructure, not a tool (DEC-035). Every setting below can be overridden
@@ -122,6 +124,35 @@ class SlidingWindowBuffer:
         else:
             raise ValueError("A conversation turn must start with a 'user' message")
 
+    def add_turn(self, messages: list[dict]) -> None:
+        """Appends a whole turn at once (DEC-057).
+
+        The ReACT loop collects a task and all its iterations, whose
+        observations also have the "user" role, and adds them here when the
+        task ends; add() would open a new turn on every observation.
+
+        Args:
+            messages: The turn's {"role": ..., "content": ...} dicts, oldest
+                first. Copies are stored.
+
+        Raises:
+            ValueError: If messages is empty or does not start with a "user"
+                message.
+        """
+        if not messages or messages[0].get("role") != "user":
+            raise ValueError("A conversation turn must start with a 'user' message")
+        self._turns.append([dict(message) for message in messages])
+
+    def get_turn_starts(self) -> list[str]:
+        """Returns the opening user message of each turn in the window.
+
+        In the ReACT loop this is the task of each turn (DEC-048).
+
+        Returns:
+            The content of each turn's first message, oldest first.
+        """
+        return [turn[0]["content"] for turn in self._turns]
+
     def get_messages(self) -> list[dict]:
         """Returns the messages currently in the window.
 
@@ -159,10 +190,52 @@ def _memory_id(text: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def outcome_memory_id(task: str) -> str:
+    """Returns the id of a task's outcome memory (DEC-058).
+
+    Derived from the task, so repeating a task updates its outcome memory
+    and the tasks in the window give the outcome ids to exclude.
+
+    Args:
+        task: Task text as sent by the user.
+
+    Returns:
+        "outcome-" followed by the task's memory id.
+    """
+    return f"outcome-{_memory_id(task)}"
+
+
+def _upsert_memory(memory_id: str, text: str, role: str, collection) -> None:
+    """Writes one memory, keeping its creation date if it exists (DEC-013).
+
+    Args:
+        memory_id: Id of the memory.
+        text: Memory text, already checked to be non-empty.
+        role: Value of the "role" metadata.
+        collection: Chroma collection to write to.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    existing = collection.get(ids=[memory_id], include=["metadatas"])
+    previous = (existing["metadatas"][0] or {}) if existing["ids"] else {}
+
+    collection.upsert(
+        ids=[memory_id],
+        documents=[text.strip()],
+        metadatas=[{
+            "role": role,
+            "run_id": RUN_ID,
+            "created_at": previous.get("created_at", now),
+            "last_seen_at": now,
+        }],
+    )
+    logger.debug("Stored memory %s (run %s)", memory_id[:16], RUN_ID)
+
+
 def store_memory(text: str, collection=None, role: str = "user") -> str:
     """Embeds and stores a message in Chroma.
 
-    Only user messages are stored today (DEC-008), hence the default role.
+    Only user messages (the tasks) are stored as messages (DEC-008, DEC-049),
+    hence the default role.
     Exact repeats update the existing memory instead of adding a new one, and
     keep its original creation date (DEC-011..DEC-013).
 
@@ -183,23 +256,50 @@ def store_memory(text: str, collection=None, role: str = "user") -> str:
         collection = get_collection()
 
     memory_id = _memory_id(text)
-    now = datetime.now(timezone.utc).isoformat()
+    _upsert_memory(memory_id, text, role, collection)
+    return memory_id
 
-    # Keep the original creation date when the memory already exists (DEC-013).
-    existing = collection.get(ids=[memory_id], include=["metadatas"])
-    previous = (existing["metadatas"][0] or {}) if existing["ids"] else {}
 
-    collection.upsert(
-        ids=[memory_id],
-        documents=[text.strip()],
-        metadatas=[{
-            "role": role,
-            "run_id": RUN_ID,
-            "created_at": previous.get("created_at", now),
-            "last_seen_at": now,
-        }],
+def store_outcome(
+    task: str,
+    status: str,
+    main_file: str | None,
+    explanation: str,
+    collection=None,
+) -> str:
+    """Stores the outcome of a task that ended with a final answer (DEC-049).
+
+    The text is "Task / Status / Main file / Explanation", without the code
+    (DEC-059). Its id comes from the task, so running the same task again
+    replaces the previous outcome (DEC-058).
+
+    Args:
+        task: Task text as sent by the user.
+        status: Final status of the task, for example "success".
+        main_file: Main file declared by the agent, or None.
+        explanation: Final explanation of the agent.
+        collection: Chroma collection to use. Defaults to the shared one.
+
+    Returns:
+        The id of the stored memory.
+
+    Raises:
+        ValueError: If task or explanation is empty or only whitespace
+            (DEC-010).
+    """
+    if not task.strip() or not explanation.strip():
+        raise ValueError("Cannot store an outcome without task or explanation")
+    if collection is None:
+        collection = get_collection()
+
+    text = (
+        f"Task: {task.strip()}\n"
+        f"Status: {status}\n"
+        f"Main file: {main_file or 'none'}\n"
+        f"Explanation: {explanation.strip()}"
     )
-    logger.debug("Stored memory %s (run %s)", memory_id[:8], RUN_ID)
+    memory_id = outcome_memory_id(task)
+    _upsert_memory(memory_id, text, "outcome", collection)
     return memory_id
 
 
@@ -211,8 +311,8 @@ MEMORY_HEADING = "Relevant context from past conversations (may not be relevant)
 def _retrieve_memories(user_input: str, window: SlidingWindowBuffer, collection) -> list[dict]:
     """Returns the long-term memories relevant to the user input.
 
-    Leaves out the input itself and the memories already in the window
-    (DEC-016, DEC-021, DEC-031).
+    Leaves out the input itself, the tasks already in the window and their
+    outcome memories (DEC-016, DEC-021, DEC-031, DEC-049).
 
     Args:
         user_input: Current user message, used as the query.
@@ -233,13 +333,15 @@ def _retrieve_memories(user_input: str, window: SlidingWindowBuffer, collection)
     if stored == 0:
         return []  # first run: nothing to retrieve yet
 
-    # Only user messages are stored (DEC-008), so only their ids can come back.
-    # The current input is already stored (DEC-019) but not in the window yet (DEC-031).
-    excluded = {
-        _memory_id(message["content"])
-        for message in window.get_messages()
-        if message["role"] == "user"
-    }
+    # Only tasks and their outcomes are stored (DEC-008, DEC-049). A task in
+    # the window brings its own outcome id (DEC-058); observations are never
+    # stored, so only the first message of each turn matters.
+    # The current input is already stored (DEC-019) but not in the window yet
+    # (DEC-031); the outcome of an earlier run of the same task may come back.
+    excluded = set()
+    for task in window.get_turn_starts():
+        excluded.add(_memory_id(task))
+        excluded.add(outcome_memory_id(task))
     excluded.add(_memory_id(user_input))
 
     # Ask for extra results to make up for the ones we drop (DEC-021).
@@ -258,17 +360,30 @@ def _retrieve_memories(user_input: str, window: SlidingWindowBuffer, collection)
     return memories[:MEMORY_TOP_K]
 
 
-def build_context(user_input: str, window: SlidingWindowBuffer, collection=None) -> list[dict]:
+def build_context(
+    user_input: str,
+    window: SlidingWindowBuffer,
+    collection=None,
+    system_prompt: str = SYSTEM_PROMPT,
+    turn_messages: list[dict] | None = None,
+) -> list[dict]:
     """Assembles the message list sent to the LLM.
 
-    Order: system prompt (with retrieved memories) -> sliding window ->
-    current user_input. The window does not hold user_input yet; chat() adds it
-    only after a successful reply (DEC-031).
+    Called before every LLM call, also on every ReACT iteration, with the task
+    as user_input (DEC-050, DEC-058). Order: system prompt (with retrieved
+    memories) -> sliding window -> current user_input -> messages of the turn
+    in progress. The window does not hold the current turn yet; it is added
+    only when the turn ends well (DEC-031, DEC-057).
 
     Args:
-        user_input: Current user message.
+        user_input: Current user message (the task in the ReACT loop); also
+            the retrieval query.
         window: Short-term window of the conversation.
         collection: Chroma collection to query. Defaults to the shared one.
+        system_prompt: Base system message, before the memories. Defaults to
+            the Lab 1.1 conversational prompt.
+        turn_messages: Messages of the turn in progress after user_input
+            (the loop's responses and observations). Defaults to none.
 
     Returns:
         The messages for the LLM call, as {"role": ..., "content": ...} dicts.
@@ -278,7 +393,7 @@ def build_context(user_input: str, window: SlidingWindowBuffer, collection=None)
     memories = _retrieve_memories(user_input, window, collection)
 
     # DEC-015, DEC-022: memories go in the system message; no heading when empty.
-    system_content = SYSTEM_PROMPT
+    system_content = system_prompt
     if memories:
         lines = "\n".join(f"- {memory['text']}" for memory in memories)
         system_content += f"\n\n{MEMORY_HEADING}\n{lines}"
@@ -288,6 +403,7 @@ def build_context(user_input: str, window: SlidingWindowBuffer, collection=None)
         {"role": "system", "content": system_content},
         *window_messages,
         {"role": "user", "content": user_input},
+        *(dict(message) for message in turn_messages or []),
     ]
 
     # DEC-025: C1.2 evidence — one INFO line per call; full LLM input at DEBUG.

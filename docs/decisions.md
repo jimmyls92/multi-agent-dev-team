@@ -1141,7 +1141,8 @@ A decision can mix bases; then each part states its own.
   turn); `add()` does not open a turn for text starting with
   "OBSERVATION:" (depends on message text, breaks silently if the prefix
   changes).
-- Code: pending (Lab 1.3)
+- Code: `memory.py` — `SlidingWindowBuffer.add_turn`; the loop that uses it
+  is pending (Lab 1.3)
 
 ### DEC-058 `build_context()` is reused for every loop iteration
 - Date: 2026-11-05 · Area: Memory / Coder Agent (Lab 1.3) · Status: accepted
@@ -1162,7 +1163,8 @@ A decision can mix bases; then each part states its own.
 - Alternatives: build the context once per task and reuse it (C1.2 Not
   Yet: no retrieval before every call); a new function in the Coder
   (duplicates exclusion and logging, the copies drift).
-- Code: pending (Lab 1.3)
+- Code: `memory.py` — `build_context`, `outcome_memory_id`,
+  `SlidingWindowBuffer.get_turn_starts`, `_retrieve_memories`
 
 ### DEC-059 The outcome memory holds task, status, main file and explanation
 - Date: 2026-11-05 · Area: Memory (Lab 1.3) · Status: accepted
@@ -1177,7 +1179,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: include the code (all-MiniLM-L6-v2 only embeds about the
   first 256 tokens, so the code would dominate and retrieval by task
   would degrade).
-- Code: pending (Lab 1.3)
+- Code: `memory.py` — `store_outcome`
 
 ### DEC-060 Text ReACT format, parsed into Pydantic steps
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
