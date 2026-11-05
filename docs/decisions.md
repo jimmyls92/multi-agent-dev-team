@@ -1309,3 +1309,22 @@ A decision can mix bases; then each part states its own.
 - Revisit when: Module 2 defines the shared state (C2.2); the model moves
   there.
 - Code: pending (Lab 1.3)
+
+### DEC-066 The smoke test is a pytest test that runs only with `--run-llm`
+- Date: 2026-11-05 · Area: Tests (Lab 1.3) · Status: accepted
+- Basis: Required (C1.6: automated smoke test); the opt-in flag —
+  Preferred
+- Context: the smoke test (DEC-054) calls the real LLM: it costs tokens and
+  needs the key. The lab's `--run-llm` flag is defined inside the test
+  file, where pytest does not register it. For Module 1 the smoke test is
+  the only new test (the mocked Coder tests are deferred, at the latest to
+  C4.7).
+- Decision: `tests/test_smoke.py` is a pytest test marked as an LLM test.
+  `tests/conftest.py` registers `--run-llm`; without it, LLM tests are
+  skipped. Run with `pytest tests/test_smoke.py --run-llm`.
+- Why: `pytest tests/` stays free and fast; the smoke test gives a clear
+  PASS/FAIL as C1.6 evidence.
+- Alternatives: skip only when there is no key (with the key in `.env` it
+  would run, and cost, on every `pytest`); a script like
+  `tests/test_memory.py` (weaker evidence of an "automated smoke test").
+- Code: pending (Lab 1.3)
