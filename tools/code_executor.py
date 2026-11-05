@@ -1,21 +1,14 @@
-"""
-Lab 1.2 — Tool 2: Sandboxed Code Executor
-==========================================
+"""Sandboxed Python executor for the agents (Lab 1.2, C1.3).
 
-Implement one function: exec_python.
+exec_python runs a script in a child process, never with exec() or eval(),
+so an infinite loop is killed by the timeout, a crash in the script does not
+reach the agent, and the agent always gets a useful string back (DEC-038).
 
-The executor must run an arbitrary Python script in a child process —
-NOT via exec() or eval() — so that:
-  - Infinite loops are killed after the timeout.
-  - Crashes in the script do not crash the agent process.
-  - The agent always receives useful output regardless of outcome.
-
-Run the tests to verify your implementation before moving to agent.py:
-  pytest tests/test_code_executor.py -v
-
-Success criterion (from the lab spec):
-  The agent writes a Python file, executes it, reads the output, and
-  reports the result — all in one agentic loop.
+Attributes:
+    MAX_OUTPUT_CHARS: Characters of output returned to the agent.
+    MAX_TIMEOUT: Hard cap in seconds for any execution (lab limit).
+    EXEC_TIMEOUT: Default timeout in seconds, from the EXEC_TIMEOUT
+        environment variable (DEC-037, DEC-045).
 """
 
 import os
@@ -43,6 +36,13 @@ _ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "TMPDIR")
 
 
 def _script_env() -> dict[str, str]:
+    """Builds the script's environment from the allowlist.
+
+    Returns:
+        The allowed variables of the agent's environment plus
+        PYTHONIOENCODING=utf-8, so no credentials reach the script (DEC-039,
+        DEC-043).
+    """
     env = {
         name: value
         for name, value in os.environ.items()
@@ -53,25 +53,58 @@ def _script_env() -> dict[str, str]:
 
 
 def _keep_start(text: str) -> str:
-    # DEC-038: a successful output keeps its beginning.
+    """Truncates a successful output, keeping its beginning (DEC-038).
+
+    Args:
+        text: Output to truncate.
+
+    Returns:
+        text unchanged if it fits in MAX_OUTPUT_CHARS; otherwise its first
+        MAX_OUTPUT_CHARS characters followed by "[output truncated]".
+    """
     if len(text) > MAX_OUTPUT_CHARS:
         return text[:MAX_OUTPUT_CHARS] + "\n[output truncated]"
     return text
 
 
 def _keep_end(text: str) -> str:
-    # DEC-038: an error output keeps its end, where the traceback's error is.
+    """Truncates an error output, keeping its end (DEC-038).
+
+    The end is where a traceback shows the actual error.
+
+    Args:
+        text: Output to truncate.
+
+    Returns:
+        text unchanged if it fits in MAX_OUTPUT_CHARS; otherwise
+        "[output truncated]" followed by its last MAX_OUTPUT_CHARS characters.
+    """
     if len(text) > MAX_OUTPUT_CHARS:
         return "[output truncated]\n" + text[-MAX_OUTPUT_CHARS:]
     return text
 
 
 def _drain(stream, chunks: list[str]) -> None:
-    # Reads in a thread so a script printing a lot never blocks on a full pipe.
+    """Reads a pipe until it closes and stores the text.
+
+    Runs in a thread so a script that prints a lot never blocks on a full pipe
+    while exec_python waits for it.
+
+    Args:
+        stream: The script's stdout or stderr pipe.
+        chunks: List that receives the text read.
+    """
     chunks.append(stream.read())
 
 
 def _kill_group(pid: int) -> None:
+    """Kills the script's whole process group (DEC-044).
+
+    Does nothing if no process is left in the group.
+
+    Args:
+        pid: Process id of the script, which leads its own group.
+    """
     try:
         os.killpg(pid, signal.SIGKILL)
     except ProcessLookupError:
@@ -79,6 +112,16 @@ def _kill_group(pid: int) -> None:
 
 
 def _combine(stdout: str, stderr: str) -> str:
+    """Joins stdout and stderr under labels.
+
+    Args:
+        stdout: Text the script wrote to stdout.
+        stderr: Text the script wrote to stderr.
+
+    Returns:
+        A "[stdout]" and a "[stderr]" section for each non-empty stream, or ""
+        when both are empty.
+    """
     parts = []
     if stdout:
         parts.append(f"[stdout]\n{stdout}")
@@ -88,54 +131,30 @@ def _combine(stdout: str, stderr: str) -> str:
 
 
 def exec_python(path: str, timeout: int | None = None) -> str:
-    """
-    Execute a Python script in a sandboxed subprocess.
+    """Runs a Python script in a child process and reports the outcome.
 
-    Parameters
-    ----------
-    path : str
-        Path to the .py file to execute. Must exist before calling this.
-    timeout : int, optional
-        Maximum seconds to allow. Values above MAX_TIMEOUT (30) are
-        clamped silently. Defaults to EXEC_TIMEOUT (10 if unset).
+    The script runs with the agent's interpreter, its own directory as working
+    directory (DEC-040), stdin closed and an environment without credentials
+    (DEC-039, DEC-043). exec_python waits for the script itself; when it exits
+    or the timeout expires, its whole process group is killed (DEC-044).
 
-    Returns
-    -------
-    str
-        Success  : stdout, truncated to MAX_OUTPUT_CHARS with a
-                   "[output truncated]" suffix if it was cut.
-        Timeout  : a message naming the script and stating it was killed.
-        Non-zero : stderr and the return code, both in the returned string.
-        Any other error : a descriptive string — do NOT raise.
+    Args:
+        path: Path to the .py file to execute.
+        timeout: Maximum seconds to allow. Defaults to EXEC_TIMEOUT; values
+            above MAX_TIMEOUT are clamped to it (DEC-037).
 
-    Hints
-    -----
-    Clamp the timeout first:
-        effective_timeout = min(timeout, MAX_TIMEOUT)
+    Returns:
+        A non-empty string for the agent (DEC-038):
 
-    Use subprocess.run with these arguments:
-        [sys.executable, path]   ← same Python env as the agent
-        capture_output=True      ← captures stdout and stderr separately
-        text=True                ← returns str instead of bytes
-        timeout=effective_timeout
-
-    Catch subprocess.TimeoutExpired to handle infinite loops.
-    The exception exposes a .timeout attribute you can include in the
-    message.
-
-    Truncate long output:
-        if len(output) > MAX_OUTPUT_CHARS:
-            output = output[:MAX_OUTPUT_CHARS] + "\\n[output truncated]"
-
-    Wrap the ENTIRE body in try/except Exception as e as a last-resort
-    safety net — this function must never propagate an exception to the
-    agent loop.
-
-    Example return values
-    ---------------------
-    Success : "hello from subprocess\\n"
-    Timeout : "Error: script 'loop.py' exceeded timeout of 2s and was killed."
-    Crash   : "Error (exit code 1):\\nTraceback (most recent call last):\\n  ..."
+        - Success: stdout, plus labeled stderr when it is not empty, or a
+          message saying the script ran with no output. Long output keeps its
+          beginning.
+        - Non-zero exit: the exit code, stderr and any stdout printed before
+          the failure. Long output keeps its end.
+        - Timeout: a message naming the script and saying it was killed, for
+          example "Error: script 'loop.py' exceeded timeout of 2s and was
+          killed.", followed by any output produced until then.
+        - Any other error: a descriptive error string; nothing is raised.
     """
     abs_path = os.path.abspath(path)
     try:

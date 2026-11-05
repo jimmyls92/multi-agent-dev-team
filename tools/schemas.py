@@ -1,11 +1,10 @@
-"""
-Tool schemas for Lab 1.2.
+"""JSON schemas of the tools registered with the LLM (Lab 1.2).
 
-These are the JSON schemas registered with the LLM. Your handler
-functions in tools/file_io.py and tools/code_executor.py must accept
-exactly these parameter names and types.
+The handlers in tools/file_io.py and tools/code_executor.py accept exactly
+these parameter names and types; a mismatch fails silently when the LLM
+calls a tool.
 
-Do NOT modify this file.
+The schemas come from the lab and must not be modified.
 """
 
 READ_FILE_SCHEMA = {

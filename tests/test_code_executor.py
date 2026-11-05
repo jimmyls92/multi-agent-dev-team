@@ -1,11 +1,12 @@
-"""
-Tests for tools/code_executor.py
+"""Tests for tools/code_executor.py (Lab 1.2).
+
+These tests come from the lab and define the contract of exec_python.
 
 Run with:
     pytest tests/test_code_executor.py -v
 
-The timeout test needs a few seconds to verify the kill signal.
-Run with --timeout=60 in slow Codespaces environments if needed.
+The timeout test needs a few seconds to verify the kill signal. Run with
+--timeout=60 in slow environments if needed.
 """
 
 import pytest
@@ -15,8 +16,25 @@ from tools.code_executor import exec_python
 
 @pytest.fixture
 def py_file(tmp_path):
-    """Write a .py file into tmp_path and return its absolute path."""
+    """Provides a helper that writes a .py file into tmp_path.
+
+    Args:
+        tmp_path: Pytest's per-test temporary directory.
+
+    Returns:
+        A function that takes the script content and an optional file name and
+        returns the absolute path of the written file.
+    """
     def _write(content: str, name: str = "script.py") -> str:
+        """Writes a script into tmp_path.
+
+        Args:
+            content: Python source to write.
+            name: File name of the script.
+
+        Returns:
+            Absolute path of the written file.
+        """
         path = str(tmp_path / name)
         write_file(path, content)
         return path
@@ -26,6 +44,7 @@ def py_file(tmp_path):
 # ── happy path ────────────────────────────────────────────────────────────────
 
 class TestExecPythonSuccess:
+    """Tests for successful runs: stdout capture and the return type."""
 
     def test_captures_stdout(self, py_file):
         path = py_file("print('hello from subprocess')\n")
@@ -47,6 +66,7 @@ class TestExecPythonSuccess:
 # ── error handling ────────────────────────────────────────────────────────────
 
 class TestExecPythonErrors:
+    """Tests for failing scripts and invalid paths: errors come as strings."""
 
     def test_captures_stderr_on_exception(self, py_file):
         path = py_file("raise ValueError('intentional crash')\n")
@@ -82,6 +102,7 @@ class TestExecPythonErrors:
 # ── timeout and sandboxing ────────────────────────────────────────────────────
 
 class TestExecPythonTimeout:
+    """Tests for the timeout, its cap and output truncation."""
 
     @pytest.mark.timeout(15)
     def test_kills_infinite_loop(self, py_file):
@@ -113,9 +134,9 @@ class TestExecPythonTimeout:
 # ── integration: write → exec → read ─────────────────────────────────────────
 
 class TestWriteExecReadRoundtrip:
-    """
-    Mirrors the lab success criterion end-to-end without the LLM:
-    write a script, execute it, verify a side-effect file was produced.
+    """Tests the lab's success criterion end to end, without the LLM.
+
+    Writes a script, executes it and checks the side-effect file it produced.
     """
 
     def test_full_roundtrip(self, tmp_path):

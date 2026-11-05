@@ -1,12 +1,10 @@
-"""
-Tests for tools/file_io.py
+"""Tests for tools/file_io.py (Lab 1.2).
+
+These tests come from the lab and define the contract of read_file and
+write_file.
 
 Run with:
     pytest tests/test_file_io.py -v
-
-All tests must pass before running agent.py.
-The tests define the exact contract your implementation must satisfy —
-reading them carefully is part of the exercise.
 """
 
 import os
@@ -17,6 +15,7 @@ from tools.file_io import read_file, write_file
 # ── write_file ────────────────────────────────────────────────────────────────
 
 class TestWriteFile:
+    """Tests for write_file: file creation, return message and failures."""
 
     def test_creates_file(self, tmp_path):
         path = str(tmp_path / "hello.py")
@@ -66,6 +65,7 @@ class TestWriteFile:
 # ── read_file ─────────────────────────────────────────────────────────────────
 
 class TestReadFile:
+    """Tests for read_file: contents, missing files and the roundtrip."""
 
     def test_returns_file_contents(self, tmp_path):
         path = str(tmp_path / "sample.py")

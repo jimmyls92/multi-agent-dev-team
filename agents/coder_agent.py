@@ -1,7 +1,10 @@
-# agent.py
-# Lab 1.1 — Coder Agent with two-tier memory
-#
-# chat() runs one conversation turn; main() is the interactive loop.
+"""Coder Agent with two-tier memory (Lab 1.1, C1.2).
+
+chat() runs one conversation turn; main() is the interactive loop.
+
+Attributes:
+    MODEL: OpenRouter model id, from the LLM_MODEL environment variable.
+"""
 
 import logging
 import os
@@ -18,15 +21,25 @@ class EmptyReplyError(RuntimeError):
 
 
 def chat(user_input: str, window: SlidingWindowBuffer) -> str:
-    """
-    Single agent turn. Steps in order:
-      1. Call store_memory() to save the user input to long-term memory (DEC-019).
-      2. Call build_context() to assemble the full message list.
-      3. Call the LLM with the assembled messages.
-      4. Add the user turn and the assistant reply to the sliding window (DEC-031).
-      5. Return the reply string.
+    """Runs one agent turn and returns the reply.
 
-    Any failure propagates (DEC-027) and leaves the window untouched (DEC-028).
+    Steps, in order:
+      1. Stores the user input in long-term memory (DEC-019).
+      2. Assembles the full message list with build_context().
+      3. Calls the LLM with the assembled messages.
+      4. Adds the user turn and the reply to the window (DEC-031).
+
+    Args:
+        user_input: The user's message.
+        window: Short-term window of the conversation.
+
+    Returns:
+        The LLM's reply.
+
+    Raises:
+        EmptyReplyError: If the LLM returns an empty reply (DEC-029).
+        Exception: Any other failure propagates (DEC-027). On any failure the
+            window is left untouched (DEC-028).
     """
     store_memory(user_input)
     messages = build_context(user_input, window)
@@ -42,6 +55,10 @@ def chat(user_input: str, window: SlidingWindowBuffer) -> str:
 
 
 def main():
+    """Runs the interactive chat loop until the user types quit or exit.
+
+    A failed turn is reported and the conversation goes on (DEC-030).
+    """
     # DEC-023: the entry point configures logging; an invalid LOG_LEVEL fails here.
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
 

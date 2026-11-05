@@ -1,22 +1,15 @@
-"""
-Lab 1.2 — Tool 1: File I/O
-===========================
+"""File I/O tools for the agents (Lab 1.2, C1.3).
 
-Implement two functions: read_file and write_file.
+Provides read_file and write_file. Their parameter names match
+tools/schemas.py exactly, and they never raise: every failure comes back as
+a descriptive error string the agent can act on.
 
-Both functions must:
-  - Match the parameter names in schemas.py EXACTLY. The LLM sends those
-    exact names; a mismatch causes a silent failure that is hard to debug.
-  - NEVER raise an unhandled exception. Always return a string —
-    either a success message or a descriptive error message.
-  - Be usable as pure Python functions with no LLM dependency.
+These functions accept any path. The workspace confinement of the LLM's
+calls lives in tools/handlers.py (DEC-036, DEC-042).
 
-Run the tests to verify your implementation before moving to agent.py:
-  pytest tests/test_file_io.py -v
-
-Success criterion (from the lab spec):
-  The agent writes a Python file, executes it, reads the output, and
-  reports the result — all in one agentic loop.
+Attributes:
+    READ_MAX_CHARS: Maximum characters read_file returns, from the
+        READ_MAX_CHARS environment variable (DEC-041, DEC-045).
 """
 
 import os
@@ -32,32 +25,19 @@ if READ_MAX_CHARS < 1:
 
 
 def read_file(path: str) -> str:
-    """
-    Read the contents of a file at the given path.
+    """Reads a UTF-8 text file and returns its contents.
 
-    Parameters
-    ----------
-    path : str
-        Relative or absolute path to the file.
+    Content longer than READ_MAX_CHARS is cut and ends with a truncation mark
+    (DEC-041). Line endings are returned as stored.
 
-    Returns
-    -------
-    str
-        File contents on success.
-        A descriptive error string on failure — do NOT raise.
+    Args:
+        path: Relative or absolute path to the file. Relative paths resolve
+            against the current working directory.
 
-    Hints
-    -----
-    - Use os.path.abspath(path) to resolve relative paths before opening.
-    - Handle at minimum: FileNotFoundError, PermissionError, and a
-      generic Exception fallback.
-    - Always include the path in the error message so the agent can
-      diagnose what went wrong and try an alternative.
-
-    Example return values
-    ---------------------
-    Success : "def word_count(text):\n    ..."
-    Failure : "Error reading file '/src/utils.py': No such file or directory."
+    Returns:
+        The file contents, or an error string that includes the absolute path,
+        for example "Error reading file '/src/utils.py': No such file or
+        directory."
     """
     abs_path = os.path.abspath(path)
     try:
@@ -83,40 +63,19 @@ def read_file(path: str) -> str:
 
 
 def write_file(path: str, content: str) -> str:
-    """
-    Write content to a file at the given path.
+    """Writes text to a file, creating any missing parent directories.
 
-    Creates the file (and any missing parent directories) if needed.
-    Overwrites any existing file at that path.
+    Overwrites an existing file at that path. The content is written as given,
+    without newline translation.
 
-    Parameters
-    ----------
-    path : str
-        Relative or absolute path to the target file.
-    content : str
-        Full text content to write.
+    Args:
+        path: Relative or absolute path to the target file.
+        content: Full text content to write.
 
-    Returns
-    -------
-    str
-        A confirmation message that includes the number of lines written.
-        A descriptive error string on failure — do NOT raise.
-
-    Hints
-    -----
-    - Before opening the file, create parent directories with:
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-      The `if parent` guard is needed because os.path.dirname returns ''
-      for bare filenames like "script.py".
-    - Open in write mode ("w") with encoding="utf-8".
-    - Count lines AFTER writing: len(content.splitlines()).
-
-    Example return values
-    ---------------------
-    Success : "File written successfully. 12 lines."
-    Failure : "Error writing file '/read-only/file.py': Permission denied."
+    Returns:
+        A confirmation with the absolute path and the number of lines written,
+        for example "File '/repo/workspace/hello.py' written successfully.
+        3 lines.", or an error string that includes the path.
     """
     abs_path = os.path.abspath(path)
     try:

@@ -1,21 +1,23 @@
-"""
-Lab 1.2 — Agent Integration Demo
-==================================
+"""Agent integration demo of the Lab 1.2 tools (C1.3).
 
-Run this AFTER all tests pass, from the repo root:
-    pytest tests/test_file_io.py tests/test_code_executor.py -v
-    python -m agents.tools_demo
-
-This script wires your three tool handlers into an LLM function-calling
-loop and issues a single coding task. A successful run demonstrates the
-Lab 1.2 success criterion:
-
-    The agent writes a Python file, executes it, reads the output,
-    and reports the result — all in one agentic loop.
+Wires the three tool handlers into an LLM function-calling loop and issues
+a single coding task. A successful run shows the lab's success criterion:
+the agent writes a Python file, executes it, reads or reports the output
+and ends with a DONE summary, all in one agentic loop.
 
 Project adaptations (DEC-034): moved from the lab's root `agent.py`; the
-client comes from the shared `llm_client` (OpenRouter, DEC-002) and the model
-from LLM_MODEL.
+client comes from the shared `llm_client` (OpenRouter, DEC-002) and the
+model from LLM_MODEL.
+
+Typical usage example, from the repo root:
+
+    python -m agents.tools_demo
+
+Attributes:
+    MODEL: OpenRouter model id, from the LLM_MODEL environment variable.
+    TASK: Coding task the demo gives the agent.
+    SYSTEM_PROMPT: Instructions for the agent.
+    MAX_ITERATIONS: Maximum LLM calls before the loop stops.
 """
 
 import json
@@ -54,7 +56,20 @@ MAX_ITERATIONS = 10
 
 
 def dispatch_tool(name: str, arguments: str) -> str:
-    """Parse the LLM's tool call and invoke the matching handler."""
+    """Parses the LLM's tool call and invokes the matching handler.
+
+    Args:
+        name: Tool name chosen by the LLM.
+        arguments: Tool arguments as the JSON string sent by the LLM.
+
+    Returns:
+        The tool's result, or an error string if the tool is unknown or the
+        arguments are not valid JSON.
+
+    Raises:
+        TypeError: If the JSON arguments are not an object. The lab's demo
+            does not handle it; the Coder Agent's loop will (Lab 1.3).
+    """
     handler = TOOL_HANDLERS.get(name)
     if handler is None:
         return (
@@ -69,6 +84,14 @@ def dispatch_tool(name: str, arguments: str) -> str:
 
 
 def run_agent(task: str) -> None:
+    """Runs the tool-calling loop on a task and prints every step.
+
+    Stops when the LLM answers without tool calls or after MAX_ITERATIONS
+    calls.
+
+    Args:
+        task: Coding task for the agent.
+    """
     client = get_client()
 
     messages = [

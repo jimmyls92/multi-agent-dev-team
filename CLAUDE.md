@@ -64,6 +64,8 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 **Docker** (C4.8): Python **3.11**, `ENTRYPOINT`, servicios del agente y de Chroma con **healthcheck** y `env_file`. Un `docker compose up` desde cero debe ejecutar la tarea de principio a fin.
 
+**Docstrings** (DEC-046): todos los módulos, clases y funciones siguen la [guía de estilo de Google](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings): resumen de una línea en estilo descriptivo ("Returns...", no "Return...") y secciones `Args:`, `Returns:`, `Raises:` y `Attributes:` cuando apliquen. Se incluyen los helpers privados y las funciones anidadas. En los tests llevan docstring los módulos, las clases, los fixtures y los helpers; los métodos `test_*` con nombre descriptivo no lo necesitan, como dice la guía. Los docstrings describen lo que hace el código, no instrucciones del lab.
+
 **Documentación**: el README y `docs/` deben coincidir con lo que está implementado (diagramas incluidos). Deben documentar el framework elegido y por qué, las decisiones de implementación, el protocolo elegido y su justificación, cómo ejecutar los tests, dónde están las trazas y los informes de coste, y cómo distinguir un éxito de una salida con issues sin resolver.
 
 ## Decisiones del proyecto

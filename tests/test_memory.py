@@ -1,12 +1,23 @@
-# test_memory.py
-# Automated verification for Lab 1.1.
-# Run from the repo root: python -m tests.test_memory
+"""Automated verification of the two-tier memory (Lab 1.1, C1.2).
+
+Calls the real LLM: plants a fact, pushes it out of the sliding window and
+checks that the agent still recalls it from Chroma.
+
+Typical usage example, from the repo root:
+
+    python -m tests.test_memory
+"""
 
 import importlib
 import sys
 
 
 def run():
+    """Runs the memory recall check and exits with code 1 if it fails.
+
+    Raises:
+        SystemExit: If the agent does not recall the planted fact.
+    """
     import memory as mem
     importlib.reload(mem)
     import agents.coder_agent as ag

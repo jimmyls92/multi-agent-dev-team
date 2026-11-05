@@ -842,3 +842,31 @@ A decision can mix bases; then each part states its own.
   fixed limit).
 - Code: `tools/code_executor.py` — `EXEC_TIMEOUT`; `tools/file_io.py` — `READ_MAX_CHARS`;
   `tools/handlers.py` — `WORKSPACE_DIR`; `.env.example`
+
+### DEC-046 Docstrings follow the Google Python Style Guide
+- Date: 2026-11-03 · Area: General · Status: accepted
+- Basis: Preferred (user requirement)
+- Context: the code mixed NumPy-style docstrings from the lab, one-line
+  docstrings, comment headers and undocumented functions; the lab's
+  docstrings also carried implementation hints that no longer match the code
+  (e.g. use `subprocess.run`, replaced by `Popen` in DEC-044).
+- Decision:
+  - Every module, class and function, private and nested ones included, has
+    a Google-style docstring: descriptive one-line summary and `Args:`,
+    `Returns:`, `Raises:` and `Attributes:` sections when they apply.
+  - In tests, modules, classes, fixtures and helpers have docstrings;
+    descriptive `test_*` methods do not, as the guide allows.
+  - The lab's `Hints` sections and stale instructions ("Implement one
+    function", "Run this AFTER all tests pass") are removed; docstrings
+    describe what the code does. Placeholder files that are still empty
+    (`agents/pm_agent.py`, `agents/qa_agent.py`, `tests/__init__.py`) get
+    theirs when they get code.
+- Why: one consistent, widely known format that tools (IDEs, Sphinx
+  napoleon) understand; documentation that matches the implementation
+  (C5.3); test names already say what they check, so docstrings there would
+  only repeat them.
+- Alternatives: keep the lab's NumPy style (inconsistent with the project's
+  own code); document every `test_*` method (about 30 docstrings repeating
+  the test name); keep the hints as a `Note` (describes things the code does
+  not do).
+- Code: all `*.py` files; rule in `CLAUDE.md`
