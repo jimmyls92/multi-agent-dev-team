@@ -99,7 +99,7 @@ A decision can mix bases; then each part states its own.
 - Code: `memory.py` — `get_collection`
 
 ### DEC-004 Sliding window stores whole turns
-- Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted
+- Date: 2026-10-30 · Area: Memory (Lab 1.1) · Status: accepted (refined by DEC-057)
 - Basis: mixed
   - Keeping the last N turns, N configurable — Required (C1.2)
   - Turns grouped in a `deque(maxlen=N)`; a `"user"` message opens a turn —
@@ -515,7 +515,7 @@ A decision can mix bases; then each part states its own.
 - Code: implemented by DEC-031 — `agents/coder_agent.py` — `chat()`
 
 ### DEC-029 An empty LLM reply counts as a failed turn
-- Date: 2026-10-31 · Area: Coder Agent (Lab 1.1) · Status: accepted
+- Date: 2026-10-31 · Area: Coder Agent (Lab 1.1) · Status: accepted (refined by DEC-060)
 - Basis: Preferred
 - Context: the API can return `None` or blank content.
 - Decision: an empty or `None` reply is treated as a failure: same path as
@@ -1117,4 +1117,195 @@ A decision can mix bases; then each part states its own.
   risk; consumers that read only the status are misled); classify the
   message before the loop and answer questions without it (part of the
   messages skip ReACT, C1.4 at risk; an extra LLM call, C4.4).
+- Code: pending (Lab 1.3)
+
+### DEC-057 The ReACT loop adds each task to the window as one whole turn
+- Date: 2026-11-05 · Area: Memory / Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Required (C1.2: last N turns; DEC-048: a turn is one task plus all
+  its iterations); how — Preferred
+- Context: DEC-004 opens a turn on every "user" message and asked to be
+  revisited when the loop adds messages inside a turn. Observations are sent
+  as "user" messages: with chat APIs the only roles are system, user and
+  assistant ("tool" needs native function calling), and "assistant" would
+  tell the model it wrote the observation itself. With `add()`, every
+  observation would open a turn and push earlier tasks out of the window.
+- Decision: during a task the loop collects the turn's messages (task,
+  Thought/Action responses, observations) in a local list. When the loop
+  ends, `window.add_turn(messages)` appends them as one turn. `add()` stays
+  as it is.
+- Why: N turns are N tasks; a failure in the middle of a task (e.g. an API
+  error) leaves the window untouched (DEC-028); observations keep the
+  "user" role, so the model reads them as external.
+- Alternatives: observations as "assistant" messages (the model may take
+  them as its own text and invent observations; a failure leaves half a
+  turn); `add()` does not open a turn for text starting with
+  "OBSERVATION:" (depends on message text, breaks silently if the prefix
+  changes).
+- Code: pending (Lab 1.3)
+
+### DEC-058 `build_context()` is reused for every loop iteration
+- Date: 2026-11-05 · Area: Memory / Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Required (C1.2: retrieval before every LLM call); how — Preferred
+- Context: a task makes up to 10 LLM calls (C1.4), each needing retrieval
+  queried by the task (DEC-050) and the messages of the turn in progress.
+  The task's outcome memory must not come back while the task is in the
+  window (DEC-049).
+- Decision: `build_context()` gains two parameters, the system prompt (the
+  ReACT prompt) and the messages of the current turn, and is called before
+  every LLM call. Order: system (prompt + memories) -> window -> task ->
+  current turn. Outcome memories are stored with an id derived from the
+  task ("outcome-" + hash of the task), so the tasks in the window give the
+  ids to exclude.
+- Why: one place for retrieval, exclusion and the DEC-025 evidence log;
+  repeating a task updates its outcome memory instead of duplicating it
+  (as DEC-011 does for messages).
+- Alternatives: build the context once per task and reuse it (C1.2 Not
+  Yet: no retrieval before every call); a new function in the Coder
+  (duplicates exclusion and logging, the copies drift).
+- Code: pending (Lab 1.3)
+
+### DEC-059 The outcome memory holds task, status, main file and explanation
+- Date: 2026-11-05 · Area: Memory (Lab 1.3) · Status: accepted
+- Basis: Preferred (C1.2 is met either way)
+- Context: DEC-049 stores one "task + final answer" memory per task that
+  ends with FINAL ANSWER; its text must be chosen.
+- Decision: the memory text is "Task / Status / Main file / Explanation",
+  without the code.
+- Why: a short text keeps the embedding focused on what the task asked;
+  the status keeps a failed task from being recalled as done; the code is
+  in the file and the agent can read it with `read_file`.
+- Alternatives: include the code (all-MiniLM-L6-v2 only embeds about the
+  first 256 tokens, so the code would dominate and retrieval by task
+  would degrade).
+- Code: pending (Lab 1.3)
+
+### DEC-060 Text ReACT format, parsed into Pydantic steps
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Required (C1.4: plan and action/observation record; C4.6: LLM
+  output validated before use); the format — Preferred
+- Context: the loop needs the LLM to say, at each step, what it thinks and
+  either which tool to call or that it has finished. The lab uses a text
+  format and returns an ad-hoc dict.
+- Decision:
+  - Each response follows the lab's text format: `Thought:` then either
+    `Action:` + `Action Input:` (a JSON object) or `FINAL ANSWER:` with a
+    JSON `{"main_file": str | null, "explanation": str}` (DEC-052,
+    DEC-056). The first Thought states the plan (DEC-053).
+  - The parser returns a Pydantic model: `ToolStep` (thought, action
+    restricted to the known tools, action_input as an object) or
+    `FinalStep` (thought, main_file, non-empty explanation).
+  - Parse errors: a response with both `Action` and `FINAL ANSWER`; any
+    text after a self-written `OBSERVATION:` is cut off first; an empty
+    response. Every parse error goes back to the LLM as
+    `OBSERVATION: Error: ...` and counts as an iteration. API errors still
+    propagate (DEC-027) until retries arrive (C4.2).
+- Why: the Thought is always in the text, which is the C1.4 evidence; the
+  model never acts on unvalidated output; an action plus a final answer is
+  a result claimed before the action ran (C1.5); an empty reply inside the
+  loop gives the LLM a chance to recover, and the 10-iteration limit still
+  ends the task (refines DEC-029 for the loop).
+- Alternatives: native function calling with a `finish` tool (sturdier
+  parsing, but the Thought becomes optional: weaker C1.4 evidence; moves
+  away from the lab); a JSON-only response with `response_format` (not
+  supported by every OpenRouter model).
+- Code: pending (Lab 1.3)
+
+### DEC-061 Tools are described in the prompt, generated from the schemas
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Preferred
+- Context: with the text format (DEC-060) the tool schemas are not sent
+  through the API, so the prompt must tell the LLM which tools exist and
+  their arguments.
+- Decision: the ReACT prompt includes a tool list generated from
+  `ALL_TOOL_SCHEMAS` (name, description, arguments). The schemas are not
+  passed as `tools=` to the API.
+- Why: one source of truth: changing a schema changes the prompt.
+- Alternatives: tools written by hand in the prompt (text and schemas can
+  drift, so the LLM sends arguments the wrappers reject); the lab's
+  `tools=` with `tool_choice="none"` (sends unusable schemas on every call,
+  extra tokens for C4.4; some OpenRouter models ignore or reject it).
+- Code: pending (Lab 1.3)
+
+### DEC-062 `dispatch_tool` returns errors instead of raising
+- Date: 2026-11-05 · Area: Tools (Lab 1.3) · Status: accepted
+- Basis: Required (C4.6: invalid LLM output never reaches the tools)
+- Context: the lab's `dispatch_tool` and the one in `agents/tools_demo.py`
+  both raise `TypeError` when the arguments are not a JSON object (and the
+  lab's also on missing or extra arguments). An exception in the middle of
+  the loop ends the task instead of letting the LLM correct itself.
+- Decision: `dispatch_tool(name, args)` lives in `tools/handlers.py`. It
+  receives the already parsed arguments and returns an `Error: ...` string
+  for an unknown tool or arguments that are not an object; missing or extra
+  arguments are rejected by the Pydantic wrappers (DEC-042). It never
+  raises.
+- Why: the error goes back to the LLM as an observation and the loop goes
+  on; the dispatcher belongs to the tool layer, so it survives the removal
+  of `tools_demo.py` and other agents can reuse it.
+- Alternatives: keep the lab's version (a `[1, 2]` argument crashes the
+  agent).
+- Code: pending (Lab 1.3)
+
+### DEC-063 Execution has a structured result underneath `exec_python`
+- Date: 2026-11-05 · Area: Tools / Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Required (C1.5: result from real execution; C1.3: no regression
+  of `exec_python`); how — Preferred
+- Context: DEC-055 needs to know whether the last execution ended without
+  error, but `exec_python` returns a text for the LLM.
+- Decision: an internal function runs the script and returns a structured
+  result (output text, exit code, timed out). `exec_python` calls it and
+  returns the same text as before. The loop uses the structured result
+  for the status and its text as `result`. Any `write_file` call after the
+  last execution invalidates it, even a failed write.
+- Why: the status comes from data, not from reading a message;
+  `exec_python` and its Lab 1.2 tests do not change; invalidating on any
+  write can only turn a success into `unverified`, never the opposite.
+- Alternatives: infer the outcome from the text (a script printing
+  "Error: ..." looks like a failure; breaks silently if the message
+  changes); make `exec_python` return an object (breaks its contract and
+  the Lab 1.2 tests; the LLM would get an object instead of text).
+- Code: pending (Lab 1.3)
+
+### DEC-064 The whole Coder lives in `agents/coder_agent.py`
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Preferred (C1.1 names `agents/coder_agent.py`)
+- Context: DEC-051 left the internal organisation of the Coder to the
+  technical phase.
+- Decision:
+  - `agents/coder_agent.py` holds `MODEL`, `MAX_ITERATIONS = 10`, the
+    ReACT prompt and the tool description (DEC-061), the step and output
+    models, `parse_llm_response()`, `run_agent(task, window)`, `chat()`
+    and `main()`.
+  - `chat(user_input, window)` wraps `run_agent()` and returns the
+    explanation; with `max_iterations` it returns a fixed "stopped after
+    10 iterations" message.
+  - `main()` without arguments is the interactive session and shows
+    status, explanation, main file and result; with one argument
+    (`python -m agents.coder_agent "task"`) it runs that task and prints
+    the whole output model as JSON.
+- Why: one agent in the file the guide names; the one-task mode shows the
+  C1.5 output in a real run. Splitting now is premature: the loop may
+  change when the framework is chosen (DEC-047).
+- Alternatives: a package `agents/coder/` with prompt, parsing and models
+  modules (the guide names a single file; premature split).
+- Revisit when: another agent needs the parser or the models (Module 2/3).
+- Code: pending (Lab 1.3)
+
+### DEC-065 `CoderResult` is the Pydantic output of a whole task
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Basis: Required (C1.5: `code`, `explanation`, `plan`, `result`; C1.4:
+  plan and action/observation record); the extra fields — Preferred
+- Context: the lab's `AgentResult` (answer, iterations, tool_calls,
+  stopped_early) has none of the C1.5 fields. The per-execution result of
+  DEC-063 is internal and is not the task output.
+- Decision: `run_agent()` returns a `CoderResult` with `status` (DEC-055,
+  DEC-056), `plan` (DEC-053), `code` (read from disk, DEC-052),
+  `explanation`, `result` (text of the last valid execution, DEC-063),
+  `main_file`, `iterations` and `steps` (thought, action, action input and
+  observation of each iteration). It lives in `agents/coder_agent.py`.
+- Why: one model holds the C1.5 fields and the C1.4 record, and the status
+  lets later agents tell success from failure without reading text.
+- Alternatives: a separate module only for the Coder's models (premature
+  until a second agent uses them, DEC-064).
+- Revisit when: Module 2 defines the shared state (C2.2); the model moves
+  there.
 - Code: pending (Lab 1.3)
