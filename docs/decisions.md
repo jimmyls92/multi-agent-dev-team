@@ -1064,7 +1064,7 @@ A decision can mix bases; then each part states its own.
   check behavior, not fixed objects or text.
 - Alternatives: only check that the fields exist and are not empty (the
   "working code" half rests on a manual run).
-- Code: pending (Lab 1.3)
+- Code: `tests/test_smoke.py` — `test_coder_writes_and_runs_working_code`
 
 ### DEC-055 `result` comes from a real execution; the output always has a status
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
@@ -1335,7 +1335,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: skip only when there is no key (with the key in `.env` it
   would run, and cost, on every `pytest`); a script like
   `tests/test_memory.py` (weaker evidence of an "automated smoke test").
-- Code: pending (Lab 1.3)
+- Code: `tests/conftest.py`; `tests/test_smoke.py`
 
 ### DEC-067 `dispatch_tool` returns a `ToolOutcome`, not a bare string
 - Date: 2026-11-05 · Area: Tools (Lab 1.3) · Status: accepted
