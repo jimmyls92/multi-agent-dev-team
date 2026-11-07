@@ -872,7 +872,7 @@ A decision can mix bases; then each part states its own.
 - Code: all `*.py` files; rule in `CLAUDE.md`
 
 ### DEC-047 Lab 1.3 ReACT loop in plain Python; framework chosen later
-- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: superseded by DEC-068
 - Basis: Provisional (C1.4 needs no framework; C1.1 needs one named in the
   README; C2.3 needs PM and Coder in one orchestration graph)
 - Context: the Lab 1.3 handout builds the ReACT loop in plain Python with a
@@ -1354,3 +1354,41 @@ A decision can mix bases; then each part states its own.
   `exec_python` (two code paths, arguments validated twice, the paths can
   drift); return a tuple (untyped, against the Pydantic-everywhere rule).
 - Code: `tools/handlers.py` — `ToolOutcome`, `dispatch_tool`
+
+### DEC-068 LangGraph is the agent framework, from Module 1
+- Date: 2026-11-07 · Area: Framework (Module 1) · Status: accepted
+- Basis: Required (C1.1: the README names and explains the chosen framework;
+  C2.3: PM and Coder in one orchestration graph); the choice of LangGraph —
+  Preferred
+- Context: DEC-047 left the ReACT loop in plain Python and the framework
+  open until the Module 1 submission. The README cannot name a framework the
+  code does not use, and a later switch must be justified (C2.6).
+- Decision: use LangGraph for every agent and for the orchestration. In
+  Module 1 the Coder's ReACT loop (`run_agent`) becomes a LangGraph graph;
+  the prompt, parser, Pydantic models, tools and memory stay as they are and
+  are called from the nodes.
+- Why:
+  - Explicit, deterministic control flow: nodes and conditional edges
+    decide what runs next, so the limits the assessor forces (10 ReACT
+    iterations, C1.4; QA→Coder loop limit, C3.3; task order, C2.4) are
+    conditions in the graph, not left to the LLM.
+  - Typed shared state is native (`StateGraph` over a TypedDict or Pydantic
+    model), as C2.2 and C2.3 ask.
+  - Nodes are plain Python functions, so the validated text format
+    (DEC-060), the tool confinement and validation (DEC-036, DEC-042,
+    DEC-062) and the status rules (DEC-052, DEC-055) are kept: no LLM output
+    reaches a tool without Pydantic validation (C1.3, C4.6).
+  - Per-call retries and the circuit breaker (C4.2, C4.3) stay in our code,
+    without fighting a framework's internal retries.
+  - LangSmith, one of the C4.1 options, traces the graph's nodes; our
+    OpenAI-SDK LLM calls still need wrapping to report tokens.
+  - Trade-off: more code than CrewAI to define roles, and no free-form
+    agent conversation (AutoGen's strength); our flow PM → Coder → QA is a
+    fixed sequence with bounded loops, so neither is needed.
+- Alternatives: AutoGen and CrewAI (their own agent classes, prompts and
+  tool calling clash with DEC-060, DEC-055 and DEC-052, so the Coder would
+  be rewritten; turn-taking is driven by a group chat manager or a crew
+  process, which makes the forced limits harder to guarantee); name
+  LangGraph in the README and keep the plain loop until Module 2 (no work
+  now, but the README would not match the code, risking C1.1).
+- Code: pending (`agents/coder_agent.py` — `run_agent` as a graph)

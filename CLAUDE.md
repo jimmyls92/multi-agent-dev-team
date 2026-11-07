@@ -70,7 +70,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Decisiones del proyecto
 
-- Framework: **pendiente** (LangGraph / AutoGen / CrewAI). Cuando se elija, documentarlo en el README. Si se cambia de framework, justificarlo (C2.6).
+- Framework: **LangGraph** desde el Módulo 1 (DEC-068, sustituye a DEC-047). Documentarlo en el README. Si se cambia de framework, justificarlo (C2.6).
 - LLM: la guía permite GPT-4o, Claude Sonnet u Ollama. Si se usa un equivalente, por ejemplo vía OpenRouter, indicarlo en el README.
 - Patrón del agente: **ReACT** (lo exige la guía).
 - Protocolo del Módulo 3: **pendiente** (MCP con el SDK oficial de Python, **o** A2A con `sender`, `receiver`, `intent`, `payload`, `correlation_id` y validación de intent).
@@ -83,7 +83,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Trabajando en: **Lab 1.3** (bucle ReACT del Coder, C1.4) → leer `docs/labs/` del Lab 1.3 al empezar.
+Trabajando en: **migrar el bucle ReACT del Coder a LangGraph** (DEC-068) para cerrar C1.1; después, nombrar el framework en el README.
 
 Progreso:
 - ✅ Lab 1.1 cerrado: memoria de dos capas (C1.2), DEC-004..DEC-031. El test oficial pasa con una key real.
@@ -106,7 +106,8 @@ Progreso:
   5. ✅ **Coder (3):** `chat()` devuelve la explicación y `main()` interactivo o de una tarea con argumento (DEC-064); borrar `agents/tools_demo.py` (DEC-051).
   Hecho: además DEC-067 (`dispatch_tool` devuelve `ToolOutcome`); una ejecución real de una tarea con `python -m agents.coder_agent "..."` termina en `success` en 3 iteraciones.
   6. ✅ **Tests:** `pytest tests/test_smoke.py --run-llm` pasa con key real; `tests.test_memory` pasa con key real; `pytest tests/` 24 passed + 1 skipped. Detalle original: `tests/conftest.py` + `tests/test_smoke.py` (DEC-054, DEC-066), ejecutarlo con key real; volver a pasar `CHROMA_PATH=.chroma-test python -m tests.test_memory` (C1.2) y `pytest tests/` (Lab 1.2).
-  Al terminar: comparar con `lab_1_3_src/agent_solution.py` (no abrirlo antes) y actualizar el README (framework pendiente, cómo ejecutar el Coder y el smoke test).
+  ✅ Comparado con `lab_1_3_src/agent_solution.py` y README escrito (setup, ejecución, estados, tests y decisiones del Módulo 1).
+- ⏭️ **Siguiente: LangGraph (DEC-068).** Fase técnica del grafo del Coder (estado, nodos, aristas, tope de 10, estados finales); después código pieza a pieza, volver a pasar el smoke test y `pytest tests/`, y nombrar LangGraph y su porqué en el README.
 Pendientes fuera del lab:
 - Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032). Falta documentar el setup en el README.
 - Tests mockeados de la memoria (sin LLM real), a proponer y aprobar antes de escribirlos: el input actual nunca vuelve como recuerdo (DEC-031), un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029) y los duplicados exactos se actualizan (DEC-011). Aplazados por decisión del usuario (en el Módulo 1 solo lo que exigen las Cs); como tarde en C4.7.
@@ -116,7 +117,7 @@ Pendientes fuera del lab:
 - El repo aún no tiene remoto. Tras el primer push no se reescribe historial.
 - "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
-- Elegir framework (LangGraph / AutoGen / CrewAI) antes de entregar el Módulo 1 (C1.1 exige nombrarlo en el README) y como tarde en el Módulo 2 (C2.3); ver DEC-047.
+- ✅ Framework elegido: LangGraph (DEC-068). Falta migrar el bucle y nombrarlo en el README antes de entregar el Módulo 1 (C1.1).
 
 Actualiza esta sección al terminar cada TODO y al empezar o cerrar cada lab.
 
