@@ -89,6 +89,8 @@ Rules:
 - For a coding task, write the code to a file and run it with exec_python
   before finishing; fix it and run it again if the run fails. Only finish
   once the last run shows the code works.
+- If a tool returns an error, fix the cause instead of repeating the same call.
+- You have at most {MAX_ITERATIONS} responses for the whole task; finish before you run out.
 - If the request needs no code (for example a question), finish directly with
   "main_file": null and the answer in "explanation".
 - Paths in FINAL ANSWER use the same form you used with the tools."""
