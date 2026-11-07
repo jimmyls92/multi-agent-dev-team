@@ -1030,7 +1030,7 @@ A decision can mix bases; then each part states its own.
 - Code: `agents/coder_agent.py` — `FinalStep`, `_read_main_file`, `run_agent`
 
 ### DEC-053 The plan is the agent's first Thought, kept apart from the action record
-- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: superseded by DEC-071
 - Basis: Required (C1.4 evidence: "concise plan and action/observation
   record"; C1.5 `plan` field); how — Preferred
 - Context: the output needs a `plan`; ReACT decides each step from the
@@ -1186,7 +1186,7 @@ A decision can mix bases; then each part states its own.
 - Code: `memory.py` — `store_outcome`
 
 ### DEC-060 Text ReACT format, parsed into Pydantic steps
-- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: superseded by DEC-069
 - Basis: Required (C1.4: plan and action/observation record; C4.6: LLM
   output validated before use); the format — Preferred
 - Context: the loop needs the LLM to say, at each step, what it thinks and
@@ -1218,7 +1218,7 @@ A decision can mix bases; then each part states its own.
   `parse_llm_response`
 
 ### DEC-061 Tools are described in the prompt, generated from the schemas
-- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: superseded by DEC-069
 - Basis: Preferred
 - Context: with the text format (DEC-060) the tool schemas are not sent
   through the API, so the prompt must tell the LLM which tools exist and
@@ -1356,7 +1356,7 @@ A decision can mix bases; then each part states its own.
 - Code: `tools/handlers.py` — `ToolOutcome`, `dispatch_tool`
 
 ### DEC-068 LangGraph is the agent framework, from Module 1
-- Date: 2026-11-07 · Area: Framework (Module 1) · Status: accepted
+- Date: 2026-11-07 · Area: Framework (Module 1) · Status: accepted (refined by DEC-069)
 - Basis: Required (C1.1: the README names and explains the chosen framework;
   C2.3: PM and Coder in one orchestration graph); the choice of LangGraph —
   Preferred
@@ -1392,3 +1392,122 @@ A decision can mix bases; then each part states its own.
   LangGraph in the README and keep the plain loop until Module 2 (no work
   now, but the README would not match the code, risking C1.1).
 - Code: pending (`agents/coder_agent.py` — `run_agent` as a graph)
+
+### DEC-069 The Coder is a LangChain `create_agent` with native tool calling
+- Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
+- Basis: Required (C1.4: bounded action/observation loop with a plan and a
+  record; C4.6: every LLM output validated before it is acted on); the
+  agent factory and tool calling — Preferred (refines DEC-068)
+- Context: DEC-068 chose LangGraph and first planned custom nodes around
+  the text ReACT format (DEC-060). LangGraph's `create_react_agent` is
+  deprecated; its successor is `langchain.agents.create_agent`, a LangGraph
+  graph customized with middleware. C1.4 says hidden model reasoning is not
+  required, so the text format is our choice, not a requirement.
+- Decision:
+  - The Coder loop is built with `create_agent`, using the model's native
+    tool calling: tools are passed as schemas, not described in the prompt,
+    and the text `Thought` / `Action` / `Action Input` / `FINAL ANSWER`
+    format and its parser are dropped.
+  - Kept: `code` read from disk (DEC-052), statuses and `result` from a
+    real execution (DEC-055, DEC-056), two-tier memory, workspace
+    confinement, the subprocess with timeout, `run_agent`, `chat()` and
+    `main()` signatures.
+  - The behavior the default agent gets wrong for us is overridden:
+    DEC-071 (plan), DEC-072 (thought), DEC-073 (explicit finish), DEC-074
+    (one tool per iteration).
+- Why: the standard LangGraph agent, which the assessor recognizes; the
+  10-call limit, the validated final answer and per-call retries with
+  jitter (C4.2) come built in; token usage reaches LangSmith traces (C4.1,
+  C4.4); fake chat models make the mocked agent tests easier (C4.7). Doing
+  it now, with one agent, is cheaper than after the PM and QA exist.
+- Alternatives: custom LangGraph nodes around our text parser (DEC-068's
+  first plan: least change, but none of the built-ins, and a later move
+  rewrites three agents); custom nodes with tool calling (full control,
+  but the loop, limit and retries are written by hand); deprecated
+  `create_react_agent`.
+- Revisit when: the technical spike shows that the limit, the explicit
+  finish or the argument validation cannot be guaranteed with middleware;
+  then fall back to custom nodes with tool calling.
+- Code: pending
+
+### DEC-070 The iteration limit counts tool-loop model calls, not the plan
+- Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
+- Basis: Required (C1.4: a loop counter stops execution after at most 10
+  iterations); what counts — Preferred
+- Context: the plan step (DEC-071) adds one LLM call before the loop.
+- Decision: an iteration is one model call inside the action/observation
+  loop (with its tool call or its error observation); at most 10. The plan
+  call is outside the loop and does not count, so a task makes at most
+  1 + 10 LLM calls.
+- Why: C1.4 bounds the action/observation loop; counting the plan would
+  leave 9 iterations for the work.
+- Alternatives: count the plan as iteration 1 (the README and the limit
+  would disagree with "10 iterations of the loop").
+- Code: pending
+
+### DEC-071 The plan comes from a structured planning step before the loop
+- Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
+- Basis: Required (C1.4: concise plan); the planning step — Preferred
+  (supersedes DEC-053)
+- Context: with tool calling the model may call a tool without writing any
+  text, so "plan = first Thought" (DEC-053) is no longer guaranteed.
+- Decision: before the loop, one LLM call returns a Pydantic-validated
+  `Plan` (a list of steps). The plan goes into the loop's context and into
+  `CoderResult.plan`. It runs for every message, questions included.
+- Why: the plan always exists and is validated (C1.4, C4.6), and the loop
+  follows the plan it was given.
+- Alternatives: ask in the prompt for a plan in the first response's text
+  (cheaper, but the plan may be missing); count on the first tool call's
+  thought (DEC-072; a reason for one action, not a plan).
+- Code: pending
+
+### DEC-072 Every tool call carries a required `thought`
+- Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
+- Basis: Preferred (C1.4: action/observation record; hidden reasoning is
+  not required)
+- Context: with tool calling the reasoning text before an action is
+  optional, and models often leave it empty; the ReACT Thought → Action →
+  Observation record would have gaps.
+- Decision: every tool the model sees, `finish` included, has a required
+  `thought` argument (why this action, given the last observation). It is
+  validated with the other arguments, stored in `StepRecord.thought` and
+  removed before the tool runs.
+- Why: a complete ReACT record without spending iterations on
+  "missing thought" errors.
+- Alternatives: ask for it in the prompt without requiring it (gaps in the
+  record); require non-empty message text (format errors cost iterations).
+- Code: pending
+
+### DEC-073 The agent ends only through `finish`; plain text is an error
+- Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
+- Basis: Required (C1.5: no success claimed without execution; C1.2: the
+  recall test's questions still end as `answered`); the explicit finish —
+  Preferred (refines DEC-052, DEC-056)
+- Context: by default a tool-calling agent stops when the model answers
+  with text and no tool call. For a Coder this ends tasks halfway or with
+  code pasted in the chat but never written.
+- Decision:
+  - The only way to end is the `finish` tool with `main_file` (or null)
+    and `explanation`, validated with Pydantic. `finish` with null ends as
+    `answered` (DEC-056); with a file, the status follows DEC-055.
+  - A response with text and no tool call gets back an error observation
+    (call a tool, or `finish`) and counts as an iteration.
+- Why: tasks never end implicitly; questions still end as `answered`, at
+  the cost of an extra iteration when the model first answers in text.
+- Alternatives: plain text ends as `answered` (natural for questions, but
+  coding tasks can end unfinished); plain text ends as `answered` only if
+  no tool was called yet (still misses code pasted in the chat at once).
+- Code: pending
+
+### DEC-074 One tool call per iteration
+- Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
+- Basis: Preferred (C1.4: action/observation record and loop counter)
+- Context: tool-calling models can return several tool calls in one
+  response, and the default agent runs them in parallel.
+- Decision: parallel tool calls are disabled; one model call is one action
+  and one observation.
+- Why: the record and the counter stay one-to-one, and a write never races
+  an execution (DEC-055's "no write after the run").
+- Alternatives: allow several calls per iteration (fewer iterations, but
+  ordering and the "last valid run" become ambiguous).
+- Code: pending
