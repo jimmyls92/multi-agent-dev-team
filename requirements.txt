@@ -1,6 +1,8 @@
 python-dotenv
 chromadb>=1.0,<2  # DEC-024
-openai
+langchain>=1.4,<2  # DEC-069, DEC-075
+langchain-openai>=1.7,<2  # DEC-075
+langgraph>=1.2,<2  # DEC-068
 pytest
 pydantic>=2,<3
 pytest-timeout

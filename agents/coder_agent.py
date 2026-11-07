@@ -1,133 +1,131 @@
-"""Coder Agent with two-tier memory and a ReACT loop (Labs 1.1-1.3).
+"""Coder Agent with two-tier memory and a ReACT loop (Module 1).
 
-The LLM answers in the lab's text format (Thought / Action / Action Input or
-FINAL ANSWER); every response is parsed into a Pydantic step before anything
-acts on it (DEC-060). run_agent() runs one task and returns a CoderResult;
-chat() wraps it for one session message; main() is the command line
-(interactive session or a single task).
+The loop is a LangChain ``create_agent`` graph (LangGraph) with native tool
+calling (DEC-068, DEC-069): every tool call carries its Thought (DEC-072),
+its arguments are validated before the tool runs (DEC-076), and the task
+ends only through the validated ``Finish`` tool (DEC-073). A planning step
+runs before the loop (DEC-071). run_agent() runs one task and returns a
+CoderResult; chat() wraps it for one session message; main() is the command
+line (interactive session or a single task).
 
 Attributes:
     MODEL: OpenRouter model id, from the LLM_MODEL environment variable.
-    MAX_ITERATIONS: LLM calls allowed per task (C1.4).
-    TOOL_NAMES: Names of the tools the agent may call.
-    REACT_SYSTEM_PROMPT: System prompt of the ReACT loop, with the tool list
-        generated from the schemas (DEC-061).
+    MAX_ITERATIONS: Model calls allowed in the tool loop per task (C1.4,
+        DEC-070); the plan call is not counted.
+    RECURSION_LIMIT: LangGraph step limit; a safety net only, well above
+        what MAX_ITERATIONS needs (DEC-079).
+    CODER_SYSTEM_PROMPT: System prompt of the tool loop.
+    PLAN_SYSTEM_PROMPT: System prompt of the planning step.
+    NUDGE_MESSAGE: Error sent back when the model answers without a tool.
     MAX_ITERATIONS_MESSAGE: Reply of chat() when a task hits the limit.
 """
 
-import json
 import logging
 import os
-import re
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    ModelCallLimitMiddleware,
+    after_model,
+    wrap_model_call,
+    wrap_tool_call,
+)
+from langchain.agents.structured_output import ToolStrategy
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+    convert_to_messages,
+    convert_to_openai_messages,
+)
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from llm_client import get_client
+from llm_client import get_chat_model
 from memory import SlidingWindowBuffer, build_context, store_memory, store_outcome
-from tools import ExecutionResult, dispatch_tool
+from tools import ExecutionResult
+from tools.agent_tools import AGENT_TOOLS, check_tool_call
 from tools.handlers import resolve_in_workspace
-from tools.schemas import ALL_TOOL_SCHEMAS
 
 MODEL = os.getenv("LLM_MODEL", "openai/gpt-4.1-mini")
-MAX_ITERATIONS = 10  # C1.4
+MAX_ITERATIONS = 10  # C1.4, DEC-070
+RECURSION_LIMIT = 10 * MAX_ITERATIONS  # DEC-079: safety net only
 
 logger = logging.getLogger(__name__)
 
-# --- ReACT prompt (DEC-061) --------------------------------------------------
+# --- Prompts, plan and finish (DEC-069..DEC-074) -----------------------------
 
-TOOL_NAMES = tuple(schema["function"]["name"] for schema in ALL_TOOL_SCHEMAS)
+CODER_SYSTEM_PROMPT = f"""You are an expert Python developer working as an autonomous coding agent.
+You solve the user's task step by step with your tools.
 
-
-def _describe_tools(schemas: list[dict]) -> str:
-    """Renders the tool schemas as a plain-text list for the prompt (DEC-061).
-
-    Args:
-        schemas: Tool schemas in the OpenAI function format.
-
-    Returns:
-        One block per tool: its name and description, then one line per
-        argument with its type, whether it is required and its description.
-    """
-    blocks = []
-    for schema in schemas:
-        function = schema["function"]
-        parameters = function["parameters"]
-        required = set(parameters.get("required", []))
-        lines = [f"- {function['name']}: {function['description']}"]
-        for name, spec in parameters["properties"].items():
-            need = "required" if name in required else "optional"
-            lines.append(f"    - {name} ({spec['type']}, {need}): {spec['description']}")
-        blocks.append("\n".join(lines))
-    return "\n".join(blocks)
-
-
-REACT_SYSTEM_PROMPT = f"""You are an expert Python developer working as an autonomous coding agent.
-You solve the user's task step by step with tools, reasoning before every action.
-
-Tools (file paths are relative to your workspace directory; scripts run with
-their own directory as the working directory):
-{_describe_tools(ALL_TOOL_SCHEMAS)}
-
-Answer in exactly one of these two formats, and nothing else.
-
-To use a tool:
-Thought: <your reasoning>
-Action: <one tool name>
-Action Input: <a JSON object with the tool arguments>
-
-To finish:
-Thought: <your reasoning>
-FINAL ANSWER: {{"main_file": "<path of the main file you wrote>", "explanation": "<what you built and how it behaves>"}}
-
-Rules:
-- Your first Thought states a short numbered plan for the whole task. Later
-  steps follow what the observations show, not the plan.
-- One action per response. After it, stop and wait: the system replies with
-  "OBSERVATION: <tool result>". Never write an OBSERVATION yourself.
+How you work:
+- Every response calls exactly one tool. Its "thought" argument says why you
+  take this action, given the last observation.
+- File paths are relative to your workspace directory; scripts run with their
+  own directory as the working directory.
 - For a coding task, write the code to a file and run it with exec_python
   before finishing; fix it and run it again if the run fails. Only finish
   once the last run shows the code works.
 - If a tool returns an error, fix the cause instead of repeating the same call.
+- You end the task only by calling the Finish tool: "main_file" is the main
+  file you wrote (the same path form you used with the tools), or null when
+  the request needs no code (for example a question), with the answer in
+  "explanation".
 - You have at most {MAX_ITERATIONS} responses for the whole task; finish before you run out.
-- If the request needs no code (for example a question), finish directly with
-  "main_file": null and the answer in "explanation".
-- Paths in FINAL ANSWER use the same form you used with the tools."""
+- Follow your plan below, but let the observations decide each next step."""
 
-# --- Steps and output models (DEC-060, DEC-065) ------------------------------
+PLAN_SYSTEM_PROMPT = """You are an expert Python developer about to work on the user's task as an
+autonomous coding agent. Later you will be able to write files, run Python
+scripts and read files; now you only plan.
 
+Write a short, concrete plan for the task: a few steps, each one sentence.
+For a coding task, include writing the code, running it and checking the
+output. For a question that needs no code, one step is enough."""
 
-class ToolStep(BaseModel):
-    """A validated tool call from the LLM (DEC-060).
-
-    Attributes:
-        thought: Reasoning before the action.
-        action: Name of a known tool.
-        action_input: Tool arguments; validated again by the tool wrappers
-            (DEC-042).
-    """
-    model_config = ConfigDict(strict=True)
-
-    thought: str = Field(min_length=1)
-    action: Literal[TOOL_NAMES]  # type: ignore[valid-type]
-    action_input: dict
+PLAN_HEADING = "Your plan for this task:"
 
 
-class FinalStep(BaseModel):
-    """A validated final answer from the LLM (DEC-052, DEC-056, DEC-060).
+class Plan(BaseModel):
+    """Plan for the task, made before the tool loop (DEC-071).
 
     Attributes:
-        thought: Reasoning before finishing.
-        main_file: Main file of the deliverable, or None when no code was
-            needed (DEC-056).
-        explanation: What was built or the answer itself; never empty.
+        steps: Ordered steps, each one short sentence.
     """
-    model_config = ConfigDict(strict=True)
+    steps: list[Annotated[str, Field(min_length=1)]] = Field(
+        min_length=1, description="Ordered steps of the plan, each one short sentence."
+    )
 
-    thought: str = Field(min_length=1)
-    main_file: str | None
-    explanation: str = Field(min_length=1)
+    def render(self) -> str:
+        """Returns the plan as a numbered list, one step per line."""
+        return "\n".join(f"{n}. {step}" for n, step in enumerate(self.steps, start=1))
+
+
+class Finish(BaseModel):
+    """Ends the task. Call it only when the task is done, or to answer a question.
+
+    Attributes:
+        thought: Why the task is finished, given the last observation.
+        main_file: Main file you wrote, or null when no code was needed.
+        explanation: What you built and how it behaves, or the answer itself.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    thought: str = Field(
+        min_length=1, description="Why the task is finished, given the last observation."
+    )
+    main_file: str | None = Field(
+        description="Path of the main file you wrote, or null when no code was needed."
+    )
+    explanation: str = Field(
+        min_length=1,
+        description="What you built and how it behaves, or the answer to the question.",
+    )
 
     @field_validator("main_file")
     @classmethod
@@ -135,7 +133,7 @@ class FinalStep(BaseModel):
         """Returns None for a blank main file, so "" means no code.
 
         Args:
-            main_file: Main file sent by the LLM.
+            main_file: Main file sent by the model.
 
         Returns:
             The stripped path, or None if it is empty.
@@ -145,29 +143,46 @@ class FinalStep(BaseModel):
         return main_file.strip()
 
 
-class ParseFailure(BaseModel):
-    """An LLM response that could not be turned into a step (DEC-060).
+# DEC-073: sent back when the model answers with text and no tool call.
+NUDGE_MESSAGE = (
+    "Error: you answered with text and no tool call. Every response must call "
+    "exactly one tool; call Finish to end the task."
+)
+
+
+@dataclass(frozen=True)
+class CoderContext:
+    """Per-task data the middleware reads at run time (DEC-077).
+
+    Passed as ``context=`` when the agent is invoked; the agent's own state
+    only holds the task message and the messages of the turn.
 
     Attributes:
-        error: Explanation for the LLM, sent back as the observation.
-        thought: The Thought, when one could be read, for the step record.
+        task: The user's request, also the memory query.
+        window: Short-term window of the session.
+        plan: The rendered plan of the task (DEC-071).
     """
-    error: str
-    thought: str | None = None
+    task: str
+    window: SlidingWindowBuffer
+    plan: str
 
 
-Step = ToolStep | FinalStep
+# --- Output models (C1.4, C1.5, DEC-065, DEC-078) ----------------------------
 
 
 class StepRecord(BaseModel):
-    """Record of one loop iteration (C1.4, DEC-065).
+    """Record of one action of the loop (C1.4, DEC-065, DEC-078).
 
     Attributes:
-        iteration: Iteration number, starting at 1.
-        thought: The LLM's Thought, if any could be read.
-        action: Tool called, or None for a final answer or a parse error.
-        action_input: Arguments of the tool call, if any.
-        observation: Text sent back to the LLM; None for the final answer.
+        iteration: Model call that produced the action, starting at 1.
+        thought: The ``thought`` argument of the tool call (DEC-072); None
+            when the model answered without a tool.
+        action: Tool called, ``Finish`` included; None when the model
+            answered without a tool.
+        action_input: Arguments of the call without ``thought``.
+        observation: Text sent back to the model: the tool's result, an
+            error, or the nudge (DEC-073). None for the accepted Finish and
+            for a text answer at the limit.
     """
     iteration: int
     thought: str | None = None
@@ -181,14 +196,14 @@ class CoderResult(BaseModel):
 
     Attributes:
         status: How the task ended (DEC-055, DEC-056).
-        plan: The first Thought (DEC-053); empty if none was read.
+        plan: The plan from the planning step (DEC-071), as a numbered list.
         code: Content of main_file read from disk (DEC-052); empty without one.
-        explanation: Explanation from the final answer; empty without one.
+        explanation: Explanation from Finish; empty without one.
         result: Output of the last valid execution (DEC-055, DEC-063);
             empty without one.
-        main_file: Main file declared in the final answer, if any.
-        iterations: LLM calls made.
-        steps: Record of every iteration.
+        main_file: Main file declared in Finish, if any.
+        iterations: Model calls made in the tool loop (DEC-070).
+        steps: Record of every action.
     """
     status: Literal["success", "failed_execution", "unverified", "max_iterations", "answered"]
     plan: str = ""
@@ -200,161 +215,132 @@ class CoderResult(BaseModel):
     steps: list[StepRecord] = Field(default_factory=list)
 
 
-# --- Parsing (DEC-060) -------------------------------------------------------
-
-_MARKER_FLAGS = re.IGNORECASE | re.MULTILINE
-_OBSERVATION_RE = re.compile(r"^\s*OBSERVATION:", _MARKER_FLAGS)
-_THOUGHT_RE = re.compile(r"^\s*Thought:", _MARKER_FLAGS)
-_ACTION_RE = re.compile(r"^\s*Action:[ \t]*(.*)$", _MARKER_FLAGS)
-_ACTION_INPUT_RE = re.compile(r"^\s*Action Input:", _MARKER_FLAGS)
-_FINAL_RE = re.compile(r"^\s*FINAL ANSWER:", _MARKER_FLAGS)
-_NEXT_FIELD_RE = re.compile(r"^\s*(?:Action|Action Input|FINAL ANSWER):", _MARKER_FLAGS)
+# --- Middleware (DEC-073, DEC-074, DEC-076, DEC-077) -------------------------
 
 
-def _cut_self_observation(text: str) -> str:
-    """Returns text up to any OBSERVATION the LLM wrote itself (DEC-060).
+@wrap_model_call
+def inject_context(request, handler):
+    """Builds the whole model input from memory before every model call (DEC-077).
 
-    Args:
-        text: Raw LLM response.
-
-    Returns:
-        The text before the first line starting with "OBSERVATION:", or the
-        whole text if there is none.
-    """
-    cut = _OBSERVATION_RE.search(text)
-    return text[:cut.start()] if cut else text
-
-
-def _read_thought(text: str) -> str | None:
-    """Returns the Thought of a response, or None if it has none.
+    The agent is invoked with the task as its only input message, so the
+    request's messages are the task followed by the turn so far. They are
+    rebuilt with ``build_context()``: system message (Coder prompt, plan and
+    retrieved memories), window, task, turn. Parallel tool calls are turned
+    off (DEC-074).
 
     Args:
-        text: LLM response, already cut at any self-written OBSERVATION.
+        request: The model request built by the agent.
+        handler: Calls the model with a request.
 
     Returns:
-        The stripped text between "Thought:" and the next field, or None if
-        there is no Thought or it is empty.
+        The model response for the rebuilt request.
     """
-    match = _THOUGHT_RE.search(text)
-    if not match:
+    context: CoderContext = request.runtime.context
+    system_prompt = f"{CODER_SYSTEM_PROMPT}\n\n{PLAN_HEADING}\n{context.plan}"
+    turn = convert_to_openai_messages(request.messages[1:])
+    system, *messages = build_context(
+        context.task, context.window, system_prompt=system_prompt, turn_messages=turn
+    )
+    return handler(request.override(
+        system_message=SystemMessage(system["content"]),
+        messages=convert_to_messages(messages),
+        model_settings={**(request.model_settings or {}), "parallel_tool_calls": False},
+    ))
+
+
+@wrap_tool_call
+def validate_tool_call(request, handler):
+    """Rejects invalid tool calls before LangChain runs the tool (DEC-076).
+
+    Args:
+        request: The tool call request; ``request.tool_call`` has the name,
+            arguments and id sent by the model.
+        handler: Runs the tool.
+
+    Returns:
+        The tool's message, or an error ToolMessage with a short
+        "Error: ..." content when the call is invalid; the tool then never
+        runs (C4.6).
+    """
+    call = request.tool_call
+    error = check_tool_call(call["name"], call["args"])
+    if error is not None:
+        logger.info("Rejected tool call: %s", error)
+        return ToolMessage(
+            content=error, tool_call_id=call["id"], name=call["name"], status="error"
+        )
+    return handler(request)
+
+
+@after_model(can_jump_to=["model"])
+def require_tool_call(state, runtime) -> dict[str, Any] | None:
+    """Logs each iteration and sends text-only answers back as errors (DEC-073).
+
+    Runs after every model call that is under the limit (DEC-079), so it
+    also logs one line per iteration.
+
+    Args:
+        state: Agent state. Its last AI message is the model's response;
+            after a valid Finish, ToolStrategy has already added a
+            ToolMessage after it.
+        runtime: LangGraph runtime (unused).
+
+    Returns:
+        None when the response called a tool or this was the last
+        iteration; otherwise the nudge message and a jump back to the model,
+        which counts as an iteration.
+    """
+    messages = state["messages"]
+    iteration = sum(isinstance(message, AIMessage) for message in messages)
+    last = next(m for m in reversed(messages) if isinstance(m, AIMessage))
+    if last.tool_calls:
+        actions = ", ".join(call["name"] for call in last.tool_calls)
+        logger.info("Iteration %d/%d: %s", iteration, MAX_ITERATIONS, actions)
         return None
-    rest = text[match.end():]
-    end = _NEXT_FIELD_RE.search(rest)
-    thought = (rest[:end.start()] if end else rest).strip()
-    return thought or None
+    if iteration >= MAX_ITERATIONS:
+        # No nudge the model would never read: the limit ends the run here.
+        logger.info("Iteration %d/%d: no tool call", iteration, MAX_ITERATIONS)
+        return None
+    logger.info("Iteration %d/%d: no tool call, sent back", iteration, MAX_ITERATIONS)
+    return {"messages": [HumanMessage(NUDGE_MESSAGE)], "jump_to": "model"}
 
 
-def _read_json_object(text: str) -> dict:
-    """Decodes the JSON object at the start of text.
-
-    Code fences around the object and any text after it are ignored.
-
-    Args:
-        text: Text that starts with a JSON object, possibly inside ``` fences.
-
-    Returns:
-        The decoded object.
-
-    Raises:
-        ValueError: If text does not start with a valid JSON object.
-    """
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1].lstrip() if "\n" in text else ""
-    if not text.startswith("{"):
-        raise ValueError("expected a JSON object starting with '{'")
-    value, _ = json.JSONDecoder().raw_decode(text)
-    return value
-
-
-def _describe_validation(error: ValidationError) -> str:
-    """Formats a step validation error for the LLM.
+def build_agent(model: BaseChatModel | None = None):
+    """Builds the Coder's tool loop with ``create_agent`` (DEC-069).
 
     Args:
-        error: The Pydantic validation error.
+        model: Chat model to use. Defaults to ``get_chat_model(MODEL)``;
+            tests pass a fake model.
 
     Returns:
-        One "field: message" item per problem, separated by "; ".
+        The compiled LangGraph agent. Invoke it with the task as the only
+        message and a CoderContext as ``context``; it ends with a
+        ``structured_response`` (a Finish) or, at the limit, without one.
     """
-    return "; ".join(
-        f"{'.'.join(str(part) for part in err['loc']) or 'response'}: {err['msg']}"
-        for err in error.errors()
+    return create_agent(
+        model or get_chat_model(MODEL),
+        AGENT_TOOLS,
+        # DEC-079: after_model hooks run in reverse order, so the call limit
+        # goes last: it counts every model call, nudges included, before
+        # require_tool_call can jump back to the model.
+        middleware=[
+            inject_context,
+            validate_tool_call,
+            require_tool_call,
+            ModelCallLimitMiddleware(run_limit=MAX_ITERATIONS, exit_behavior="end"),
+        ],
+        response_format=ToolStrategy(Finish),
+        context_schema=CoderContext,
     )
 
 
-def parse_llm_response(text: str | None) -> Step | ParseFailure:
-    """Parses one LLM response of the ReACT loop into a validated step (DEC-060).
-
-    Rules, in order:
-      1. Any text from a self-written "OBSERVATION:" line onwards is cut off.
-      2. An empty response is an error.
-      3. A missing or empty Thought is an error (C1.4 evidence).
-      4. A response with both Action and FINAL ANSWER is an error.
-      5. FINAL ANSWER must be a JSON object {"main_file", "explanation"}.
-      6. Action must name one known tool, appear once, and be followed by an
-         Action Input that is a JSON object.
-      7. A response with neither Action nor FINAL ANSWER is an error.
-    Markers are matched at line start, ignoring case.
-
-    Args:
-        text: Raw content of the LLM response; None counts as empty.
-
-    Returns:
-        A ToolStep or FinalStep, or a ParseFailure whose error tells the LLM
-        how to fix its response. Never raises.
-    """
-    text = _cut_self_observation(text or "")
-    if not text.strip():
-        return ParseFailure(error="empty response. Answer with Thought and then Action or FINAL ANSWER.")
-
-    thought = _read_thought(text)
-    if thought is None:
-        return ParseFailure(error="missing 'Thought:'. Start every response with your reasoning.")
-
-    final = _FINAL_RE.search(text)
-    actions = list(_ACTION_RE.finditer(text))
-    if final and actions:
-        return ParseFailure(
-            thought=thought,
-            error="response has both Action and FINAL ANSWER. Either call one tool "
-                  "and wait for its OBSERVATION, or finish.",
-        )
-
-    try:
-        if final:
-            answer = _read_json_object(text[final.end():])
-            return FinalStep(
-                thought=thought,
-                main_file=answer.get("main_file"),
-                explanation=answer.get("explanation", ""),
-            )
-        if not actions:
-            return ParseFailure(
-                thought=thought,
-                error="response has neither Action nor FINAL ANSWER.",
-            )
-        if len(actions) > 1:
-            return ParseFailure(
-                thought=thought,
-                error="more than one Action. Call one tool per response.",
-            )
-        action = actions[0]
-        action_input = _ACTION_INPUT_RE.search(text, action.end())
-        if not action_input:
-            return ParseFailure(thought=thought, error="Action without 'Action Input:'.")
-        return ToolStep(
-            thought=thought,
-            action=action.group(1).strip().strip("`"),
-            action_input=_read_json_object(text[action_input.end():]),
-        )
-    except ValidationError as e:
-        return ParseFailure(thought=thought, error=f"invalid step: {_describe_validation(e)}")
-    except ValueError as e:  # includes json.JSONDecodeError
-        return ParseFailure(thought=thought, error=f"invalid JSON: {e}")
+@lru_cache(maxsize=1)  # the graph is compiled once per process
+def _default_agent():
+    """Returns the Coder agent built with the default model."""
+    return build_agent()
 
 
-
-# --- ReACT loop (C1.4) --------------------------------------------------------
+# --- Result from the final messages (DEC-078) --------------------------------
 
 
 def _read_main_file(main_file: str) -> str | None:
@@ -364,7 +350,7 @@ def _read_main_file(main_file: str) -> str | None:
     (DEC-036, DEC-042), and read whole: code must match the file.
 
     Args:
-        main_file: Path declared in the final answer.
+        main_file: Path declared in Finish.
 
     Returns:
         The file content, or None if the path is outside the workspace, does
@@ -393,20 +379,158 @@ def _final_status(main_code: str | None, execution: ExecutionResult | None) -> s
     return "success" if execution.ok else "failed_execution"
 
 
+def _drop_limit_message(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Returns the messages without the one LangChain adds at the call limit.
+
+    ``ModelCallLimitMiddleware`` ends the run by adding an AIMessage the
+    model never wrote ("Model call limits exceeded ..."); it is the AI
+    message after the last allowed model call (DEC-077).
+
+    Args:
+        messages: Final messages of the agent run.
+
+    Returns:
+        The same messages, without that last AI message if present.
+    """
+    model_calls = sum(isinstance(message, AIMessage) for message in messages)
+    if model_calls > MAX_ITERATIONS and isinstance(messages[-1], AIMessage):
+        return messages[:-1]
+    return messages
+
+
+def _last_ai(messages: list[BaseMessage]) -> AIMessage | None:
+    """Returns the last AIMessage of a message list, or None if there is none.
+
+    Args:
+        messages: Messages of the run.
+
+    Returns:
+        The last AIMessage, or None.
+    """
+    return next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+
+
+def result_from_messages(
+    messages: list[BaseMessage], finish: Finish | None, plan: str
+) -> CoderResult:
+    """Computes the CoderResult of a task from the agent's messages (DEC-078).
+
+    Args:
+        messages: Messages of the run: the task first, then the turn,
+            without the limit message.
+        finish: The validated Finish (``structured_response``), or None when
+            the run hit the limit.
+        plan: The rendered plan of the task (DEC-071).
+
+    Returns:
+        The task's CoderResult: one StepRecord per tool call, or per text
+        answer; the last valid execution is the artifact of the last
+        exec_python with no write_file call after it (DEC-055, DEC-063); the
+        status follows DEC-055/DEC-056, or ``max_iterations`` without Finish.
+    """
+    tool_results = {m.tool_call_id: m for m in messages if isinstance(m, ToolMessage)}
+    accepted_finish = _last_ai(messages) if finish is not None else None
+    steps: list[StepRecord] = []
+    last_execution: ExecutionResult | None = None
+    iteration = 0
+
+    for index, message in enumerate(messages):
+        if not isinstance(message, AIMessage):
+            continue
+        iteration += 1
+        if not message.tool_calls:
+            following = messages[index + 1] if index + 1 < len(messages) else None
+            nudged = isinstance(following, HumanMessage) and following.content == NUDGE_MESSAGE
+            steps.append(StepRecord(
+                iteration=iteration, observation=NUDGE_MESSAGE if nudged else None
+            ))
+            continue
+        for call in message.tool_calls:
+            args = dict(call["args"])
+            thought = args.pop("thought", None)
+            reply = tool_results.get(call["id"])
+            observation = str(reply.text) if reply is not None else None
+            if call["name"] == "write_file":
+                last_execution = None  # DEC-063: any write invalidates the last run
+            elif call["name"] == "exec_python" and isinstance(
+                getattr(reply, "artifact", None), ExecutionResult
+            ):
+                last_execution = reply.artifact
+            elif message is accepted_finish:
+                observation = None  # the accepted Finish ends the loop
+            steps.append(StepRecord(
+                iteration=iteration,
+                thought=thought if isinstance(thought, str) else None,
+                action=call["name"],
+                action_input=args,
+                observation=observation,
+            ))
+
+    if finish is None:
+        return CoderResult(status="max_iterations", plan=plan, iterations=iteration, steps=steps)
+    if finish.main_file is None:
+        # DEC-056: text answer; code and result stay empty.
+        return CoderResult(
+            status="answered",
+            plan=plan,
+            explanation=finish.explanation,
+            iterations=iteration,
+            steps=steps,
+        )
+    main_code = _read_main_file(finish.main_file)
+    return CoderResult(
+        status=_final_status(main_code, last_execution),
+        plan=plan,
+        code=main_code or "",
+        explanation=finish.explanation,
+        result=last_execution.output if last_execution else "",
+        main_file=finish.main_file,
+        iterations=iteration,
+        steps=steps,
+    )
+
+
+# --- Task entry points --------------------------------------------------------
+
+
+def make_plan(task: str, window: SlidingWindowBuffer, model: BaseChatModel | None = None) -> Plan:
+    """Makes the validated plan of a task with one LLM call (DEC-071).
+
+    The call gets the same memory context as the loop (C1.2, DEC-077) and
+    is not counted as an iteration (DEC-070).
+
+    Args:
+        task: The user's request.
+        window: Short-term window of the session.
+        model: Chat model to use. Defaults to ``get_chat_model(MODEL)``.
+
+    Returns:
+        The plan, validated with Pydantic (C4.6).
+
+    Raises:
+        Exception: API errors and an invalid plan propagate (DEC-027).
+    """
+    messages = build_context(task, window, system_prompt=PLAN_SYSTEM_PROMPT)
+    planner = (model or get_chat_model(MODEL)).with_structured_output(
+        Plan, method="function_calling"
+    )
+    plan = planner.invoke(convert_to_messages(messages))
+    logger.info("Plan:\n%s", plan.render())
+    return plan
+
+
 def run_agent(task: str, window: SlidingWindowBuffer) -> CoderResult:
-    """Runs one task through the ReACT loop and returns its structured output.
+    """Runs one task through the planning step and the tool loop.
 
     Steps:
       1. Stores the task in long-term memory (DEC-019).
-      2. Up to MAX_ITERATIONS times: builds the context with retrieval by the
-         task (DEC-050, DEC-058), calls the LLM, parses the response
-         (DEC-060) and either runs the tool and sends back its OBSERVATION or
-         stops on a final answer. Parse errors go back as observations and
-         count as iterations.
-      3. Sets the status (DEC-055, DEC-056), reads code from the main file
-         (DEC-052) and takes the first Thought as the plan (DEC-053).
-      4. Stores the outcome when there is a final answer (DEC-049, DEC-059)
-         and adds the whole task to the window as one turn (DEC-057).
+      2. Makes the plan (DEC-071).
+      3. Runs the agent: at most MAX_ITERATIONS model calls, each with the
+         memory context rebuilt (DEC-077); it ends with Finish or at the
+         limit (DEC-073, DEC-079).
+      4. Computes the CoderResult from the messages (DEC-078), stores the
+         outcome when the task ended with Finish (DEC-049, DEC-059) and adds
+         the whole task to the window as one turn (DEC-057, DEC-077).
 
     Args:
         task: The user's request.
@@ -421,84 +545,19 @@ def run_agent(task: str, window: SlidingWindowBuffer) -> CoderResult:
             then left untouched (DEC-028).
     """
     store_memory(task)  # DEC-019
-    turn: list[dict] = []  # messages after the task (DEC-057)
-    steps: list[StepRecord] = []
-    plan = ""
-    final: FinalStep | None = None
-    last_execution: ExecutionResult | None = None  # DEC-055, DEC-063
+    plan = make_plan(task, window).render()
+    output = _default_agent().invoke(
+        {"messages": [HumanMessage(task)]},
+        {"recursion_limit": RECURSION_LIMIT},
+        context=CoderContext(task=task, window=window, plan=plan),
+    )
+    messages = _drop_limit_message(output["messages"])
+    finish: Finish | None = output.get("structured_response")
+    result = result_from_messages(messages, finish, plan)
 
-    for iteration in range(1, MAX_ITERATIONS + 1):
-        messages = build_context(
-            task, window, system_prompt=REACT_SYSTEM_PROMPT, turn_messages=turn
-        )
-        response = get_client().chat.completions.create(model=MODEL, messages=messages)
-        content = response.choices[0].message.content or ""
-        step = parse_llm_response(content)
-
-        reply = _cut_self_observation(content).strip()
-        if reply:
-            turn.append({"role": "assistant", "content": reply})
-        if not plan and step.thought:
-            plan = step.thought  # DEC-053
-
-        if isinstance(step, FinalStep):
-            logger.info("Iteration %d/%d: FINAL ANSWER", iteration, MAX_ITERATIONS)
-            steps.append(StepRecord(iteration=iteration, thought=step.thought))
-            final = step
-            break
-
-        if isinstance(step, ParseFailure):
-            observation = f"Error: {step.error}"
-            record = StepRecord(iteration=iteration, thought=step.thought, observation=observation)
-            logger.info("Iteration %d/%d: parse error: %s", iteration, MAX_ITERATIONS, step.error)
-        else:
-            outcome = dispatch_tool(step.action, step.action_input)  # DEC-062
-            if step.action == "write_file":
-                last_execution = None  # DEC-063: any write invalidates the last run
-            if outcome.execution is not None:
-                last_execution = outcome.execution
-            observation = outcome.observation
-            record = StepRecord(
-                iteration=iteration,
-                thought=step.thought,
-                action=step.action,
-                action_input=step.action_input,
-                observation=observation,
-            )
-            logger.info("Iteration %d/%d: %s", iteration, MAX_ITERATIONS, step.action)
-        steps.append(record)
-        # DEC-057: observations are "user" messages, read as external.
-        turn.append({"role": "user", "content": f"OBSERVATION: {observation}"})
-
-    if final is None:
-        result = CoderResult(
-            status="max_iterations", plan=plan, iterations=len(steps), steps=steps
-        )
-    elif final.main_file is None:
-        # DEC-056: text answer; code and result stay empty.
-        result = CoderResult(
-            status="answered",
-            plan=plan,
-            explanation=final.explanation,
-            iterations=len(steps),
-            steps=steps,
-        )
-    else:
-        main_code = _read_main_file(final.main_file)
-        result = CoderResult(
-            status=_final_status(main_code, last_execution),
-            plan=plan,
-            code=main_code or "",
-            explanation=final.explanation,
-            result=last_execution.output if last_execution else "",
-            main_file=final.main_file,
-            iterations=len(steps),
-            steps=steps,
-        )
-
-    if final is not None:
+    if finish is not None:
         store_outcome(task, result.status, result.main_file, result.explanation)  # DEC-049
-    window.add_turn([{"role": "user", "content": task}, *turn])  # DEC-057
+    window.add_turn(convert_to_openai_messages(messages))  # DEC-057, DEC-077
     logger.info("Task finished: %s after %d iterations", result.status, result.iterations)
     return result
 
@@ -519,8 +578,8 @@ def chat(user_input: str, window: SlidingWindowBuffer) -> str:
         window: Short-term window of the session.
 
     Returns:
-        The explanation of the final answer, or MAX_ITERATIONS_MESSAGE when
-        the task hit the iteration limit.
+        The explanation from Finish, or MAX_ITERATIONS_MESSAGE when the task
+        hit the iteration limit.
 
     Raises:
         Exception: API and memory errors propagate (DEC-027); the window is

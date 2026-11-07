@@ -1027,7 +1027,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: every file written in the task (mixes the deliverable with
   test scripts; `code` stops being a text); the code the LLM writes in its
   final answer (may differ from the file: C1.5 at risk).
-- Code: `agents/coder_agent.py` — `FinalStep`, `_read_main_file`, `run_agent`
+- Code: `agents/coder_agent.py` — `Finish`, `_read_main_file`, `result_from_messages`
 
 ### DEC-053 The plan is the agent's first Thought, kept apart from the action record
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: superseded by DEC-071
@@ -1094,7 +1094,7 @@ A decision can mix bases; then each part states its own.
   file that only defines functions prints nothing, and it runs something
   the agent did not ask for); trust the LLM's report of the result (C1.5
   Not Yet); raise on the limit (the assessor probe ends in a crash).
-- Code: `agents/coder_agent.py` — `_final_status`, `run_agent`
+- Code: `agents/coder_agent.py` — `_final_status`, `result_from_messages`
 
 ### DEC-056 A final answer without code has its own status, `answered`
 - Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
@@ -1121,7 +1121,7 @@ A decision can mix bases; then each part states its own.
   risk; consumers that read only the status are misled); classify the
   message before the loop and answer questions without it (part of the
   messages skip ReACT, C1.4 at risk; an extra LLM call, C4.4).
-- Code: `agents/coder_agent.py` — `FinalStep`, `run_agent`, `chat`
+- Code: `agents/coder_agent.py` — `Finish`, `result_from_messages`, `chat`
 
 ### DEC-057 The ReACT loop adds each task to the window as one whole turn
 - Date: 2026-11-05 · Area: Memory / Coder Agent (Lab 1.3) · Status: accepted (refined by DEC-077)
@@ -1391,7 +1391,7 @@ A decision can mix bases; then each part states its own.
   process, which makes the forced limits harder to guarantee); name
   LangGraph in the README and keep the plain loop until Module 2 (no work
   now, but the README would not match the code, risking C1.1).
-- Code: pending (`agents/coder_agent.py` — `run_agent` as a graph)
+- Code: `agents/coder_agent.py` — `build_agent` (through DEC-069); `requirements.txt`
 
 ### DEC-069 The Coder is a LangChain `create_agent` with native tool calling
 - Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
@@ -1428,7 +1428,7 @@ A decision can mix bases; then each part states its own.
 - Revisit when: the technical spike shows that the limit, the explicit
   finish or the argument validation cannot be guaranteed with middleware;
   then fall back to custom nodes with tool calling.
-- Code: pending
+- Code: `agents/coder_agent.py` — `build_agent`, `run_agent`
 
 ### DEC-070 The iteration limit counts tool-loop model calls, not the plan
 - Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
@@ -1443,7 +1443,7 @@ A decision can mix bases; then each part states its own.
   leave 9 iterations for the work.
 - Alternatives: count the plan as iteration 1 (the README and the limit
   would disagree with "10 iterations of the loop").
-- Code: pending
+- Code: `agents/coder_agent.py` — `MAX_ITERATIONS`, `make_plan`, `build_agent`
 
 ### DEC-071 The plan comes from a structured planning step before the loop
 - Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
@@ -1459,7 +1459,8 @@ A decision can mix bases; then each part states its own.
 - Alternatives: ask in the prompt for a plan in the first response's text
   (cheaper, but the plan may be missing); count on the first tool call's
   thought (DEC-072; a reason for one action, not a plan).
-- Code: pending
+- Code: `agents/coder_agent.py` — `Plan`, `PLAN_SYSTEM_PROMPT`, `make_plan`,
+  `inject_context`
 
 ### DEC-072 Every tool call carries a required `thought`
 - Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
@@ -1476,7 +1477,10 @@ A decision can mix bases; then each part states its own.
   "missing thought" errors.
 - Alternatives: ask for it in the prompt without requiring it (gaps in the
   record); require non-empty message text (format errors cost iterations).
-- Code: pending
+- Note (implementation): the `thought` of each call goes to `StepRecord.thought`; it is
+  dropped before `dispatch_tool` in the tool function itself.
+- Code: `tools/agent_tools.py` — `CALL_MODELS`, `_parameters_with_thought`;
+  `agents/coder_agent.py` — `Finish`, `result_from_messages`
 
 ### DEC-073 The agent ends only through `finish`; plain text is an error
 - Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
@@ -1497,7 +1501,12 @@ A decision can mix bases; then each part states its own.
 - Alternatives: plain text ends as `answered` (natural for questions, but
   coding tasks can end unfinished); plain text ends as `answered` only if
   no tool was called yet (still misses code pasted in the chat at once).
-- Code: pending
+- Note (implementation): `ToolStrategy` names the tool after the class, so the model
+  sees `Finish`, not `finish`. A valid `Finish` leaves a `ToolMessage` after
+  the model's response, so `require_tool_call` checks the last AI message,
+  not the last message. On the 10th model call no nudge is sent: the model
+  would never read it (the limit ends the run).
+- Code: `agents/coder_agent.py` — `Finish`, `NUDGE_MESSAGE`, `require_tool_call`
 
 ### DEC-074 One tool call per iteration
 - Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
@@ -1510,7 +1519,7 @@ A decision can mix bases; then each part states its own.
   an execution (DEC-055's "no write after the run").
 - Alternatives: allow several calls per iteration (fewer iterations, but
   ordering and the "last valid run" become ambiguous).
-- Code: pending
+- Code: `agents/coder_agent.py` — `inject_context`
 
 ### DEC-075 LLM through `ChatOpenAI` pointed at OpenRouter
 - Date: 2026-11-07 · Area: LLM client (Module 1) · Status: accepted
@@ -1529,7 +1538,7 @@ A decision can mix bases; then each part states its own.
   agents can use different models (C4.5).
 - Alternatives: a provider-specific LangChain package per model (several
   configurations for the same OpenRouter endpoint).
-- Code: pending (`llm_client.py`, `requirements.txt`)
+- Code: `llm_client.py` — `get_chat_model`; `requirements.txt`
 
 ### DEC-076 LangChain tool adapter in `tools/agent_tools.py`
 - Date: 2026-11-07 · Area: Tools (Module 1) · Status: accepted
@@ -1559,7 +1568,15 @@ A decision can mix bases; then each part states its own.
 - Alternatives: adapter inside `handlers.py` (mixes the framework into the
   validation layer); in `coder_agent.py` (QA could not reuse it);
   LangChain's validation errors as they are (long messages, wasted tokens).
-- Code: pending (`tools/agent_tools.py`)
+- Note (implementation): the tools are declared with the lab's JSON schema plus
+  `thought`, so LangChain does not validate them at all and only our
+  messages reach the model; `dispatch_tool` validates again. The
+  per-iteration log line is written by `require_tool_call`, the only hook
+  that sees every model response (text answers and `Finish` included).
+  `tools/agent_tools.py` is not exported from `tools/__init__.py`, so
+  `import tools` does not load LangChain.
+- Code: `tools/agent_tools.py` — `check_tool_call`, `AGENT_TOOLS`;
+  `agents/coder_agent.py` — `validate_tool_call`
 
 ### DEC-077 Memory and window are injected on every model call
 - Date: 2026-11-07 · Area: Memory / Coder Agent (Module 1) · Status: accepted
@@ -1584,7 +1601,12 @@ A decision can mix bases; then each part states its own.
 - Alternatives: a `before_model` hook that writes memories into the agent
   state (they would pile up in the turn); LangGraph's own store or
   checkpointer (C1.2 requires Chroma and our window).
-- Code: pending (`agents/coder_agent.py`)
+- Note (implementation): the per-task data (task, window, plan) reaches the middleware
+  as the agent's run-time `context`. The limit message only appears when the
+  limit is reached with tool calls; with text answers the run simply ends
+  after the 10th call.
+- Code: `agents/coder_agent.py` — `CoderContext`, `inject_context`,
+  `make_plan`, `_drop_limit_message`, `run_agent`
 
 ### DEC-078 `CoderResult` is computed from the final messages
 - Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
@@ -1604,7 +1626,10 @@ A decision can mix bases; then each part states its own.
   that is easy to test with invented messages (C4.7).
 - Alternatives: custom agent state updated by a `wrap_tool_call`
   middleware (logic spread across hooks).
-- Code: pending (`agents/coder_agent.py`)
+- Note (implementation): one `StepRecord` per tool call (one per model call, since
+  parallel calls are off) or per text answer; the accepted `Finish` has no
+  observation.
+- Code: `agents/coder_agent.py` — `result_from_messages`, `StepRecord`
 
 ### DEC-079 Middleware order; the call limit goes last
 - Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
@@ -1622,4 +1647,4 @@ A decision can mix bases; then each part states its own.
 - Why: the limit counts every model call, nudges included, and ends
   cleanly.
 - Alternatives: our own counter middleware (duplicates the built-in one).
-- Code: pending (`agents/coder_agent.py`)
+- Code: `agents/coder_agent.py` — `build_agent`, `RECURSION_LIMIT`
