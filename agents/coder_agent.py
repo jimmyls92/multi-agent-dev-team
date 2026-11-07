@@ -74,8 +74,9 @@ How you work:
   once the last run shows the code works.
 - If a tool returns an error, fix the cause instead of repeating the same call.
 - You end the task only by calling the Finish tool: "main_file" is the main
-  file you wrote (the same path form you used with the tools), or null when
-  the request needs no code (for example a question), with the answer in
+  file you wrote in this task (the same path form you used with the tools),
+  or null when you wrote no code in this task, for example to answer a
+  question, even one about files from earlier tasks; the answer then goes in
   "explanation".
 - You have at most {MAX_ITERATIONS} responses for the whole task; finish before you run out.
 - Follow your plan below, but let the observations decide each next step."""
@@ -111,7 +112,8 @@ class Finish(BaseModel):
 
     Attributes:
         thought: Why the task is finished, given the last observation.
-        main_file: Main file you wrote, or null when no code was needed.
+        main_file: Main file you wrote in this task, or null when you wrote
+            no code in this task.
         explanation: What you built and how it behaves, or the answer itself.
     """
     model_config = ConfigDict(extra="forbid")
@@ -120,7 +122,10 @@ class Finish(BaseModel):
         min_length=1, description="Why the task is finished, given the last observation."
     )
     main_file: str | None = Field(
-        description="Path of the main file you wrote, or null when no code was needed."
+        description=(
+            "Path of the main file you wrote in this task, or null when you "
+            "wrote no code in this task (for example to answer a question)."
+        )
     )
     explanation: str = Field(
         min_length=1,
@@ -410,6 +415,47 @@ def _last_ai(messages: list[BaseMessage]) -> AIMessage | None:
     return next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
 
 
+def _resolved(path: object) -> str | None:
+    """Returns a path resolved in the workspace, or None if it is invalid.
+
+    Args:
+        path: Path sent by the model.
+
+    Returns:
+        The absolute path inside the workspace, or None if path is not a
+        string or ends up outside the workspace.
+    """
+    if not isinstance(path, str):
+        return None
+    try:
+        return resolve_in_workspace(path)
+    except ValueError:
+        return None
+
+
+def _touched_paths(messages: list[BaseMessage]) -> set[str]:
+    """Returns the files this task wrote or ran (DEC-080).
+
+    Args:
+        messages: Messages of the run.
+
+    Returns:
+        The resolved paths of every write_file and exec_python call that
+        was not rejected by validation.
+    """
+    rejected = {
+        m.tool_call_id for m in messages
+        if isinstance(m, ToolMessage) and m.status == "error"
+    }
+    return {
+        path
+        for m in messages if isinstance(m, AIMessage)
+        for call in m.tool_calls
+        if call["name"] in ("write_file", "exec_python") and call["id"] not in rejected
+        if (path := _resolved(call["args"].get("path"))) is not None
+    }
+
+
 def result_from_messages(
     messages: list[BaseMessage], finish: Finish | None, plan: str
 ) -> CoderResult:
@@ -425,8 +471,10 @@ def result_from_messages(
     Returns:
         The task's CoderResult: one StepRecord per tool call, or per text
         answer; the last valid execution is the artifact of the last
-        exec_python with no write_file call after it (DEC-055, DEC-063); the
-        status follows DEC-055/DEC-056, or ``max_iterations`` without Finish.
+        exec_python with no write_file call after it (DEC-055, DEC-063); a
+        declared main file that exists but that this task neither wrote nor
+        ran counts as none (DEC-080); the status follows DEC-055/DEC-056, or
+        ``max_iterations`` without Finish.
     """
     tool_results = {m.tool_call_id: m for m in messages if isinstance(m, ToolMessage)}
     accepted_finish = _last_ai(messages) if finish is not None else None
@@ -468,7 +516,15 @@ def result_from_messages(
 
     if finish is None:
         return CoderResult(status="max_iterations", plan=plan, iterations=iteration, steps=steps)
-    if finish.main_file is None:
+    main_file = finish.main_file
+    main_code = _read_main_file(main_file) if main_file is not None else None
+    if main_code is not None and _resolved(main_file) not in _touched_paths(messages):
+        # DEC-080: an existing file this task neither wrote nor ran is not its
+        # deliverable. A missing file stays declared and ends as unverified.
+        logger.info("Declared main file %r was not written or run in this task; "
+                    "treated as an answer", main_file)
+        main_file = None
+    if main_file is None:
         # DEC-056: text answer; code and result stay empty.
         return CoderResult(
             status="answered",
@@ -477,14 +533,13 @@ def result_from_messages(
             iterations=iteration,
             steps=steps,
         )
-    main_code = _read_main_file(finish.main_file)
     return CoderResult(
         status=_final_status(main_code, last_execution),
         plan=plan,
         code=main_code or "",
         explanation=finish.explanation,
         result=last_execution.output if last_execution else "",
-        main_file=finish.main_file,
+        main_file=main_file,
         iterations=iteration,
         steps=steps,
     )

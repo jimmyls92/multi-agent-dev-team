@@ -1097,7 +1097,7 @@ A decision can mix bases; then each part states its own.
 - Code: `agents/coder_agent.py` — `_final_status`, `result_from_messages`
 
 ### DEC-056 A final answer without code has its own status, `answered`
-- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted (refined by DEC-080)
 - Basis: Required (C1.2: the official Lab 1.1 recall test sends
   conversational messages through `chat()` and must keep passing; C1.5: no
   success without a real execution); the status name — Preferred
@@ -1648,3 +1648,39 @@ A decision can mix bases; then each part states its own.
   cleanly.
 - Alternatives: our own counter middleware (duplicates the built-in one).
 - Code: `agents/coder_agent.py` — `build_agent`, `RECURSION_LIMIT`
+
+### DEC-080 A declared main file counts only if this task wrote or ran it
+- Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
+- Basis: Preferred (refines DEC-056; C1.5: statuses from facts, not from
+  the model's claim)
+- Context: in a real session, a question about a file from an earlier
+  task ("what did the file you just wrote print?") ended as `unverified`:
+  the model declared that file as `main_file` in `Finish` although it
+  wrote nothing in this task. Clearer wording in the prompt and in
+  `Finish` did not stop it (`gpt-4.1-mini`, 2 of 2 runs).
+- Decision: the declared `main_file` counts as this task's deliverable
+  only if this task called `write_file` or `exec_python` on that same path
+  (compared after resolving it in the workspace) and the call was not
+  rejected by validation.
+  - Not touched and the file exists: treated as null; the task ends as
+    `answered` (`main_file`, `code` and `result` empty) and one INFO line
+    records it. The model referred to an earlier file; this task
+    delivered text, not code.
+  - Not touched and the file does not exist (or is outside the
+    workspace): it stays declared and the task ends as `unverified`
+    (DEC-052, DEC-055): the model claimed a deliverable that does not
+    exist.
+- Why: statuses describe the evidence this task produced, not the kind of
+  request, which the system does not classify (DEC-056). `answered`
+  means "no code delivered in this task", so a question about an earlier
+  file is not shown as a failed coding task; a declared file that does
+  not exist is a false claim and stays flagged as `unverified`. Counting
+  a run of the file keeps "check whether greet.py works" (run it, change
+  nothing) as `success`, not `answered`.
+- Alternatives: keep `unverified` for every untouched file (consistent
+  with "not checked", but questions about earlier files look like failed
+  tasks); `answered` also for a missing file (one-line rule, but hides a
+  false claim); stronger prompt only (already failed once, no guarantee);
+  count only writes (a task that only runs an existing file would end as
+  `answered`).
+- Code: `agents/coder_agent.py` — `_touched_paths`, `result_from_messages`
