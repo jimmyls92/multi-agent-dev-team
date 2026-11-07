@@ -70,7 +70,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Decisiones del proyecto
 
-- Framework: **LangGraph** desde el Módulo 1 (DEC-068, sustituye a DEC-047). Documentarlo en el README. Si se cambia de framework, justificarlo (C2.6).
+- Framework: **LangGraph** desde el Módulo 1 (DEC-068, sustituye a DEC-047); el Coder usa `create_agent` de LangChain con tool calling nativo y middleware (DEC-069). Documentarlo en el README. Si se cambia de framework, justificarlo (C2.6).
 - LLM: la guía permite GPT-4o, Claude Sonnet u Ollama. Si se usa un equivalente, por ejemplo vía OpenRouter, indicarlo en el README.
 - Patrón del agente: **ReACT** (lo exige la guía).
 - Protocolo del Módulo 3: **pendiente** (MCP con el SDK oficial de Python, **o** A2A con `sender`, `receiver`, `intent`, `payload`, `correlation_id` y validación de intent).
@@ -83,7 +83,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Trabajando en: **migrar el bucle ReACT del Coder a LangGraph** (DEC-068) para cerrar C1.1; después, nombrar el framework en el README.
+Trabajando en: **migrar el Coder a LangChain `create_agent` (LangGraph)** para cerrar C1.1. Producto y técnico cerrados (DEC-068..DEC-079); toca el **código pieza a pieza** (ver el plan más abajo).
 
 Progreso:
 - ✅ Lab 1.1 cerrado: memoria de dos capas (C1.2), DEC-004..DEC-031. El test oficial pasa con una key real.
@@ -107,17 +107,33 @@ Progreso:
   Hecho: además DEC-067 (`dispatch_tool` devuelve `ToolOutcome`); una ejecución real de una tarea con `python -m agents.coder_agent "..."` termina en `success` en 3 iteraciones.
   6. ✅ **Tests:** `pytest tests/test_smoke.py --run-llm` pasa con key real; `tests.test_memory` pasa con key real; `pytest tests/` 24 passed + 1 skipped. Detalle original: `tests/conftest.py` + `tests/test_smoke.py` (DEC-054, DEC-066), ejecutarlo con key real; volver a pasar `CHROMA_PATH=.chroma-test python -m tests.test_memory` (C1.2) y `pytest tests/` (Lab 1.2).
   ✅ Comparado con `lab_1_3_src/agent_solution.py` y README escrito (setup, ejecución, estados, tests y decisiones del Módulo 1).
-- ⏭️ **Siguiente: LangGraph (DEC-068).** Fase técnica del grafo del Coder (estado, nodos, aristas, tope de 10, estados finales); después código pieza a pieza, volver a pasar el smoke test y `pytest tests/`, y nombrar LangGraph y su porqué en el README.
+- ✅ Framework: LangGraph (DEC-068). Producto cerrado: `create_agent` con tool calling nativo (DEC-069, sustituye a DEC-060/061); el plan no cuenta en las 10 (DEC-070); paso de plan estructurado antes del bucle (DEC-071, sustituye a DEC-053); `thought` obligatorio en cada tool (DEC-072); solo se termina con la tool `finish`, el texto sin tool es un error que cuenta como iteración (DEC-073); una tool por iteración (DEC-074).
+- ✅ Técnico cerrado: `get_chat_model(model)` con `ChatOpenAI` → OpenRouter (DEC-075); adaptador `tools/agent_tools.py` + middleware de validación con errores cortos (DEC-076); memoria y ventana inyectadas en cada llamada con `build_context()` (DEC-077); `CoderResult` calculado al final desde los mensajes (DEC-078); orden de middleware con el límite el último (DEC-079).
+- ⏭️ **Siguiente: código de la migración, pieza a pieza** (el usuario revisa cada una; leer antes las fichas citadas). `run_agent(task, window) -> CoderResult`, `chat()` y `main()` mantienen la firma; el smoke test y `tests/test_memory.py` no cambian.
+  1. **Dependencias y cliente** (DEC-075): `requirements.txt` (+`langchain>=1.4,<2`, `langchain-openai>=1.7,<2`, `langgraph>=1.2,<2`; quitar `openai`), instalar en `.venv` (`UV_LINK_MODE=copy uv pip install -r requirements.txt`), `llm_client.get_chat_model(model)` sustituye a `get_client()`.
+  2. **`tools/agent_tools.py`** (DEC-076, DEC-072): modelos de llamada = `*Args` de `handlers.py` + `thought`; `StructuredTool` con `response_format="content_and_artifact"` que quita `thought` y llama a `dispatch_tool` (contenido = observación, artifact = `ExecutionResult`); descripciones desde `tools/schemas.py` (no se toca).
+  3. **Coder: agente** (DEC-069..DEC-074, DEC-077, DEC-079): prompt, `Plan`, `Finish` (`thought`, `main_file: str | None`, `explanation` no vacía), middleware `inject_context` (`wrap_model_call` + `build_context()` + `parallel_tool_calls=False`), `validate_tool_call` (`wrap_tool_call`), `require_tool_call` (`after_model`, `can_jump_to=["model"]`) y `ModelCallLimitMiddleware(run_limit=10, exit_behavior="end")` **el último**; `create_agent(..., response_format=ToolStrategy(Finish))`.
+  4. **Coder: `run_agent`** (DEC-071, DEC-078, DEC-049, DEC-057): `store_memory`, plan con `with_structured_output(Plan)` y `build_context()`, invocar el agente con `recursion_limit` de seguridad, calcular `CoderResult` desde los mensajes, `store_outcome`, `add_turn` sin el mensaje de límite. Borrar parser, `ToolStep`/`FinalStep`/`ParseFailure`/`_describe_tools`.
+  5. **Verificar:** `pytest tests/`, `pytest tests/test_smoke.py --run-llm`, `CHROMA_PATH=.chroma-test python -m tests.test_memory` y una tarea real con `python -m agents.coder_agent "..."`.
+  6. **Docs:** README (framework y porqué según DEC-068/069, cómo funciona, modelo con tool calling, "Known simplifications" sin DEC-047), campo `Code:` de DEC-068..DEC-079 y esta sección.
+  Notas de la prueba (`/tmp/lgcheck`, fuera del repo; versiones langchain 1.4.9, langgraph 1.2.20, langchain-openai 1.7.4, langchain-core 1.7.6):
+  - `create_react_agent` está deprecado; se usa `from langchain.agents import create_agent`. Middleware en `langchain.agents.middleware` (`after_model`, `wrap_model_call`, `wrap_tool_call`, `ModelCallLimitMiddleware`); `ToolStrategy` en `langchain.agents.structured_output`.
+  - Los `after_model` se ejecutan en orden inverso de la lista; el límite cuenta en su `after_model`, por eso va el último (DEC-079). Al llegar al límite termina sin excepción, sin `structured_response` y añade un `AIMessage` "Model call limits exceeded: run limit (10/10)".
+  - Con `ToolStrategy`, `create_agent` llama a `bind_tools(..., tool_choice="any")`: el modelo está obligado a llamar a una tool; `require_tool_call` es red de seguridad.
+  - `finish` inválido: devuelve el error al modelo y reintenta. Argumentos inválidos y tool inexistente: `ToolMessage` con `status="error"`, la tool no se ejecuta; el mensaje de LangChain repite todos los kwargs (por eso DEC-076).
+  - Los errores de validación de argumentos no los ve `ToolErrorMiddleware`; una excepción dentro de la función de una tool la vuelve a lanzar `ToolNode` y para el agente (por eso `dispatch_tool` nunca lanza).
+  - Cambiar el request: `request.override(model_settings=..., messages=..., system_message=...)`; asignar atributos está deprecado. Campos de `ModelRequest`: model, messages, system_message, tool_choice, tools, response_format, state, runtime, model_settings.
+  - Para modelos falsos: subclase de `GenericFakeChatModel` con `bind_tools` que devuelve `self`; `AIMessage("", tool_calls=[{"name", "args", "id"}])`.
 Pendientes fuera del lab:
-- Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032). Falta documentar el setup en el README.
+- Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032); setup documentado en el README.
 - Tests mockeados de la memoria (sin LLM real), a proponer y aprobar antes de escribirlos: el input actual nunca vuelve como recuerdo (DEC-031), un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029) y los duplicados exactos se actualizan (DEC-011). Aplazados por decisión del usuario (en el Módulo 1 solo lo que exigen las Cs); como tarde en C4.7.
 - Tests propios de las tools (Lab 1.2), aplazados: confinamiento a `workspace/` (DEC-036, DEC-042), entorno sin credenciales (DEC-039, DEC-043), `cwd` del script (DEC-040), stdin cerrado, mensaje sin salida y truncado por el final (DEC-038), tope de lectura (DEC-041) y muerte del grupo de procesos (DEC-044). Proponer y aprobar antes de escribirlos. Aplazados por decisión del usuario (en el Módulo 1 solo lo que exigen las Cs); como tarde en C4.7.
-- Tests mockeados del Coder (Lab 1.3), aplazados por decisión del usuario: en el Módulo 1 solo el smoke test que exige C1.6. Propuestos: parser (DEC-060), estados del bucle (DEC-055/056/063), ventana y memoria en el bucle (DEC-049/057/058), `dispatch_tool` (DEC-062), resultado estructurado de la ejecución (DEC-063) y `add_turn` (DEC-057). Como tarde en C4.7 (tests unitarios mockeados de cada agente).
+- Tests mockeados del Coder (Lab 1.3), aplazados por decisión del usuario: en el Módulo 1 solo el smoke test que exige C1.6. Propuestos: parser (DEC-060), estados del bucle (DEC-055/056/063), ventana y memoria en el bucle (DEC-049/057/058), `dispatch_tool` (DEC-062), resultado estructurado de la ejecución (DEC-063) y `add_turn` (DEC-057). Como tarde en C4.7 (tests unitarios mockeados de cada agente). Tras la migración a `create_agent` (DEC-069) el parser desaparece; los propuestos pasan a ser, con modelo falso: (a) **prioritario**, un modelo que solo da texto para en 10 con `max_iterations` (fija el orden de DEC-079); (b) un modelo que llama a tools sin terminar para en 10; (c) argumentos inválidos no ejecutan la tool (DEC-076); y el cálculo de `CoderResult` desde mensajes inventados (DEC-078). Aplazados por decisión del usuario.
 - Mejoras de memoria IMP-001..IMP-005: siguen en `idea`.
 - El repo aún no tiene remoto. Tras el primer push no se reescribe historial.
 - "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
-- ✅ Framework elegido: LangGraph (DEC-068). Falta migrar el bucle y nombrarlo en el README antes de entregar el Módulo 1 (C1.1).
+- Framework elegido: LangGraph (DEC-068). Falta migrar el Coder (plan de arriba) y nombrarlo en el README antes de entregar el Módulo 1 (C1.1).
 
 Actualiza esta sección al terminar cada TODO y al empezar o cerrar cada lab.
 

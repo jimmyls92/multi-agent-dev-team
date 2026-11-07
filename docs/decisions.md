@@ -56,7 +56,7 @@ A decision can mix bases; then each part states its own.
 - Code: `docs/labs/`, `pytest.ini`
 
 ### DEC-002 LLM access through OpenRouter with the OpenAI SDK
-- Date: 2026-10-30 · Area: LLM client (Lab 1.1) · Status: accepted
+- Date: 2026-10-30 · Area: LLM client (Lab 1.1) · Status: accepted (refined by DEC-075)
 - Basis: Preferred (constrained by the available credentials)
 - Context: the lab template routes OpenAI calls through Helicone
   (`helicone_client`, model `gpt-4.1-mini`); the available credentials are for
@@ -1124,7 +1124,7 @@ A decision can mix bases; then each part states its own.
 - Code: `agents/coder_agent.py` — `FinalStep`, `run_agent`, `chat`
 
 ### DEC-057 The ReACT loop adds each task to the window as one whole turn
-- Date: 2026-11-05 · Area: Memory / Coder Agent (Lab 1.3) · Status: accepted
+- Date: 2026-11-05 · Area: Memory / Coder Agent (Lab 1.3) · Status: accepted (refined by DEC-077)
 - Basis: Required (C1.2: last N turns; DEC-048: a turn is one task plus all
   its iterations); how — Preferred
 - Context: DEC-004 opens a turn on every "user" message and asked to be
@@ -1149,7 +1149,7 @@ A decision can mix bases; then each part states its own.
   `run_agent`
 
 ### DEC-058 `build_context()` is reused for every loop iteration
-- Date: 2026-11-05 · Area: Memory / Coder Agent (Lab 1.3) · Status: accepted
+- Date: 2026-11-05 · Area: Memory / Coder Agent (Lab 1.3) · Status: accepted (refined by DEC-077)
 - Basis: Required (C1.2: retrieval before every LLM call); how — Preferred
 - Context: a task makes up to 10 LLM calls (C1.4), each needing retrieval
   queried by the task (DEC-050) and the messages of the turn in progress.
@@ -1234,7 +1234,7 @@ A decision can mix bases; then each part states its own.
 - Code: `agents/coder_agent.py` — `_describe_tools`, `REACT_SYSTEM_PROMPT`
 
 ### DEC-062 `dispatch_tool` returns errors instead of raising
-- Date: 2026-11-05 · Area: Tools (Lab 1.3) · Status: accepted
+- Date: 2026-11-05 · Area: Tools (Lab 1.3) · Status: accepted (refined by DEC-076)
 - Basis: Required (C4.6: invalid LLM output never reaches the tools)
 - Context: the lab's `dispatch_tool` and the one in `agents/tools_demo.py`
   both raise `TypeError` when the arguments are not a JSON object (and the
@@ -1299,7 +1299,7 @@ A decision can mix bases; then each part states its own.
 - Code: `agents/coder_agent.py` — `chat`, `main`
 
 ### DEC-065 `CoderResult` is the Pydantic output of a whole task
-- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted
+- Date: 2026-11-05 · Area: Coder Agent (Lab 1.3) · Status: accepted (refined by DEC-078)
 - Basis: Required (C1.5: `code`, `explanation`, `plan`, `result`; C1.4:
   plan and action/observation record); the extra fields — Preferred
 - Context: the lab's `AgentResult` (answer, iterations, tool_calls,
@@ -1511,3 +1511,115 @@ A decision can mix bases; then each part states its own.
 - Alternatives: allow several calls per iteration (fewer iterations, but
   ordering and the "last valid run" become ambiguous).
 - Code: pending
+
+### DEC-075 LLM through `ChatOpenAI` pointed at OpenRouter
+- Date: 2026-11-07 · Area: LLM client (Module 1) · Status: accepted
+- Basis: Preferred (refines DEC-002)
+- Context: `create_agent` (DEC-069) needs a LangChain chat model, not the
+  raw OpenAI SDK client.
+- Decision: `llm_client.get_client()` is replaced by
+  `get_chat_model(model)`, which returns a `ChatOpenAI` with OpenRouter's
+  base URL and `OPENROUTER_API_KEY`. "OpenAI" is the API protocol that
+  OpenRouter exposes for every model; `LLM_MODEL` can be any OpenRouter
+  model that supports tool calling. Dependencies: `langchain>=1.4,<2`,
+  `langchain-openai>=1.7,<2`, `langgraph>=1.2,<2`; `openai` is no longer a
+  direct dependency. Retries stay at `ChatOpenAI`'s defaults until C4.2
+  (Module 4, `ModelRetryMiddleware` with jitter).
+- Why: one place configures the provider; the model is a parameter, so
+  agents can use different models (C4.5).
+- Alternatives: a provider-specific LangChain package per model (several
+  configurations for the same OpenRouter endpoint).
+- Code: pending (`llm_client.py`, `requirements.txt`)
+
+### DEC-076 LangChain tool adapter in `tools/agent_tools.py`
+- Date: 2026-11-07 · Area: Tools (Module 1) · Status: accepted
+- Basis: Required (C4.6: invalid tool arguments never run); the adapter —
+  Preferred (refines DEC-062)
+- Context: `create_agent` takes LangChain tool objects. Our tools are
+  three layers: implementations (`file_io.py`, `code_executor.py`),
+  validation and dispatch (`handlers.py`), and now what the model sees.
+  LangChain's own validation errors repeat every argument, including whole
+  file contents, and an exception raised inside a tool function stops the
+  whole agent.
+- Decision:
+  - `tools/agent_tools.py` defines one call model per tool: the strict
+    `ReadFileArgs`, `WriteFileArgs`, `ExecPythonArgs` plus a required
+    `thought` (DEC-072); descriptions come from `tools/schemas.py`
+    (unchanged lab schemas).
+  - Each LangChain tool (`response_format="content_and_artifact"`) drops
+    `thought` and calls `dispatch_tool`; the observation is the content and
+    the `ExecutionResult` the artifact (DEC-063, DEC-067).
+  - A `wrap_tool_call` middleware validates the arguments with the call
+    models before LangChain runs the tool; invalid calls get our short
+    "Error: invalid arguments ..." message and never run. It also logs one
+    line per iteration.
+- Why: implementations and `handlers.py` stay framework-free; the adapter
+  is the only LangChain-specific tool code and can be reused by QA
+  (Module 3); `dispatch_tool` never raising keeps the agent alive.
+- Alternatives: adapter inside `handlers.py` (mixes the framework into the
+  validation layer); in `coder_agent.py` (QA could not reuse it);
+  LangChain's validation errors as they are (long messages, wasted tokens).
+- Code: pending (`tools/agent_tools.py`)
+
+### DEC-077 Memory and window are injected on every model call
+- Date: 2026-11-07 · Area: Memory / Coder Agent (Module 1) · Status: accepted
+- Basis: Required (C1.2: Chroma queried before each LLM call, retrieved
+  context injected; window of the last N turns); how — Preferred (refines
+  DEC-057, DEC-058)
+- Context: inside `create_agent` the model calls happen in the framework's
+  loop; the agent state only holds the current task's messages.
+- Decision:
+  - A `wrap_model_call` middleware calls `build_context()` before every
+    model call: the system message gets the Coder prompt, the plan
+    (DEC-071) and the retrieved memories, and the window's messages go
+    before the task. The plan call also uses `build_context()`.
+    `memory.py` does not change.
+  - The window stores each whole turn (DEC-057) in OpenAI message format,
+    tool calls included (`convert_to_openai_messages` /
+    `convert_to_messages`, checked to round-trip).
+  - The "Model call limits exceeded" message LangChain adds at the limit
+    is left out of the window: the model never wrote it.
+- Why: the C1.2 behavior is unchanged and visible in the same log line
+  (DEC-025); memory keeps one implementation.
+- Alternatives: a `before_model` hook that writes memories into the agent
+  state (they would pile up in the turn); LangGraph's own store or
+  checkpointer (C1.2 requires Chroma and our window).
+- Code: pending (`agents/coder_agent.py`)
+
+### DEC-078 `CoderResult` is computed from the final messages
+- Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
+- Basis: Required (C1.4 record, C1.5 result from a real execution); how —
+  Preferred (refines DEC-065)
+- Context: `create_agent` returns the whole conversation and, when
+  `finish` was called, `structured_response`. The spike kept the last
+  execution in a custom state updated by a middleware during the run.
+- Decision: one function reads the final messages after the run: one
+  `StepRecord` per AI message (thought and action from the call
+  arguments, observation from the answering tool message, nudges as
+  errors); the last valid execution is the artifact of the last
+  `exec_python` with no `write_file` after it (DEC-055); `finish` present
+  gives the DEC-055/056 status, absent gives `max_iterations`; `code` is
+  read from disk (DEC-052); `plan` comes from the planning step.
+- Why: one middleware fewer; all the status logic in one pure function
+  that is easy to test with invented messages (C4.7).
+- Alternatives: custom agent state updated by a `wrap_tool_call`
+  middleware (logic spread across hooks).
+- Code: pending (`agents/coder_agent.py`)
+
+### DEC-079 Middleware order; the call limit goes last
+- Date: 2026-11-07 · Area: Coder Agent (Module 1) · Status: accepted
+- Basis: Required (C1.4: the loop stops after at most 10 iterations, with
+  no crash under the assessor's probe)
+- Context: the spike showed that `ModelCallLimitMiddleware` counts calls
+  in its own `after_model`, and `after_model` hooks run in reverse list
+  order. With the limit first, `require_tool_call` (DEC-073) jumped back
+  to the model before the count: a model answering only text looped
+  until `GraphRecursionError`.
+- Decision: middleware order `[inject_context, validate_tool_call,
+  require_tool_call, ModelCallLimitMiddleware(run_limit=10,
+  exit_behavior="end")]`, with a comment in the code; `recursion_limit` is
+  set above what 10 iterations need, only as a safety net.
+- Why: the limit counts every model call, nudges included, and ends
+  cleanly.
+- Alternatives: our own counter middleware (duplicates the built-in one).
+- Code: pending (`agents/coder_agent.py`)
