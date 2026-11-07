@@ -12,16 +12,33 @@ the orchestration graph, Docker and observability arrive in Modules 2-4.
 
 ## Framework
 
-**Not chosen yet.** The Module 1 ReACT loop is plain Python, as in the course
-lab (DEC-047): the criteria for this module need no framework, and the choice
-between LangGraph, AutoGen and CrewAI is made before the Module 1 submission
-and at the latest in Module 2, when the PM and the Coder must run in one
-orchestration graph. This section will name the framework and the reason for
-the choice.
+**[LangGraph](https://langchain-ai.github.io/langgraph/)**, for every agent and
+for the orchestration (DEC-068). The Coder's ReACT loop is LangChain's
+`create_agent`, which builds a LangGraph graph, with native tool calling and
+our own middleware (DEC-069).
 
-**LLM:** any OpenAI-compatible model through [OpenRouter](https://openrouter.ai)
-(an equivalent of the GPT-4o / Claude Sonnet options in the course guide). The
-default is `openai/gpt-4.1-mini`, set with `LLM_MODEL`.
+Why LangGraph:
+- **Explicit control flow.** Nodes and conditional edges decide what runs
+  next, so the limits the assessor forces (10 ReACT iterations, the QA→Coder
+  loop limit, task order) are conditions in the graph, not left to the LLM.
+- **Typed shared state** is native, as the PM → Coder → QA handoff needs
+  (Modules 2-3).
+- **The standard agent loop with hooks.** `create_agent` brings the loop, a
+  model-call limit and a validated final answer; middleware adds what a
+  Coder needs on top: memory injected on every call, tool arguments
+  validated before any tool runs, and no task ending without the `Finish`
+  tool.
+- **Tracing and tests.** LangSmith traces the graph (Module 4), and fake chat
+  models make the mocked agent tests simple.
+- Trade-off: more code than CrewAI to define roles, and no free-form agent
+  conversation (AutoGen's strength); our flow PM → Coder → QA is a fixed
+  sequence with bounded loops, so neither is needed.
+
+**LLM:** any model with tool calling through [OpenRouter](https://openrouter.ai),
+used with LangChain's `ChatOpenAI` because OpenRouter speaks the OpenAI API
+for every model (DEC-075); an equivalent of the GPT-4o / Claude Sonnet options
+in the course guide. The default is `openai/gpt-4.1-mini`, set with
+`LLM_MODEL`.
 
 ## Setup
 
@@ -51,39 +68,53 @@ python -m agents.coder_agent "Write is_palindrome(s) in palindrome.py and test i
 
 The agent works inside `workspace/` (git-ignored): every path it uses is
 confined there, and scripts run in a child process with a timeout and without
-the agent's credentials. `LOG_LEVEL=INFO` logs one line per iteration (tool
-called) and one per LLM call (window size and memories retrieved);
-`LOG_LEVEL=DEBUG` adds the full LLM input.
+the agent's credentials. `LOG_LEVEL=INFO` logs the plan, one line per
+iteration (tool called, or a text answer sent back) and one per LLM call
+(window size and memories retrieved); `LOG_LEVEL=DEBUG` adds the full LLM
+input.
 
 ### How it works
 
-- **ReACT loop** (`agents/coder_agent.py`): up to **10 iterations** per task.
-  Each LLM response is `Thought` + `Action` + `Action Input`, or `Thought` +
-  `FINAL ANSWER`; it is parsed into a Pydantic model before anything acts on
-  it, and format errors go back to the LLM as an observation (DEC-060).
-- **Tools** (`tools/`): `read_file`, `write_file`, `exec_python`, called
-  through `dispatch_tool`, which validates the arguments with Pydantic and
-  never raises (DEC-042, DEC-062).
+- **Plan** (`agents/coder_agent.py`): before the loop, one LLM call returns
+  a Pydantic-validated `Plan`; it goes into the loop's prompt and into the
+  output. It does not count as an iteration (DEC-070, DEC-071).
+- **ReACT loop**: a `create_agent` graph with native tool calling, at most
+  **10 model calls** per task (DEC-069, DEC-079). Each response calls exactly
+  one tool (DEC-074), and every tool has a required `thought` argument, the
+  Thought of that step (DEC-072). The task ends only through the `Finish`
+  tool (`main_file` or null, `explanation`), validated with Pydantic; a
+  response with text and no tool call goes back to the model as an error
+  and counts as an iteration (DEC-073).
+- **Tools** (`tools/`): `read_file`, `write_file`, `exec_python`. The model
+  sees the lab schemas plus `thought` (`tools/agent_tools.py`); a middleware
+  validates every call with strict Pydantic models before it runs, and
+  `dispatch_tool` validates again and never raises, so invalid arguments
+  never reach a tool (DEC-042, DEC-062, DEC-076).
 - **Memory** (`memory.py`): a sliding window of the last N tasks of the
   session (each task with all its iterations is one turn), and a Chroma
-  semantic store queried **before every LLM call**, whose results are
-  injected into the system prompt. It stores each task and the outcome of
-  each finished task (DEC-049, DEC-057, DEC-058).
+  semantic store queried **before every LLM call** (the plan call and each
+  call of the loop), whose results are injected into the system prompt. It
+  stores each task and the outcome of each finished task (DEC-049, DEC-057,
+  DEC-058, DEC-077).
 
 ### Output and statuses
 
-Every task returns a `CoderResult` (Pydantic) with `status`, `plan` (first
-Thought), `code` (read from the main file on disk), `explanation`, `result`
-(output of the last real execution), `main_file`, `iterations` and `steps`
-(thought, action, input and observation of each iteration).
+Every task returns a `CoderResult` (Pydantic) with `status`, `plan` (from
+the planning step), `code` (read from the main file on disk), `explanation`,
+`result` (output of the last real execution), `main_file`, `iterations` and
+`steps` (thought, action, input and observation of each step). It is computed
+from the agent's messages after the run (DEC-078).
+
+The status describes the evidence the task produced, not the kind of
+request:
 
 | Status | Meaning |
 |---|---|
-| `success` | Final answer, the main file exists and its last run (with no file written after it) ended without error. |
-| `failed_execution` | Final answer, but the last valid run failed. |
-| `unverified` | Final answer without a valid run: never ran, files changed after the run, or the declared file does not exist. |
-| `answered` | Text answer with no code (for example a question); nothing was executed. |
-| `max_iterations` | 10 iterations without a final answer. |
+| `success` | `Finish` with a main file this task wrote or ran; the file exists and its last run (with no file written after it) ended without error. |
+| `failed_execution` | `Finish` with a main file, but the last valid run failed. |
+| `unverified` | `Finish` with a main file but no valid run: never ran, files changed after the run, or the declared file does not exist. |
+| `answered` | `Finish` without code from this task (for example a question, even one about a file from an earlier task); nothing was executed (DEC-056, DEC-080). |
+| `max_iterations` | 10 model calls without `Finish`. |
 
 Only `success` means the code was checked by a real execution.
 
@@ -105,12 +136,13 @@ subprocess to check its behavior. Without `--run-llm` it is skipped; with
 
 ```
 agents/          coder_agent.py (Module 1); pm_agent.py, qa_agent.py (Modules 2-3)
-tools/           file_io.py, code_executor.py, handlers.py (validation, dispatch), schemas.py
+tools/           file_io.py, code_executor.py, handlers.py (validation, dispatch), schemas.py,
+                 agent_tools.py (LangChain adapter)
 orchestration/   orchestration graph (Module 2)
 tests/           pytest tests and the smoke test
 docs/            decisions.md, improvements.md, labs/, course_reference.txt
 memory.py        two-tier memory
-llm_client.py    shared OpenRouter client
+llm_client.py    shared chat model (ChatOpenAI → OpenRouter)
 ```
 
 `Dockerfile` and `docker-compose.yml` are placeholders until Module 4.
@@ -126,8 +158,10 @@ each `DEC-NNN` it applies. Ideas beyond the requirements are in
 - Labs live inside the required scaffold; shared modules (`memory.py`,
   `llm_client.py`) sit at the root, split by responsibility — DEC-001,
   DEC-033, DEC-035
-- LLM through OpenRouter with the OpenAI SDK; model set by `LLM_MODEL` —
-  DEC-002
+- LangGraph as the framework; the Coder is a `create_agent` graph —
+  DEC-068, DEC-069
+- LLM through OpenRouter with LangChain's `ChatOpenAI`; model set by
+  `LLM_MODEL` and passed per agent — DEC-002, DEC-075
 - Python 3.11 locally via uv — DEC-032
 
 **C1.2 Memory**
@@ -135,9 +169,10 @@ each `DEC-NNN` it applies. Ideas beyond the requirements are in
   iterations — DEC-004, DEC-048, DEC-057
 - Chroma with local embeddings (no extra API key) and an on-disk store, so
   memories survive between runs — DEC-003
-- Retrieval runs before every LLM call, queried by the task, and its results
-  go into the system message; memories already in the window are skipped —
-  DEC-015, DEC-016, DEC-050, DEC-058
+- Retrieval runs before every LLM call (a middleware rebuilds the input of
+  each model call), queried by the task, and its results go into the system
+  message; memories already in the window are skipped — DEC-015, DEC-016,
+  DEC-050, DEC-058, DEC-077
 - Stored: each task and the outcome of each finished task, not tool
   observations — DEC-049, DEC-059
 - A failed LLM call raises and leaves the window untouched — DEC-027,
@@ -154,16 +189,19 @@ each `DEC-NNN` it applies. Ideas beyond the requirements are in
   DEC-043
 - `exec_python` always returns a useful text (output, exit code or timeout)
   — DEC-038
+- Every tool call is validated with strict Pydantic models before the tool
+  runs, with short error messages; `dispatch_tool` validates again and never
+  raises — DEC-062, DEC-067, DEC-076
 
 **C1.4 ReACT loop**
-- Text format (`Thought` / `Action` / `Action Input` / `FINAL ANSWER`) parsed
-  into Pydantic steps; format errors go back to the LLM as observations; at
-  most 10 iterations — DEC-060
-- Tools are described in the prompt, generated from their schemas — DEC-061
-- `dispatch_tool` never raises and returns the structured result of each
-  execution — DEC-062, DEC-067
-- The plan is the first Thought; every iteration is recorded in `steps` —
-  DEC-053
+- Native tool calling in a `create_agent` loop; at most 10 model calls,
+  enforced by LangChain's call limit placed last in the middleware —
+  DEC-069, DEC-070, DEC-079
+- A validated `Plan` before the loop — DEC-071
+- Every tool call carries a `thought`; one tool per call; the task ends only
+  through `Finish`, and text answers go back as errors — DEC-072, DEC-073,
+  DEC-074
+- Every step is recorded in `steps` — DEC-078
 
 **C1.5 Structured output**
 - `CoderResult` (Pydantic) is the output of a whole task — DEC-065
@@ -171,6 +209,9 @@ each `DEC-NNN` it applies. Ideas beyond the requirements are in
   written artifact — DEC-052
 - `result` comes from the last real execution with no file written after it;
   the status says how the task ended — DEC-055, DEC-056, DEC-063
+- A declared main file only counts if this task wrote or ran it; an existing
+  file from an earlier task makes the answer `answered`, a missing one
+  `unverified` — DEC-080
 
 **C1.6 Verification**
 - The smoke test runs a real task with the real LLM (opt-in with
@@ -178,7 +219,7 @@ each `DEC-NNN` it applies. Ideas beyond the requirements are in
   DEC-054, DEC-066
 
 **Known simplifications** (provisional, to revisit)
-- No agent framework yet: the loop is plain Python — DEC-047
 - Memory deduplication only catches exact repeats — DEC-011
 - One run id per process, no session id — DEC-014
 - Retrieval returns the top K without a relevance threshold — DEC-017
+- LLM retries are `ChatOpenAI`'s defaults until Module 4 (C4.2) — DEC-075
