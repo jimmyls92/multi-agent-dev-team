@@ -1725,7 +1725,8 @@ A decision can mix bases; then each part states its own.
   prose-only spec Not Yet. C2.4 asks for a requirement mapping after
   consolidation.
 - Decision: the spec is a Pydantic model with `name`, `description`,
-  `acceptance_criteria` (each with an ID such as `AC-1`), `tasks` and
+  `acceptance_criteria` (each with an ID such as `REQ-1`; prefix `REQ-`
+  so it never clashes with the `AC-<n>.<m>-<k>` IDs of our own specs), `tasks` and
   `details` (markdown with the lab's five sections). Each task lists the
   spec criteria it covers; validation fails if any spec criterion is not
   covered by a task.
@@ -1927,3 +1928,21 @@ A decision can mix bases; then each part states its own.
 - Revisit when: more shared helpers appear (the helper module's name and
   split may change), or Lab 2.3 wires the Coder into the state (DEC-065).
 - Code: —
+
+### DEC-095 Task acceptance criteria are structured Given/When/Then
+- Date: 2026-11-09 · Area: Orchestration (Lab 2.1) · Status: accepted
+- Basis: Preferred
+- Context: the spec has two levels of criteria. Spec criteria (with IDs)
+  say what the whole requirement must meet and drive the coverage check
+  (DEC-083); task criteria say how the code of one task is checked. In
+  Module 3, QA writes pytest tests that check behaviour (C3.1).
+- Decision: each task acceptance criterion is a `TaskCriterion` with
+  non-empty `given`, `when` and `then` fields. Spec criteria stay plain
+  statements with an ID.
+- Why: a Given/When/Then check translates almost directly into a test for
+  the Coder and QA; as fields, Pydantic enforces the form and a missing
+  part triggers the corrective retry (DEC-088).
+- Alternatives: a regular expression over free text (brittle with commas,
+  case or extra "and"); Given/When/Then also for spec criteria (they state
+  what, not how to check it); plain strings as the lab (vague checks).
+- Code: `orchestration/state.py` — `TaskCriterion`, `TaskSpec`

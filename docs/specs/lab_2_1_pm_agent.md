@@ -3,7 +3,7 @@
 - **Status:** approved
 - **Sources:** lab handout `docs/labs/lab_2_1_pm_agent.md`, project guide
   (Module 2, `docs/course_reference.txt` Part A2), rubric C2.1–C2.5
-- **Decisions:** DEC-081..DEC-094 (the why lives there; do not repeat it here)
+- **Decisions:** DEC-081..DEC-095 (the why lives there; do not repeat it here)
 
 ## Goal
 
@@ -22,6 +22,7 @@ state already has the fields the Coder will fill in Lab 2.3.
 | 2–4 tasks | C2.4: at most 8, consolidate the excess | 2–8 asked; >8 consolidated in code (DEC-081, DEC-082, DEC-092) |
 | `CodingTask` without priority | C2.3: priority in the handoff | `priority` = execution order (DEC-085) |
 | Unique `file_path` per task | — | `files: list[str]`, may repeat across tasks (DEC-084) |
+| Acceptance criteria as free strings | C3.1 (later): QA writes behavioural tests | Task criteria are structured Given/When/Then (DEC-095) |
 | `PMState` TypedDict, status always `"pending"`, no code | C2.2: per-task status and accumulated code | Pydantic `ProjectState` with `tasks[].status` and `code` (DEC-089, DEC-090) |
 | Helicone client, `gpt-4.1-mini` | C4.5: larger model for the PM | `get_chat_model(PM_MODEL)`, default `openai/gpt-4.1` (DEC-093) |
 | `graph.py`, `state.py`, `main.py` in the root | C1.1/C2.3: graph in `orchestration/` | DEC-094 layout |
@@ -35,7 +36,7 @@ or `manual`.
 
 "Fake model" = a `GenericFakeChatModel` subclass that returns scripted
 `Spec`/`TaskList` tool calls and records the messages of every call.
-"Valid outputs" = a spec draft with criteria `AC-1`, `AC-2`, `AC-3` and a
+"Valid outputs" = a spec draft with criteria `REQ-1`, `REQ-2`, `REQ-3` and a
 task list of 2 tasks that together cover all three.
 
 ### Shared state
@@ -58,6 +59,15 @@ task list of 2 tasks that together cover all three.
 - **When** it is dumped with `model_dump_json()` and loaded back with
   `ProjectState.model_validate_json()`
 - **Then** the loaded state equals the original
+
+#### AC-2.1-20 — Task criteria must be Given/When/Then
+
+- **Origin:** ours (DEC-095)
+- **Verify:** unit — `tests/test_state.py::test_ac_2_1_20_task_criteria_need_given_when_then`
+- **Given** valid state data
+- **When** one task acceptance criterion has no `then` and the data is
+  validated as `ProjectState`
+- **Then** a `ValidationError` is raised
 
 ### Structured call helper
 
@@ -133,11 +143,11 @@ task list of 2 tasks that together cover all three.
 
 - **Origin:** C2.1, DEC-083, DEC-088
 - **Verify:** unit — `tests/test_pm_agent.py::test_ac_2_1_9_uncovered_criterion_retried`
-- **Given** a fake model whose first task list covers only `AC-1` and
-  `AC-2`, and whose second covers all three criteria
+- **Given** a fake model whose first task list covers only `REQ-1` and
+  `REQ-2`, and whose second covers all three criteria
 - **When** `pm_node` runs
 - **Then** the state's tasks are the second list, the second task-list call
-  contains a message naming `AC-3` as not covered, and the model was
+  contains a message naming `REQ-3` as not covered, and the model was
   called three times in total
 
 #### AC-2.1-10 — A task covering an unknown criterion is rejected
@@ -145,9 +155,9 @@ task list of 2 tasks that together cover all three.
 - **Origin:** DEC-083
 - **Verify:** unit — `tests/test_pm_agent.py::test_ac_2_1_10_unknown_criterion_rejected`
 - **Given** a fake model whose task lists both cover all criteria but also
-  reference `AC-9`, which the spec does not have
+  reference `REQ-9`, which the spec does not have
 - **When** `pm_node` runs
-- **Then** the state has `error` mentioning `AC-9`, `spec is None` and
+- **Then** the state has `error` mentioning `REQ-9`, `spec is None` and
   `tasks == []`
 
 #### AC-2.1-11 — Fewer than 2 tasks is invalid
@@ -250,12 +260,22 @@ Task status: todo | map | in progress | review | done
 Each task runs: map (approved) → tests for its ACs, failing (red) → code
 until they pass (green) → guided review → commit.
 
-### T1 — Shared state models · todo
+### T1 — Shared state models · done
 
-- **Covers:** AC-2.1-1, AC-2.1-2
-- **Map:** —
-- **Run it yourself:** —
-- **Review notes:** —
+- **Covers:** AC-2.1-1, AC-2.1-2, AC-2.1-20
+- **Map:**
+  - Files: `orchestration/state.py` (new), `tests/test_state.py` (new)
+  - `SpecCriterion`, `TaskCriterion` (Given/When/Then), `TaskSpec`, `ProjectSpec`, `TaskState`, `ProjectState`
+    — the state models of DEC-090; `TaskStatus` literal
+  - LLM draft schemas stay out (they live in `agents/pm_agent.py`, T4);
+    the state checks shape, not cross-field consistency; `code` has no
+    reducer until Lab 2.3
+  - Data flow: requirement → PM → `spec` + `tasks` (pending) → Coder →
+    `tasks[i].status`, `code`; `progress` appended by its reducer
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_state.py -v`
+- **Review notes:**
+  - Added during review: task criteria as Given/When/Then (DEC-095,
+    AC-2.1-20); spec criterion IDs use `REQ-`.
 
 ### T2 — Structured-call helper · todo
 
