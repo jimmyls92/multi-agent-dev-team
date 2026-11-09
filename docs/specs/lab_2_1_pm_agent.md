@@ -277,12 +277,23 @@ until they pass (green) → guided review → commit.
   - Added during review: task criteria as Given/When/Then (DEC-095,
     AC-2.1-20); spec criterion IDs use `REQ-`.
 
-### T2 — Structured-call helper · todo
+### T2 — Structured-call helper · done
 
 - **Covers:** AC-2.1-3, AC-2.1-4
-- **Map:** —
-- **Run it yourself:** —
-- **Review notes:** —
+- **Map:**
+  - Files: `agents/llm_helpers.py` (new), `tests/fakes.py` (new, shared
+    fake model), `tests/test_llm_helpers.py` (new)
+  - `structured_call(model, schema, system_prompt, user_message,
+    max_attempts=2) -> schema` — `create_agent` with no tools,
+    `ToolStrategy(schema)` and `ModelCallLimitMiddleware(run_limit=max_attempts)`
+  - `StructuredOutputError` — no valid output within the calls; holds the
+    last validation error. API errors propagate unchanged.
+  - `ScriptedChatModel` — scripted replies (an exception is raised), records
+    the messages of each call
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_llm_helpers.py -v`
+- **Review notes:**
+  - `ToolStrategy` marks its validation-error ToolMessages with
+    `status="success"`; the helper takes the last ToolMessage instead.
 
 ### T3 — Task consolidation · todo
 
