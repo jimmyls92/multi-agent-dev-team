@@ -80,72 +80,69 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 - Los nombres ya coinciden con el scaffold de la guía. Los tests van en `tests/`; no crear `test/`.
 - Git no versiona carpetas vacías. Antes de entregar, comprobar que `orchestration/` tiene algún archivo para que aparezca en el repo (C1.1).
 - `config.yaml` es la configuración del IDE (Continue) y no forma parte del sistema. Nunca debe contener una API key real.
+- Remoto: `origin` = https://github.com/jimmyls92/multi-agent-dev-team (público). Se trabaja en la rama de la semana (`week-1`, ...); `master` es la rama por defecto y se adelanta con fast-forward (`git fetch . week-1:master`) a lo que esté listo.
+- Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032); instalar con `UV_LINK_MODE=copy uv pip install -r requirements.txt`. Setup en el README.
+- El material de los labs (`lab_1_3_src/`, `lab-2-1/`) es solo referencia local y **nunca se commitea**.
 
 ## Estado actual
 
-Trabajando en: **cerrar el Módulo 1**. La migración del Coder a LangChain `create_agent` (LangGraph) está hecha y documentada (DEC-068..DEC-080); falta commitearla y revisar la entrega del Módulo 1 (C1.1–C1.6).
+Spec activo: **Lab 2.1 (PM Agent)**, fase de **producto**. Spec previsto: `docs/specs/lab_2_1_pm_agent.md`. Material del lab en `lab-2-1/`; guía del proyecto en `Build_Autonomous_Multi_Agent_Systems_Module_2_Project_Guide.pdf` (ambos fuera de git).
 
-Progreso:
-- ✅ Lab 1.1 cerrado: memoria de dos capas (C1.2), DEC-004..DEC-031. El test oficial pasa con una key real.
-- ✅ Lab 1.2 scaffold en el repo (DEC-033..DEC-035): `tools/schemas.py`, `agents/tools_demo.py`, `llm_client.py` (cliente compartido) y `memory.py` en la raíz. El test de memoria sigue pasando con key real tras el refactor.
-- ✅ Producto y técnico de las tools cerrados: DEC-036..DEC-045 (workspace, timeout, salida de `exec_python`, entorno, `cwd`, tope de lectura, wrappers Pydantic, grupo de procesos, configuración).
-- ✅ `read_file`/`write_file` (`tools/file_io.py`) implementados; `tests/test_file_io.py` pasa.
-- ✅ `exec_python` (`tools/code_executor.py`) implementado; `tests/test_code_executor.py` pasa.
-- ✅ Wrappers Pydantic estrictos + confinamiento a `workspace/` en `tools/handlers.py` (DEC-036, DEC-042); `workspace/` en `.gitignore` y variables en `.env.example`.
-- ✅ Lab 1.2 cerrado: `python -m agents.tools_demo` con key real escribe `workspace/word_freq.py`, lo ejecuta y termina con DONE (C1.3).
-- ✅ Lab 1.3: handout en `docs/labs/lab_1_3_react_agent.md`. El código del lab (incluido `agent_solution.py`) está en `lab_1_3_src/`, que **nunca se commitea**.
-- ✅ Lab 1.3, producto cerrado: sin framework por ahora (DEC-047); sesión con un bucle ReACT por mensaje y una tarea con sus iteraciones = un turno (DEC-048); se guarda también "tarea + respuesta final" (DEC-049, sustituye a DEC-008); consulta antes de cada iteración por la tarea (DEC-050, mejora IMP-006); un único Coder en `agents/coder_agent.py`, `chat()` como entrada y `tools_demo.py` se elimina (DEC-051).
-- ✅ C1.5/C1.6, producto cerrado dentro del Lab 1.3 (no hay más labs en el Módulo 1): el LLM declara el archivo principal y `code` se lee del disco (DEC-052); el plan es el primer Thought (DEC-053); smoke test con LLM real que ejecuta el código generado (DEC-054); `result` de la última ejecución válida y estados `success`/`failed_execution`/`unverified`/`max_iterations` (DEC-055) y `answered` para respuestas sin código (DEC-056).
-- ✅ Lab 1.3, técnico cerrado (DEC-057..DEC-065): turno completo en la ventana con `add_turn` (DEC-057, refina DEC-004); `build_context()` ampliado y llamado en cada iteración (DEC-058); recuerdo del resultado sin código (DEC-059); formato de texto del lab validado con Pydantic (DEC-060, refina DEC-029); tools descritas en el prompt desde los schemas (DEC-061); `dispatch_tool` en `tools/handlers.py` sin excepciones (DEC-062); resultado estructurado bajo `exec_python` (DEC-063); todo el Coder en `coder_agent.py` con modo de una tarea (DEC-064); `CoderResult` (DEC-065).
-- ✅ Lab 1.3, tests: en el Módulo 1 solo el smoke test (DEC-054), como test de pytest que solo corre con `--run-llm` vía `tests/conftest.py` (DEC-066).
-- ⏭️ **Siguiente: código del Lab 1.3, pieza a pieza** (el usuario revisa cada una antes de seguir; leer antes las fichas citadas):
-  1. ✅ **Tools:** función interna con resultado estructurado (salida, código de salida, timeout) bajo `exec_python`, que sigue devolviendo el mismo texto (DEC-063); `dispatch_tool(name, args)` en `tools/handlers.py` que nunca lanza (DEC-062).
-  2. ✅ **Memoria:** `SlidingWindowBuffer.add_turn(messages)` (DEC-057); `build_context()` con prompt de sistema y mensajes del turno en curso; id `outcome-` + hash de la tarea para el recuerdo del resultado y su exclusión (DEC-058, DEC-059, DEC-049).
-  3. ✅ **Coder (1):** prompt ReACT con las tools generadas desde `ALL_TOOL_SCHEMAS` (DEC-061), modelos `ToolStep`/`FinalStep`/`Step`/`CoderResult` (DEC-065) y `parse_llm_response()` con sus reglas (DEC-060).
-  4. ✅ **Coder (2):** `run_agent(task, window) -> CoderResult`: bucle de 10, estados (DEC-055, DEC-056), `code` leído del disco (DEC-052), plan = primer Thought (DEC-053), guardado de tarea y resultado (DEC-049).
-  5. ✅ **Coder (3):** `chat()` devuelve la explicación y `main()` interactivo o de una tarea con argumento (DEC-064); borrar `agents/tools_demo.py` (DEC-051).
-  Hecho: además DEC-067 (`dispatch_tool` devuelve `ToolOutcome`); una ejecución real de una tarea con `python -m agents.coder_agent "..."` termina en `success` en 3 iteraciones.
-  6. ✅ **Tests:** `pytest tests/test_smoke.py --run-llm` pasa con key real; `tests.test_memory` pasa con key real; `pytest tests/` 24 passed + 1 skipped. Detalle original: `tests/conftest.py` + `tests/test_smoke.py` (DEC-054, DEC-066), ejecutarlo con key real; volver a pasar `CHROMA_PATH=.chroma-test python -m tests.test_memory` (C1.2) y `pytest tests/` (Lab 1.2).
-  ✅ Comparado con `lab_1_3_src/agent_solution.py` y README escrito (setup, ejecución, estados, tests y decisiones del Módulo 1).
-- ✅ Framework: LangGraph (DEC-068). Producto cerrado: `create_agent` con tool calling nativo (DEC-069, sustituye a DEC-060/061); el plan no cuenta en las 10 (DEC-070); paso de plan estructurado antes del bucle (DEC-071, sustituye a DEC-053); `thought` obligatorio en cada tool (DEC-072); solo se termina con la tool `finish`, el texto sin tool es un error que cuenta como iteración (DEC-073); una tool por iteración (DEC-074).
-- ✅ Técnico cerrado: `get_chat_model(model)` con `ChatOpenAI` → OpenRouter (DEC-075); adaptador `tools/agent_tools.py` + middleware de validación con errores cortos (DEC-076); memoria y ventana inyectadas en cada llamada con `build_context()` (DEC-077); `CoderResult` calculado al final desde los mensajes (DEC-078); orden de middleware con el límite el último (DEC-079).
-- ✅ **Código de la migración, pieza a pieza** (el usuario revisa cada una; leer antes las fichas citadas). `run_agent(task, window) -> CoderResult`, `chat()` y `main()` mantienen la firma; el smoke test y `tests/test_memory.py` no cambian.
-  1. ✅ **Dependencias y cliente** (DEC-075). Hecho; `get_client()` se mantiene temporalmente (TODO) hasta la pieza 4, que borra su último uso en el Coder: `requirements.txt` (+`langchain>=1.4,<2`, `langchain-openai>=1.7,<2`, `langgraph>=1.2,<2`; quitar `openai`), instalar en `.venv` (`UV_LINK_MODE=copy uv pip install -r requirements.txt`), `llm_client.get_chat_model(model)` sustituye a `get_client()`.
-  2. ✅ **`tools/agent_tools.py`** (DEC-076, DEC-072). Hecho: tools con el JSON schema del lab + `thought` (LangChain no valida); `check_tool_call(name, args) -> str | None` para el middleware de la pieza 3; no se exporta en `tools/__init__.py`. Plan original: modelos de llamada = `*Args` de `handlers.py` + `thought`; `StructuredTool` con `response_format="content_and_artifact"` que quita `thought` y llama a `dispatch_tool` (contenido = observación, artifact = `ExecutionResult`); descripciones desde `tools/schemas.py` (no se toca).
-  3. ✅ **Coder: agente** (DEC-069..DEC-074, DEC-077, DEC-079). Hecho junto al bucle antiguo (se borra en la pieza 4): `build_agent(model=None)`, contexto por ejecución en `CoderContext` (`context=`), `Plan.render()`. Diferencias con lo previsto (pasarlas a las fichas en la pieza 6): la tool final se llama `Finish` (ToolStrategy usa el nombre de la clase); `require_tool_call` registra la línea por iteración (no `validate_tool_call`) y no corrige en la iteración 10; tras un `Finish` válido el último mensaje es un `ToolMessage`, por eso mira el último `AIMessage`. Al límite con solo texto termina sin mensaje de límite; con tools sí lo añade. Plan original: prompt, `Plan`, `Finish` (`thought`, `main_file: str | None`, `explanation` no vacía), middleware `inject_context` (`wrap_model_call` + `build_context()` + `parallel_tool_calls=False`), `validate_tool_call` (`wrap_tool_call`), `require_tool_call` (`after_model`, `can_jump_to=["model"]`) y `ModelCallLimitMiddleware(run_limit=10, exit_behavior="end")` **el último**; `create_agent(..., response_format=ToolStrategy(Finish))`.
-  4. ✅ **Coder: `run_agent`** (DEC-071, DEC-078, DEC-049, DEC-057). Hecho: `make_plan()` (con `method="function_calling"`), `result_from_messages()` (una `StepRecord` por llamada a tool o respuesta de texto), `_drop_limit_message()`, agente compilado una vez (`_default_agent`); `get_client()` y el bucle de texto borrados. Comprobado con modelo falso (estados, ventana, memoria, error). Plan original: `store_memory`, plan con `with_structured_output(Plan)` y `build_context()`, invocar el agente con `recursion_limit` de seguridad, calcular `CoderResult` desde los mensajes, `store_outcome`, `add_turn` sin el mensaje de límite. Borrar parser, `ToolStep`/`FinalStep`/`ParseFailure`/`_describe_tools`.
-  5. ✅ **Verificar** (hecho): `pytest tests/` 24+1 skipped, smoke `--run-llm` pasa, `tests.test_memory` PASS, BST real `success` en 3 iteraciones, sesión de 2 tareas con historial de tool calls en la ventana OK. Una pregunta sobre un archivo de una tarea anterior terminaba `unverified` (el modelo declaraba `main_file`): resuelto con DEC-080 (opción B': si esta tarea no escribió ni ejecutó el `main_file` y existe → `answered`; si no existe → `unverified`), comprobado con modelo falso y en sesión real (`answered`). Plan original: `pytest tests/`, `pytest tests/test_smoke.py --run-llm`, `CHROMA_PATH=.chroma-test python -m tests.test_memory` y una tarea real con `python -m agents.coder_agent "..."`.
-  6. ✅ **Docs** (hecho; notas de implementación en DEC-072/073/076/077/078): README (framework y porqué según DEC-068/069, cómo funciona, modelo con tool calling, "Known simplifications" sin DEC-047), campo `Code:` de DEC-068..DEC-079 y esta sección.
-  Notas de la prueba (`/tmp/lgcheck`, fuera del repo; versiones langchain 1.4.9, langgraph 1.2.20, langchain-openai 1.7.4, langchain-core 1.7.6):
-  - `create_react_agent` está deprecado; se usa `from langchain.agents import create_agent`. Middleware en `langchain.agents.middleware` (`after_model`, `wrap_model_call`, `wrap_tool_call`, `ModelCallLimitMiddleware`); `ToolStrategy` en `langchain.agents.structured_output`.
-  - Los `after_model` se ejecutan en orden inverso de la lista; el límite cuenta en su `after_model`, por eso va el último (DEC-079). Al llegar al límite termina sin excepción, sin `structured_response` y añade un `AIMessage` "Model call limits exceeded: run limit (10/10)".
-  - Con `ToolStrategy`, `create_agent` llama a `bind_tools(..., tool_choice="any")`: el modelo está obligado a llamar a una tool; `require_tool_call` es red de seguridad.
-  - `finish` inválido: devuelve el error al modelo y reintenta. Argumentos inválidos y tool inexistente: `ToolMessage` con `status="error"`, la tool no se ejecuta; el mensaje de LangChain repite todos los kwargs (por eso DEC-076).
-  - Los errores de validación de argumentos no los ve `ToolErrorMiddleware`; una excepción dentro de la función de una tool la vuelve a lanzar `ToolNode` y para el agente (por eso `dispatch_tool` nunca lanza).
-  - Cambiar el request: `request.override(model_settings=..., messages=..., system_message=...)`; asignar atributos está deprecado. Campos de `ModelRequest`: model, messages, system_message, tool_choice, tools, response_format, state, runtime, model_settings.
-  - Para modelos falsos: subclase de `GenericFakeChatModel` con `bind_tools` que devuelve `self`; `AIMessage("", tool_calls=[{"name", "args", "id"}])`.
-Pendientes fuera del lab:
-- Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032); setup documentado en el README.
-- Tests mockeados de la memoria (sin LLM real), a proponer y aprobar antes de escribirlos: el input actual nunca vuelve como recuerdo (DEC-031), un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029) y los duplicados exactos se actualizan (DEC-011). Aplazados por decisión del usuario (en el Módulo 1 solo lo que exigen las Cs); como tarde en C4.7.
-- Tests propios de las tools (Lab 1.2), aplazados: confinamiento a `workspace/` (DEC-036, DEC-042), entorno sin credenciales (DEC-039, DEC-043), `cwd` del script (DEC-040), stdin cerrado, mensaje sin salida y truncado por el final (DEC-038), tope de lectura (DEC-041) y muerte del grupo de procesos (DEC-044). Proponer y aprobar antes de escribirlos. Aplazados por decisión del usuario (en el Módulo 1 solo lo que exigen las Cs); como tarde en C4.7.
-- Tests mockeados del Coder (Lab 1.3), aplazados por decisión del usuario: en el Módulo 1 solo el smoke test que exige C1.6. Propuestos: parser (DEC-060), estados del bucle (DEC-055/056/063), ventana y memoria en el bucle (DEC-049/057/058), `dispatch_tool` (DEC-062), resultado estructurado de la ejecución (DEC-063) y `add_turn` (DEC-057). Como tarde en C4.7 (tests unitarios mockeados de cada agente). Tras la migración a `create_agent` (DEC-069) el parser desaparece; los propuestos pasan a ser, con modelo falso: (a) **prioritario**, un modelo que solo da texto para en 10 con `max_iterations` (fija el orden de DEC-079); (b) un modelo que llama a tools sin terminar para en 10; (c) argumentos inválidos no ejecutan la tool (DEC-076); y el cálculo de `CoderResult` desde mensajes inventados (DEC-078). Aplazados por decisión del usuario.
-- Mejoras de memoria IMP-001..IMP-005: siguen en `idea`.
-- Remoto: `origin` = https://github.com/jimmyls92/multi-agent-dev-team (público; primer push 2026-11-07 en `9906aac`). Se trabaja en la rama de la semana (`week-1`); `master` es la rama por defecto y se adelanta con fast-forward (`git fetch . week-1:master`) a lo que esté listo. Lo ya subido no se reescribe.
-- "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
+Decisiones de producto abiertas (recomendación propuesta; el usuario aún no ha decidido):
+- **D1. Número de tareas:** 2–4 como el lab, o **2–8 pidiendo las menos posibles** (recomendada: el 4 es una simplificación del lab y con requisitos grandes da tareas enormes para 10 iteraciones).
+- **D2. Consolidación de >8 (C2.4):** **determinista**, juntando tareas consecutivas con `merged_from` (recomendada: cobertura garantizada y testeable sin LLM), o fusión con LLM + comprobación + respaldo determinista (posible `IMP`).
+- **D3. Formato de la spec (C2.1):** solo estructurada, o **estructurada + `details` en markdown con las 5 secciones del lab** (recomendada). Añadido propuesto: criterios de la spec con ID, cada tarea lista los que cubre y se valida que todos estén cubiertos (el mapeo de requisitos de C2.1/C2.4).
+
+Diferencias lab ↔ proyecto ya detectadas (irán a la tabla del spec): spec en prosa (C2.1), JSON sin Pydantic (C1.3/C4.6), `CodingTask` sin prioridad (C2.3), 2–4 tareas sin consolidación (C2.4), `PMState` sin estado por tarea ni código acumulado (C2.2), cliente Helicone (usamos `get_chat_model`). Los 45 tests de `lab-2-1/test_lab21.py` sirven de inspiración para los AC; no se ejecutan contra nuestro código.
+
+Módulo 1: cerrado y subido (C1.1–C1.6). Memoria de dos capas (Lab 1.1), tools (Lab 1.2) y Coder con LangChain `create_agent` (Lab 1.3, DEC-068..DEC-080). Detalle en `docs/decisions.md` y el README.
+
+Actualiza esta sección al cambiar de spec o de tarea; el detalle de las tareas vive en el spec.
+
+## Pendientes
+
+Tests aplazados por decisión del usuario (como tarde en C4.7; proponer y aprobar antes de escribirlos):
+- **Memoria** (mockeados): el input actual nunca vuelve como recuerdo (DEC-031); un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029); los duplicados exactos se actualizan (DEC-011).
+- **Tools:** confinamiento a `workspace/` (DEC-036, DEC-042), entorno sin credenciales (DEC-039, DEC-043), `cwd` del script (DEC-040), stdin cerrado, mensaje sin salida y truncado por el final (DEC-038), tope de lectura (DEC-041), muerte del grupo de procesos (DEC-044).
+- **Coder** (modelo falso): (a) **prioritario**, un modelo que solo da texto para en 10 con `max_iterations` (fija el orden de DEC-079); (b) uno que llama a tools sin terminar para en 10; (c) argumentos inválidos no ejecutan la tool (DEC-076); (d) `CoderResult` desde mensajes inventados (DEC-078).
+
+Otros:
+- Mejoras de memoria IMP-001..IMP-005 en `idea`. "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
-- Framework elegido: LangGraph (DEC-068); Coder migrado y README actualizado (C1.1).
 
-Actualiza esta sección al terminar cada TODO y al empezar o cerrar cada lab.
+## Notas técnicas de LangChain/LangGraph
 
-## Flujo de trabajo: Producto → Técnico → Código
+Versiones probadas: langchain 1.4.9, langgraph 1.2.20, langchain-openai 1.7.4, langchain-core 1.7.6.
+- `from langchain.agents import create_agent` (`create_react_agent` está deprecado). Middleware en `langchain.agents.middleware` (`after_model`, `wrap_model_call`, `wrap_tool_call`, `ModelCallLimitMiddleware`); `ToolStrategy` en `langchain.agents.structured_output`.
+- Los `after_model` se ejecutan en orden inverso de la lista; el límite cuenta en su `after_model`, por eso va el último (DEC-079). Al llegar al límite termina sin excepción, sin `structured_response`, y añade un `AIMessage` "Model call limits exceeded: run limit (10/10)".
+- Con `ToolStrategy`, `create_agent` usa `bind_tools(..., tool_choice="any")`. La tool final se llama como la clase (`Finish`) y, tras un `Finish` válido, el último mensaje es un `ToolMessage`.
+- Argumentos inválidos o tool inexistente: `ToolMessage` con `status="error"` y la tool no se ejecuta (`ToolErrorMiddleware` no lo ve). Una excepción dentro de una tool la relanza `ToolNode` y para el agente; por eso `dispatch_tool` nunca lanza.
+- Cambiar el request con `request.override(model_settings=..., messages=..., system_message=...)`; asignar atributos está deprecado.
+- Salida estructurada: `with_structured_output(Model, method="function_calling")`.
+- Modelos falsos: subclase de `GenericFakeChatModel` con `bind_tools` que devuelve `self`; `AIMessage("", tool_calls=[{"name", "args", "id"}])`.
 
-Cada TODO o funcionalidad se trabaja siempre en tres fases, en este orden y sin saltarse ninguna:
+## Flujo de trabajo: Producto → Técnico → Spec → Tareas
+
+Método en prueba desde el Lab 2.1 (2026-11-09). Objetivo: tests fáciles a partir de los acceptance criteria y que el usuario entienda el código y su porqué, sin alargar mucho el desarrollo. Si se hace demasiado largo, se replantea.
+
+Cada lab (o funcionalidad grande) se trabaja en este orden, sin saltarse fases:
 
 1. **Producto (funcional/negocio):** decidir cómo se comporta el agente y por qué. Por ejemplo, qué recuerda, qué alcance tiene o qué pasa en los casos límite. Presenta cada decisión con su impacto y tu recomendación; el usuario decide.
 2. **Técnico:** cuando el producto esté cerrado, propón cómo implementarlo: opciones con ventajas e inconvenientes y una recomendación. No le preguntes al usuario el "cómo"; explícale por qué importa.
-3. **Código:** cuando lo técnico esté cerrado, transfórmalo en código **paso a paso**, en piezas pequeñas que el usuario revise antes de seguir.
+3. **Spec:** `docs/specs/lab_<n>_<m>_<tema>.md`, a partir de `docs/specs/_template.md` (en inglés). Normalmente uno por lab.
+   - Compara el handout del lab, la guía del proyecto del módulo y la rúbrica; los huecos van en la tabla de diferencias. Si chocan, gana el proyecto. Si el lab ya encaja con el proyecto, el spec es mínimo (tabla de AC y 1–2 tareas).
+   - Acceptance criteria en **Given/When/Then**, con ID `AC-<n>.<m>-<k>`, `Origin` (`C<x>.<y>`, `lab` o `ours`) y `Verify` (`unit` con modelo falso, `integration`, `llm` con key real o `manual`). Cada AC se tiene que poder convertir en un test sin pensar.
+   - **Aprobar el spec es aprobar los tests que fijan comportamiento** (no hace falta otra aprobación).
+   - Tareas: cada una cubre al menos un AC, se revisa en ~15 min y acaba en un commit. El número sale de ahí, no es fijo.
+4. **Código, tarea a tarea** (no se empieza la siguiente hasta que el usuario acepte la actual):
+   1. **Mapa** antes de escribir código: archivos que se crean o tocan, funciones/clases con firma y tipos y una línea de qué hacen, y flujo de datos entre ellas. El usuario lo aprueba.
+   2. **TDD ligero:** primero los tests de los AC de la tarea (en rojo, con modelo falso; nombre `test_ac_<n>_<m>_<k>_...`), luego el código hasta verde. Los AC `llm` se ejecutan al final de la tarea.
+   3. **Revisión guiada:** seguir un ejemplo concreto (input real → qué pasa en cada función → estado final con valores), las 2–3 decisiones no obvias, un **comando para que el usuario lo ejecute** y **2 preguntas "¿qué pasaría si...?"** que el usuario responde y tú corriges. No se añaden comentarios explicativos al código: docstrings Google (DEC-046) y comentarios solo para porqués no obvios con su `DEC-NNN`.
+   4. **Hecho cuando:** tests de sus AC en verde (o el AC marcado `llm`/`manual` con su comando ejecutado), docstrings y anclas DEC, estado de la tarea actualizado en el spec y commit propuesto.
+   5. Opcional por spec: el usuario escribe él mismo una pieza pequeña con tu revisión.
+5. **Cierre del spec:** lanza un agente revisor independiente. Recibe el spec, `docs/course_reference.txt` y el diff del spec completo, **no tu resumen**. Comprueba que cada AC tiene un test que verifica comportamiento real, que no hay regresiones de criterios anteriores y que se respetan los límites que fuerza el evaluador. El usuario clasifica los hallazgos (arreglar, descartar o pasar a `IMP`); lo que se arregla va en una tarea `R1` con el mismo proceso.
 
-En cada fase, registra en `docs/decisions.md` las decisiones acordadas con su motivo. Si el usuario no da un motivo explícito, usa el que propusiste. Los tests que fijen comportamiento se proponen y se aprueban antes de escribirlos.
+En cada fase, registra en `docs/decisions.md` las decisiones acordadas con su motivo. Si el usuario no da un motivo explícito, usa el que propusiste. El porqué vive en las fichas `DEC-NNN`; el spec las enlaza, no las repite. El estado de las tareas vive en el spec; "Estado actual" solo dice qué spec y qué tarea están activos.
 
 ## Commits
 
