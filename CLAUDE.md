@@ -86,9 +86,9 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Spec activo: **Lab 2.1 (PM Agent)**, spec **aprobado**. Spec: `docs/specs/lab_2_1_pm_agent.md`. Enunciado y diferencias lab ↔ proyecto en `docs/labs/lab_2_1_pm_agent.md`; guía del Módulo 2 en `docs/course_reference.txt` (Part A2). Material original en `lab-2-1/` (fuera de git).
+Spec activo: **Lab 2.1 (PM Agent)**, spec **cerrado**. Spec: `docs/specs/lab_2_1_pm_agent.md`. Enunciado y diferencias lab ↔ proyecto en `docs/labs/lab_2_1_pm_agent.md`; guía del Módulo 2 en `docs/course_reference.txt` (Part A2). Material original en `lab-2-1/` (fuera de git).
 
-Producto cerrado (DEC-081..DEC-088) y técnico cerrado (DEC-089..DEC-094). T1–T6 hechas. Siguiente: cierre del spec (agente revisor independiente).
+Producto cerrado (DEC-081..DEC-088) y técnico cerrado (DEC-089..DEC-094). Spec cerrado (T1–T6 y R1 hechas, revisión independiente clasificada). Siguiente: Lab 2.2.
 
 Los tests de `lab-2-1/test_lab21.py` sirven de inspiración para los AC; no se ejecutan contra nuestro código.
 

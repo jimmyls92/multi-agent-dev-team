@@ -102,6 +102,20 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   query: consider using only its last lines or a size cap. Try it once the
   Coder works end to end, comparing retrieval with and without it.
 
+## PM Agent (Lab 2.1)
+
+### IMP-007 Reject duplicate tasks in the PM's task list
+- Status: idea
+- Area: PM Agent (Lab 2.1)
+- Why: two identical task drafts pass validation, so a list could meet the
+  minimum of two tasks without them being discrete (found in the Lab 2.1
+  independent review, F4).
+- Rubric: C2.1 asks for at least two discrete tasks; rejecting duplicates
+  (same title or description) in the coverage validator would trigger the
+  corrective retry (DEC-088) and keeps C2.1 met.
+- Notes: rare with the real model; the lab's real-LLM test already checks
+  coverage of distinct criteria.
+
 ## General
 
 _No ideas yet._

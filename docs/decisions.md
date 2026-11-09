@@ -1698,7 +1698,7 @@ A decision can mix bases; then each part states its own.
   the run short and the handoff simple for small requirements.
 - Alternatives: 2–4 as the lab (task size grows with the requirement);
   a fixed number (does not fit both a two-endpoint API and a larger app).
-- Code: —
+- Code: `agents/pm_agent.py` — `MIN_TASKS`, `MAX_TASKS`, `TASKS_SYSTEM_PROMPT`, `TaskListBase`
 
 ### DEC-082 More than 8 tasks are consolidated deterministically
 - Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
@@ -1715,7 +1715,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: LLM merge with a coverage check and the deterministic merge
   as fallback (more natural tasks, more failure modes; candidate `IMP`);
   keep the first 8 (loses requirements, Not Yet).
-- Code: —
+- Code: `agents/pm_agent.py` — `consolidate_tasks`, `_merge`
 
 ### DEC-083 Structured spec with markdown details and criterion coverage
 - Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
@@ -1735,7 +1735,8 @@ A decision can mix bases; then each part states its own.
   requirement mapping that C2.1 and C2.4 assessors look for.
 - Alternatives: structured fields only (loses the lab's richer spec for the
   Coder); markdown only (Not Yet in C2.1).
-- Code: —
+- Code: `orchestration/state.py` — `SpecCriterion`, `ProjectSpec`; `agents/pm_agent.py` —
+  `SpecDraft`, `_build_spec`, `_task_list_schema`
 
 ### DEC-084 Several tasks may target the same file
 - Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
@@ -1749,7 +1750,8 @@ A decision can mix bases; then each part states its own.
   filler tasks just to reach two files; what is graded is that the
   generated API works (C2.5).
 - Alternatives: unique file per task as the lab (forces artificial splits).
-- Code: —
+- Code: `orchestration/state.py` — `TaskSpec.files`; `agents/pm_agent.py` —
+  `TASKS_SYSTEM_PROMPT`
 
 ### DEC-085 Task priority is the execution order
 - Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
@@ -1762,7 +1764,7 @@ A decision can mix bases; then each part states its own.
 - Why: priority can never contradict the order the Coder follows.
 - Alternatives: `high`/`medium`/`low` next to the order (a second field
   that changes nothing and can disagree with the order).
-- Code: —
+- Code: `agents/pm_agent.py` — `_build_tasks`, `_merge`
 
 ### DEC-086 The PM uses a more capable model than the Coder
 - Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
@@ -1777,7 +1779,7 @@ A decision can mix bases; then each part states its own.
 - Why: a better decomposition helps every later step at the cost of only
   two calls per run; doing it now avoids touching the PM again in Module 4.
 - Alternatives: same model for all agents until Module 4 (rework later).
-- Code: —
+- Code: `agents/pm_agent.py` — `DEFAULT_PM_MODEL`, `make_pm_node`
 
 ### DEC-087 The PM is a fixed two-call pipeline; failures end in state
 - Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
@@ -1795,7 +1797,7 @@ A decision can mix bases; then each part states its own.
   graph).
 - Revisit when: Module 4 adds per-call retries with backoff and jitter
   (C4.2). Invalid outputs are handled by DEC-088.
-- Code: —
+- Code: `agents/pm_agent.py` — `make_pm_node`; `orchestration/graph.py`
 
 ### DEC-088 An invalid PM output gets one corrective retry
 - Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
@@ -1813,7 +1815,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: fail at once (fragile); up to three corrections (little gain
   over one; a second failure usually means the requirement was
   misunderstood).
-- Code: —
+- Code: `agents/llm_helpers.py` — `structured_call`
 
 ### DEC-089 The shared state is a Pydantic model
 - Date: 2026-11-09 · Area: Orchestration (Lab 2.1) · Status: accepted
@@ -1829,7 +1831,8 @@ A decision can mix bases; then each part states its own.
   when the next node reads the state.
 - Alternatives: TypedDict as the lab (no run-time validation and a second,
   parallel schema next to the Pydantic ones).
-- Code: —
+- Code: `orchestration/state.py` — `ProjectState`; `orchestration/graph.py` —
+  `build_graph`
 
 ### DEC-090 State fields: spec as planned, tasks as executed
 - Date: 2026-11-09 · Area: Orchestration (Lab 2.1) · Status: accepted
@@ -1853,7 +1856,8 @@ A decision can mix bases; then each part states its own.
   always unique and ordered.
 - Alternatives: a single task list inside `spec` carrying the status (every
   status change rewrites the whole spec).
-- Code: —
+- Code: `orchestration/state.py`; `agents/pm_agent.py` — `_build_spec`,
+  `_build_tasks`
 
 ### DEC-091 PM structured calls use `create_agent` with `ToolStrategy`
 - Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
@@ -1875,7 +1879,8 @@ A decision can mix bases; then each part states its own.
   (explicit cap and plain-function check, but a second mechanism next to
   the Coder's); `.with_retry()` (retries without showing the error, so it
   corrects nothing).
-- Code: —
+- Code: `agents/llm_helpers.py` — `structured_call`; `agents/pm_agent.py` —
+  `_task_list_schema`
 
 ### DEC-092 Consolidation splits tasks into 8 even consecutive groups
 - Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
@@ -1892,7 +1897,7 @@ A decision can mix bases; then each part states its own.
 - Why: predictable, pure and easy to test; keeps order and coverage.
 - Alternatives: repeatedly merge the smallest neighbouring pair (more even
   sizes, less predictable).
-- Code: —
+- Code: `agents/pm_agent.py` — `consolidate_tasks`, `_group_sizes`, `_merge`
 
 ### DEC-093 PM model: `openai/gpt-4.1` through `PM_MODEL`
 - Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
@@ -1906,7 +1911,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: a Claude Sonnet model (named in the guide, but a provider
   change with no need); renaming `LLM_MODEL` to `CODER_MODEL` now (touches
   Module 1 for no gain; left for Module 4).
-- Code: —
+- Code: `agents/pm_agent.py` — `DEFAULT_PM_MODEL`, `make_pm_node`; `.env.example`
 
 ### DEC-094 Module layout for the PM and the graph
 - Date: 2026-11-09 · Area: Orchestration (Lab 2.1) · Status: accepted
@@ -1927,7 +1932,8 @@ A decision can mix bases; then each part states its own.
   discoverable); a generic `agents/utils.py` (tends to become a catch-all).
 - Revisit when: more shared helpers appear (the helper module's name and
   split may change), or Lab 2.3 wires the Coder into the state (DEC-065).
-- Code: —
+- Code: `orchestration/state.py`, `orchestration/graph.py`, `agents/pm_agent.py`,
+  `agents/llm_helpers.py`, `main.py`
 
 ### DEC-095 Task acceptance criteria are structured Given/When/Then
 - Date: 2026-11-09 · Area: Orchestration (Lab 2.1) · Status: accepted
