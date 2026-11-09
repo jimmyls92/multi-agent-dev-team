@@ -310,12 +310,28 @@ until they pass (green) → guided review → commit.
   - `covers` and `files` are deduplicated in order (`_unique`); acceptance
     criteria are not; a single-task group keeps its description as is.
 
-### T4 — PM node · todo
+### T4 — PM node · done
 
 - **Covers:** AC-2.1-7 .. AC-2.1-15
-- **Map:** —
-- **Run it yourself:** —
-- **Review notes:** —
+- **Map:**
+  - Files: `agents/pm_agent.py` (modified), `tests/test_pm_agent.py` (modified)
+  - LLM schemas `SpecDraft`, `TaskDraft`, `TaskListBase` (min 2 tasks, no
+    max); `_task_list_schema(criterion_ids)` adds the per-run coverage check
+    (class named `TaskList`, the tool name)
+  - `_build_spec(requirement, model) -> ProjectSpec` (criteria numbered
+    `REQ-k` by code); `_render_spec(spec)`; `_build_tasks(spec, model) ->
+    list[TaskSpec]` (`task_k`, priority `k`)
+  - `make_pm_node(model=None)` returns `pm_node(state) -> dict`; without a
+    model it uses `get_chat_model(PM_MODEL or "openai/gpt-4.1")` at run time
+  - Data flow: requirement → `_build_spec` → `_build_tasks` →
+    `consolidate_tasks` → update `spec`, `tasks` (pending), `progress`,
+    `error`; any exception → logged at ERROR and returned in `error`
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_pm_agent.py -v`
+- **Review notes:**
+  - Criterion IDs `REQ-k` are assigned by code, not by the LLM (agreed in
+    the map).
+  - The model is resolved inside the node, so a missing key also ends in
+    `error` instead of raising.
 
 ### T5 — Graph, `main.py` and demo run · todo
 
