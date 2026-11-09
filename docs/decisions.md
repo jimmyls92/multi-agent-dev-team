@@ -1813,3 +1813,117 @@ A decision can mix bases; then each part states its own.
   over one; a second failure usually means the requirement was
   misunderstood).
 - Code: —
+
+### DEC-089 The shared state is a Pydantic model
+- Date: 2026-11-09 · Area: Orchestration (Lab 2.1) · Status: accepted
+- Basis: Required (C2.2: Pydantic or TypedDict schema); Pydantic —
+  Preferred
+- Context: the lab's state is a TypedDict with tasks as plain dicts. LLM
+  outputs must be validated with Pydantic anyway (C1.3, C4.6).
+- Decision: `ProjectState` and the models it holds are Pydantic models;
+  the LangGraph graph is built on `ProjectState`.
+- Why: one schema validates the LLM output, defines the state and
+  serialises the handoff (`model_dump_json()`, C2.3); unlike a TypedDict,
+  invalid values (e.g. an unknown task status) are rejected at run time
+  when the next node reads the state.
+- Alternatives: TypedDict as the lab (no run-time validation and a second,
+  parallel schema next to the Pydantic ones).
+- Code: —
+
+### DEC-090 State fields: spec as planned, tasks as executed
+- Date: 2026-11-09 · Area: Orchestration (Lab 2.1) · Status: accepted
+- Basis: Required (C2.1: spec with name, description, acceptance criteria,
+  tasks; C2.2: requirement, spec, task list, per-task status, accumulated
+  code; C2.3: task ID, description, acceptance criteria, priority); the
+  split — Preferred
+- Context: C2.1 wants the tasks inside the spec, and C2.2 wants a task list
+  whose status changes as the Coder works.
+- Decision: `ProjectState` holds `requirement`, `spec` (`ProjectSpec`:
+  name, description, markdown `details`, criteria with IDs, tasks — what the
+  PM decided, never changed afterwards), `tasks` (the same tasks plus
+  `status`, the handoff the Coder updates), `code` (path → content,
+  written by the Coder from Lab 2.3), `progress` (log appended through an
+  `operator.add` reducer) and `error`. Each task has `task_id`, `title`,
+  `description`, `acceptance_criteria`, `covers` (spec criterion IDs),
+  `files`, `priority` and `merged_from`. Task IDs and priorities are
+  assigned by code, not by the LLM.
+- Why: keeps the plan apart from its execution, so the Coder updates one
+  task without rewriting the spec; code-assigned IDs and priorities are
+  always unique and ordered.
+- Alternatives: a single task list inside `spec` carrying the status (every
+  status change rewrites the whole spec).
+- Code: —
+
+### DEC-091 PM structured calls use `create_agent` with `ToolStrategy`
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Basis: Preferred
+- Context: DEC-088 asks for one corrective retry on invalid output.
+  `ToolStrategy` already feeds validation errors back to the model, but has
+  no retry cap. The coverage check (DEC-083) depends on the criterion IDs
+  of each run.
+- Decision: a shared helper in `agents/llm_helpers.py` runs one structured
+  call as a `create_agent` with no tools, `ToolStrategy(schema)` and
+  `ModelCallLimitMiddleware(run_limit=2)`. If the run ends without a
+  structured response it raises with the last validation error. The task
+  schema is built per run with a validator that checks coverage against
+  that run's criterion IDs, so a coverage failure is retried like any
+  other validation error.
+- Why: same mechanism as the Coder (DEC-069); LangChain feeds the error
+  back to the model.
+- Alternatives: own helper around `with_structured_output(include_raw=True)`
+  (explicit cap and plain-function check, but a second mechanism next to
+  the Coder's); `.with_retry()` (retries without showing the error, so it
+  corrects nothing).
+- Code: —
+
+### DEC-092 Consolidation splits tasks into 8 even consecutive groups
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Basis: Preferred (implements DEC-082)
+- Context: DEC-082 merges consecutive tasks when the LLM returns more than
+  eight despite the prompt.
+- Decision: n > 8 tasks are split into 8 consecutive groups whose sizes
+  differ by at most one, the larger groups first (11 → 2,2,2,1,1,1,1,1).
+  A merged task joins titles, descriptions, acceptance criteria, covered
+  criterion IDs and files of its group and lists the original task IDs in
+  `merged_from`; IDs and priorities are renumbered. The task schema accepts
+  more than eight tasks so the excess reaches consolidation instead of
+  triggering a corrective retry.
+- Why: predictable, pure and easy to test; keeps order and coverage.
+- Alternatives: repeatedly merge the smallest neighbouring pair (more even
+  sizes, less predictable).
+- Code: —
+
+### DEC-093 PM model: `openai/gpt-4.1` through `PM_MODEL`
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Basis: Preferred (implements DEC-086)
+- Context: the Coder uses `LLM_MODEL` (`openai/gpt-4.1-mini`).
+- Decision: the PM reads `PM_MODEL`, default `openai/gpt-4.1`. The Coder
+  keeps `LLM_MODEL`.
+- Why: the larger model of the same family keeps the tool-calling behaviour
+  already tested; the PM makes 2–4 calls per run, so the higher price per
+  token weighs little.
+- Alternatives: a Claude Sonnet model (named in the guide, but a provider
+  change with no need); renaming `LLM_MODEL` to `CODER_MODEL` now (touches
+  Module 1 for no gain; left for Module 4).
+- Code: —
+
+### DEC-094 Module layout for the PM and the graph
+- Date: 2026-11-09 · Area: Orchestration (Lab 2.1) · Status: accepted
+- Basis: Required (C1.1, C2.3: graph in `orchestration/`); the rest —
+  Provisional
+- Context: the lab has `state.py`, `graph.py` and `main.py` in its root.
+  DEC-064 kept the Coder in one file until another agent needed shared
+  code.
+- Decision: `orchestration/state.py` (state and models, shared by PM and
+  Coder), `orchestration/graph.py` (`build_graph()`), `agents/pm_agent.py`
+  (the PM), `agents/llm_helpers.py` (the structured-call helper of DEC-091)
+  and `main.py` in the repo root as the entry point
+  (`python main.py "requirement"`), later the Docker `ENTRYPOINT`.
+  `agents/coder_agent.py` is not touched.
+- Why: the models belong to neither agent; a root `main.py` is the obvious
+  way in for anyone cloning the repo (guide §1.3) and for the assessor.
+- Alternatives: `python -m orchestration` via `__main__.py` (less
+  discoverable); a generic `agents/utils.py` (tends to become a catch-all).
+- Revisit when: more shared helpers appear (the helper module's name and
+  split may change), or Lab 2.3 wires the Coder into the state (DEC-065).
+- Code: —
