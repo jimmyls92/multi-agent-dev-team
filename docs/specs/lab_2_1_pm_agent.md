@@ -3,7 +3,7 @@
 - **Status:** approved
 - **Sources:** lab handout `docs/labs/lab_2_1_pm_agent.md`, project guide
   (Module 2, `docs/course_reference.txt` Part A2), rubric C2.1–C2.5
-- **Decisions:** DEC-081..DEC-095 (the why lives there; do not repeat it here)
+- **Decisions:** DEC-081..DEC-096 (the why lives there; do not repeat it here)
 
 ## Goal
 
@@ -243,6 +243,15 @@ task list of 2 tasks that together cover all three.
   task ID with its priority and files, and the progress notes; on failure
   it returns 1 and stdout contains the error
 
+#### AC-2.1-21 — `main.py` rejects an empty requirement
+
+- **Origin:** ours (DEC-096)
+- **Verify:** unit — `tests/test_main.py::test_ac_2_1_21_main_rejects_empty_requirement`
+- **Given** the PM on a fake model with no scripted replies
+- **When** `main([""])` or `main(["   "])` runs
+- **Then** it exits with code 2, stderr says the requirement must not be
+  empty, and the model is never called
+
 #### AC-2.1-19 — The graded demo requirement gives a covering spec
 
 - **Origin:** C2.1
@@ -333,12 +342,29 @@ until they pass (green) → guided review → commit.
   - The model is resolved inside the node, so a missing key also ends in
     `error` instead of raising.
 
-### T5 — Graph, `main.py` and demo run · todo
+### T5 — Graph, `main.py` and demo run · done
 
-- **Covers:** AC-2.1-16 .. AC-2.1-19
-- **Map:** —
-- **Run it yourself:** —
-- **Review notes:** —
+- **Covers:** AC-2.1-16 .. AC-2.1-19, AC-2.1-21
+- **Map:**
+  - Files: `orchestration/graph.py` (new), `main.py` (new),
+    `tests/test_integration_pm.py` (new), `tests/test_main.py` (new)
+  - `build_graph(pm_model=None)` — `START → pm → END` over `ProjectState`
+  - `run(requirement, pm_model=None) -> ProjectState` — invokes the graph
+    and validates the returned dict
+  - `main(argv=None) -> int` — demo requirement by default, `--json` for
+    the whole state, exit code 1 on error, 2 on an empty requirement
+    (DEC-096); `_print_state(state)`
+  - Data flow: CLI → `main` → `run` → graph → `pm_node` → `ProjectState` →
+    printed summary or JSON → exit code
+- **Run it yourself:** `.venv/bin/python main.py` (real LLM) and
+  `.venv/bin/python -m pytest tests/test_integration_pm.py --run-llm -v`
+- **Review notes:**
+  - Added during review: an empty or blank requirement exits with code 2
+    before the graph runs (AC-2.1-21); `NonEmptyStr` alone accepts
+    whitespace-only text.
+  - First real run of the demo task: 4 criteria, 2 tasks on `app.py`, all
+    covered; the LLM added "responses are JSON" (`REQ-4`), not asked
+    literally.
 
 ### T6 — Docs: README and `.env.example` · todo
 

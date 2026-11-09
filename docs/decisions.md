@@ -1946,3 +1946,23 @@ A decision can mix bases; then each part states its own.
   case or extra "and"); Given/When/Then also for spec criteria (they state
   what, not how to check it); plain strings as the lab (vague checks).
 - Code: `orchestration/state.py` — `TaskCriterion`, `TaskSpec`
+
+### DEC-096 `main.py` defaults to the demo task and can print JSON
+- Date: 2026-11-09 · Area: Orchestration (Lab 2.1) · Status: accepted
+- Basis: Preferred
+- Context: `main.py` is the entry point (DEC-094). The lab's `main.py` has a
+  default requirement; in Module 4 `docker compose up` must run a task end
+  to end (C4.8). C2.3 lists the serialised handoff as evidence.
+- Decision: without arguments `main.py` runs the graded Module 2 demo
+  requirement; `--json` prints the whole final state with
+  `model_dump_json(indent=2)` instead of the readable summary. Exit codes:
+  0 success, 1 the run ended with an error, 2 invalid usage (an empty or
+  blank requirement is rejected before the graph runs).
+- Why: one command with no input shows the graded behaviour; the JSON is
+  the serialised handoff and helps debugging; separate exit codes tell a
+  usage mistake from a failed run without reading the output, and a blank
+  requirement never costs an LLM call (`NonEmptyStr` alone accepts spaces).
+- Alternatives: require the requirement (one more step for the assessor and
+  for Docker); readable summary only (no direct view of the serialised
+  state).
+- Code: `main.py` — `DEMO_REQUIREMENT`, `main`
