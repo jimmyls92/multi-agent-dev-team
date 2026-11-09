@@ -88,7 +88,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 Spec activo: **Lab 2.1 (PM Agent)**, spec **aprobado**. Spec: `docs/specs/lab_2_1_pm_agent.md`. Enunciado y diferencias lab ↔ proyecto en `docs/labs/lab_2_1_pm_agent.md`; guía del Módulo 2 en `docs/course_reference.txt` (Part A2). Material original en `lab-2-1/` (fuera de git).
 
-Producto cerrado (DEC-081..DEC-088) y técnico cerrado (DEC-089..DEC-094). T1–T5 hechas. Siguiente: T6 (README y `.env.example`).
+Producto cerrado (DEC-081..DEC-088) y técnico cerrado (DEC-089..DEC-094). T1–T6 hechas. Siguiente: cierre del spec (agente revisor independiente).
 
 Los tests de `lab-2-1/test_lab21.py` sirven de inspiración para los AC; no se ejecutan contra nuestro código.
 
@@ -102,6 +102,8 @@ Tests aplazados por decisión del usuario (como tarde en C4.7; proponer y aproba
 - **Memoria** (mockeados): el input actual nunca vuelve como recuerdo (DEC-031); un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029); los duplicados exactos se actualizan (DEC-011).
 - **Tools:** confinamiento a `workspace/` (DEC-036, DEC-042), entorno sin credenciales (DEC-039, DEC-043), `cwd` del script (DEC-040), stdin cerrado, mensaje sin salida y truncado por el final (DEC-038), tope de lectura (DEC-041), muerte del grupo de procesos (DEC-044).
 - **Coder** (modelo falso): (a) **prioritario**, un modelo que solo da texto para en 10 con `max_iterations` (fija el orden de DEC-079); (b) uno que llama a tools sin terminar para en 10; (c) argumentos inválidos no ejecutan la tool (DEC-076); (d) `CoderResult` desde mensajes inventados (DEC-078).
+
+**README del Módulo 2 (bloqueante para avanzar `master` o entregar un SHA):** se actualiza al final del módulo, de una vez: estado actual, `PM_MODEL`, `python main.py` (demo por defecto, `--json`, códigos de salida 0/1/2), diagrama de dos agentes con el estado (C2.6), tests nuevos, layout y decisiones del Módulo 2.
 
 Otros:
 - Mejoras de memoria IMP-001..IMP-005 en `idea`. "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.

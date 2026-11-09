@@ -366,13 +366,17 @@ until they pass (green) → guided review → commit.
     covered; the LLM added "responses are JSON" (`REQ-4`), not asked
     literally.
 
-### T6 — Docs: README and `.env.example` · todo
+### T6 — `.env.example` · done
 
-- **Covers:** documentation matches the system (`PM_MODEL`, how to run the
-  PM, state and graph diagram); C2.6's two-agent diagram comes in Lab 2.3
-- **Map:** —
-- **Run it yourself:** —
-- **Review notes:** —
+- **Covers:** `PM_MODEL` documented next to `LLM_MODEL` (DEC-093)
+- **Map:**
+  - Files: `.env.example` (modified)
+- **Run it yourself:** `grep MODEL .env.example`
+- **Review notes:**
+  - The README update (PM, `main.py`, exit codes, state and graph diagram,
+    Module 2 decisions) is deferred to the end of Module 2, together with
+    C2.6's two-agent diagram; it must be done before `master` is
+    fast-forwarded or a SHA is submitted.
 
 ## Independent review
 
