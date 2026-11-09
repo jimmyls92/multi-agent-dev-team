@@ -295,12 +295,20 @@ until they pass (green) → guided review → commit.
   - `ToolStrategy` marks its validation-error ToolMessages with
     `status="success"`; the helper takes the last ToolMessage instead.
 
-### T3 — Task consolidation · todo
+### T3 — Task consolidation · done
 
 - **Covers:** AC-2.1-5, AC-2.1-6
-- **Map:** —
-- **Run it yourself:** —
-- **Review notes:** —
+- **Map:**
+  - Files: `agents/pm_agent.py` (was empty), `tests/test_pm_agent.py` (new)
+  - `MAX_TASKS = 8`; `consolidate_tasks(tasks, max_tasks=MAX_TASKS) ->
+    list[TaskSpec]` — unchanged within the limit, else 8 even consecutive
+    groups joined and renumbered
+  - `_group_sizes(n, groups)`, `_merge(group, position)`, `_unique(items)`
+  - Data flow: tasks → `_group_sizes` → slices → `_merge` → ≤ 8 tasks
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_pm_agent.py -v`
+- **Review notes:**
+  - `covers` and `files` are deduplicated in order (`_unique`); acceptance
+    criteria are not; a single-task group keeps its description as is.
 
 ### T4 — PM node · todo
 
