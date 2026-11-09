@@ -2,7 +2,7 @@
 
 Proyecto final del curso **Build Autonomous Multi-Agent Systems** (Saras AI Institute).
 
-Referencia completa (guía + rúbrica, transcritas): **`docs/course_reference.txt`**. Consúltala antes de implementar o cerrar cualquier criterio; aquí solo está lo que hay que tener presente siempre.
+Referencia completa (guía general, guías de cada módulo y rúbrica, transcritas): **`docs/course_reference.txt`**; cada lab en `docs/labs/` (ver "Labs"). Al empezar un módulo se añade su guía como Part A<n>, y al empezar un lab, su archivo en `docs/labs/`. Consúltala antes de implementar o cerrar cualquier criterio; aquí solo está lo que hay que tener presente siempre.
 
 ## Contexto del proyecto
 
@@ -86,14 +86,14 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Spec activo: **Lab 2.1 (PM Agent)**, fase de **producto**. Spec previsto: `docs/specs/lab_2_1_pm_agent.md`. Material del lab en `lab-2-1/`; guía del proyecto en `Build_Autonomous_Multi_Agent_Systems_Module_2_Project_Guide.pdf` (ambos fuera de git).
+Spec activo: **Lab 2.1 (PM Agent)**, fase de **producto**. Spec previsto: `docs/specs/lab_2_1_pm_agent.md`. Enunciado y diferencias lab ↔ proyecto en `docs/labs/lab_2_1_pm_agent.md`; guía del Módulo 2 en `docs/course_reference.txt` (Part A2). Material original en `lab-2-1/` (fuera de git).
 
 Decisiones de producto abiertas (recomendación propuesta; el usuario aún no ha decidido):
 - **D1. Número de tareas:** 2–4 como el lab, o **2–8 pidiendo las menos posibles** (recomendada: el 4 es una simplificación del lab y con requisitos grandes da tareas enormes para 10 iteraciones).
 - **D2. Consolidación de >8 (C2.4):** **determinista**, juntando tareas consecutivas con `merged_from` (recomendada: cobertura garantizada y testeable sin LLM), o fusión con LLM + comprobación + respaldo determinista (posible `IMP`).
 - **D3. Formato de la spec (C2.1):** solo estructurada, o **estructurada + `details` en markdown con las 5 secciones del lab** (recomendada). Añadido propuesto: criterios de la spec con ID, cada tarea lista los que cubre y se valida que todos estén cubiertos (el mapeo de requisitos de C2.1/C2.4).
 
-Diferencias lab ↔ proyecto ya detectadas (irán a la tabla del spec): spec en prosa (C2.1), JSON sin Pydantic (C1.3/C4.6), `CodingTask` sin prioridad (C2.3), 2–4 tareas sin consolidación (C2.4), `PMState` sin estado por tarea ni código acumulado (C2.2), cliente Helicone (usamos `get_chat_model`). Los 45 tests de `lab-2-1/test_lab21.py` sirven de inspiración para los AC; no se ejecutan contra nuestro código.
+Los tests de `lab-2-1/test_lab21.py` sirven de inspiración para los AC; no se ejecutan contra nuestro código.
 
 Módulo 1: cerrado y subido (C1.1–C1.6). Memoria de dos capas (Lab 1.1), tools (Lab 1.2) y Coder con LangChain `create_agent` (Lab 1.3, DEC-068..DEC-080). Detalle en `docs/decisions.md` y el README.
 
