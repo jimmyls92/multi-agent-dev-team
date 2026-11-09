@@ -1684,3 +1684,132 @@ A decision can mix bases; then each part states its own.
   count only writes (a task that only runs an existing file would end as
   `answered`).
 - Code: `agents/coder_agent.py` — `_touched_paths`, `result_from_messages`
+
+### DEC-081 The PM creates 2 to 8 tasks, as few as the requirement allows
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Basis: Required (C2.1: at least two tasks for the API task; C2.4: at most
+  eight); "as few as possible" — Preferred
+- Context: the lab asks for 2–4 tasks. Each task is solved by the Coder
+  within 10 ReACT iterations (C1.4), so a large requirement squeezed into
+  four tasks gives tasks too big for one run.
+- Decision: the PM is asked for between 2 and 8 tasks and told to use the
+  fewest that keep each task small enough for one Coder run.
+- Why: 2 and 8 are the bounds the rubric checks; asking for few tasks keeps
+  the run short and the handoff simple for small requirements.
+- Alternatives: 2–4 as the lab (task size grows with the requirement);
+  a fixed number (does not fit both a two-endpoint API and a larger app).
+- Code: —
+
+### DEC-082 More than 8 tasks are consolidated deterministically
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Basis: Required (C2.4: consolidate to at most eight without losing
+  requirement coverage); deterministic merge — Preferred
+- Context: the LLM may ignore the 8-task limit, and the assessor forces
+  inputs that yield more than eight tasks. Deleting the excess is Not Yet.
+- Decision: if the task list has more than 8 tasks, consecutive tasks are
+  merged in code until 8 remain. A merged task joins the descriptions and
+  acceptance criteria of its sources, covers all their spec criteria
+  (DEC-083) and records them in `merged_from`. Order is preserved.
+- Why: coverage is guaranteed by construction, it is testable without an
+  LLM, and merging neighbours keeps dependency order.
+- Alternatives: LLM merge with a coverage check and the deterministic merge
+  as fallback (more natural tasks, more failure modes; candidate `IMP`);
+  keep the first 8 (loses requirements, Not Yet).
+- Code: —
+
+### DEC-083 Structured spec with markdown details and criterion coverage
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Basis: Required (C2.1: name, description, acceptance criteria, tasks;
+  C1.3/C4.6: Pydantic validation); `details` and coverage check — Preferred
+- Context: the lab's spec is free markdown with five sections; C2.1 calls a
+  prose-only spec Not Yet. C2.4 asks for a requirement mapping after
+  consolidation.
+- Decision: the spec is a Pydantic model with `name`, `description`,
+  `acceptance_criteria` (each with an ID such as `AC-1`), `tasks` and
+  `details` (markdown with the lab's five sections). Each task lists the
+  spec criteria it covers; validation fails if any spec criterion is not
+  covered by a task.
+- Why: the structured fields meet C2.1 and are machine-checkable; `details`
+  keeps the lab's spec-first reasoning; the criterion IDs give the
+  requirement mapping that C2.1 and C2.4 assessors look for.
+- Alternatives: structured fields only (loses the lab's richer spec for the
+  Coder); markdown only (Not Yet in C2.1).
+- Code: —
+
+### DEC-084 Several tasks may target the same file
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Basis: Preferred
+- Context: the lab requires a unique `file_path` per task. The graded API
+  task is naturally one Flask/FastAPI file, and C2.1 still asks for at
+  least two tasks.
+- Decision: tasks do not need unique files; a later task may extend a file
+  an earlier task created. The Coder reads existing files before editing.
+- Why: avoids splitting small programs into artificial modules or adding
+  filler tasks just to reach two files; what is graded is that the
+  generated API works (C2.5).
+- Alternatives: unique file per task as the lab (forces artificial splits).
+- Code: —
+
+### DEC-085 Task priority is the execution order
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Basis: Required (C2.3: the handoff carries priority; C2.4: tasks run in
+  order); integer meaning — Preferred
+- Context: the lab's `CodingTask` has no priority.
+- Decision: `priority` is an integer from 1 to n equal to the task's
+  position in the execution order (1 runs first). Consolidation (DEC-082)
+  renumbers it.
+- Why: priority can never contradict the order the Coder follows.
+- Alternatives: `high`/`medium`/`low` next to the order (a second field
+  that changes nothing and can disagree with the order).
+- Code: —
+
+### DEC-086 The PM uses a more capable model than the Coder
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Basis: Required (C4.5: large model for the PM, small/fast for Coder and
+  QA); doing it now — Preferred
+- Context: every agent uses `LLM_MODEL` (`openai/gpt-4.1-mini`). The PM
+  reasons once per run over the whole scope; the Coder calls the model up
+  to 10 times per task.
+- Decision: the PM reads its own model id from an environment variable,
+  defaulting to a more capable model than the Coder's. The exact model is
+  set in the technical phase.
+- Why: a better decomposition helps every later step at the cost of only
+  two calls per run; doing it now avoids touching the PM again in Module 4.
+- Alternatives: same model for all agents until Module 4 (rework later).
+- Code: —
+
+### DEC-087 The PM is a fixed two-call pipeline; failures end in state
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Basis: two calls and failing into state — Required (lab); printing the
+  error — Preferred; no retry beyond the client's — Provisional
+- Context: the PM has no tools and nothing to decide between steps, so a
+  ReACT loop adds nothing. A node that raises crashes the graph.
+- Decision: the PM makes one call for the spec and one for the tasks, never
+  writes files or runs code. Any failure is caught: the error goes to
+  `state.error` and the progress log, is printed and logged at ERROR, the
+  graph reaches END and nothing is reported as success.
+- Why: spec-first gives better decompositions (lab); the error is visible
+  for debugging without crashing the run.
+- Alternatives: a ReACT PM (no tools to act with); raising (crashes the
+  graph).
+- Revisit when: Module 4 adds per-call retries with backoff and jitter
+  (C4.2). Invalid outputs are handled by DEC-088.
+- Code: —
+
+### DEC-088 An invalid PM output gets one corrective retry
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Basis: Required (C1.3/C4.6: invalid output never reaches later steps);
+  one corrective retry — Preferred
+- Context: an LLM output can fail Pydantic validation or the coverage check
+  of DEC-083. Failing at once would end a whole run over a formatting slip,
+  and the assessor runs the system several times.
+- Decision: when a PM call returns an output that fails validation, the PM
+  calls the model once more with the validation error so it can fix it. If
+  the second output is also invalid, the run fails as in DEC-087 with the
+  validation error. Each PM step makes at most two calls (four per run).
+- Why: recovers from most format slips at a bounded cost; the message the
+  model sees is the same one shown when debugging.
+- Alternatives: fail at once (fragile); up to three corrections (little gain
+  over one; a second failure usually means the requirement was
+  misunderstood).
+- Code: —

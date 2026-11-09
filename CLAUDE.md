@@ -86,12 +86,9 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Spec activo: **Lab 2.1 (PM Agent)**, fase de **producto**. Spec previsto: `docs/specs/lab_2_1_pm_agent.md`. Enunciado y diferencias lab ↔ proyecto en `docs/labs/lab_2_1_pm_agent.md`; guía del Módulo 2 en `docs/course_reference.txt` (Part A2). Material original en `lab-2-1/` (fuera de git).
+Spec activo: **Lab 2.1 (PM Agent)**, fase **técnica**. Spec previsto: `docs/specs/lab_2_1_pm_agent.md`. Enunciado y diferencias lab ↔ proyecto en `docs/labs/lab_2_1_pm_agent.md`; guía del Módulo 2 en `docs/course_reference.txt` (Part A2). Material original en `lab-2-1/` (fuera de git).
 
-Decisiones de producto abiertas (recomendación propuesta; el usuario aún no ha decidido):
-- **D1. Número de tareas:** 2–4 como el lab, o **2–8 pidiendo las menos posibles** (recomendada: el 4 es una simplificación del lab y con requisitos grandes da tareas enormes para 10 iteraciones).
-- **D2. Consolidación de >8 (C2.4):** **determinista**, juntando tareas consecutivas con `merged_from` (recomendada: cobertura garantizada y testeable sin LLM), o fusión con LLM + comprobación + respaldo determinista (posible `IMP`).
-- **D3. Formato de la spec (C2.1):** solo estructurada, o **estructurada + `details` en markdown con las 5 secciones del lab** (recomendada). Añadido propuesto: criterios de la spec con ID, cada tarea lista los que cubre y se valida que todos estén cubiertos (el mapeo de requisitos de C2.1/C2.4).
+Producto cerrado: DEC-081..DEC-088 (2–8 tareas, consolidación determinista, spec estructurada + `details` con cobertura de criterios, tareas pueden compartir archivo, prioridad = orden, modelo más capaz para el PM, pipeline de 2 llamadas con el error en el estado, 1 reintento correctivo ante salida inválida). Siguiente: fase **técnica**.
 
 Los tests de `lab-2-1/test_lab21.py` sirven de inspiración para los AC; no se ejecutan contra nuestro código.
 
