@@ -88,7 +88,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 Spec activo: **Lab 2.1 (PM Agent)**, spec **aprobado**. Spec: `docs/specs/lab_2_1_pm_agent.md`. Enunciado y diferencias lab ↔ proyecto en `docs/labs/lab_2_1_pm_agent.md`; guía del Módulo 2 en `docs/course_reference.txt` (Part A2). Material original en `lab-2-1/` (fuera de git).
 
-Producto cerrado (DEC-081..DEC-088) y técnico cerrado (DEC-089..DEC-094). Siguiente: mapa de T1.
+Producto cerrado (DEC-081..DEC-088) y técnico cerrado (DEC-089..DEC-094). T1 hecha. Siguiente: mapa de T2 (helper de llamada estructurada).
 
 Los tests de `lab-2-1/test_lab21.py` sirven de inspiración para los AC; no se ejecutan contra nuestro código.
 
@@ -135,7 +135,7 @@ Cada lab (o funcionalidad grande) se trabaja en este orden, sin saltarse fases:
 4. **Código, tarea a tarea** (no se empieza la siguiente hasta que el usuario acepte la actual):
    1. **Mapa** antes de escribir código: archivos que se crean o tocan, funciones/clases con firma y tipos y una línea de qué hacen, y flujo de datos entre ellas. El usuario lo aprueba.
    2. **TDD ligero:** primero los tests de los AC de la tarea (en rojo, con modelo falso; nombre `test_ac_<n>_<m>_<k>_...`), luego el código hasta verde. Los AC `llm` se ejecutan al final de la tarea.
-   3. **Revisión guiada:** seguir un ejemplo concreto (input real → qué pasa en cada función → estado final con valores), las 2–3 decisiones no obvias, un **comando para que el usuario lo ejecute** y **2 preguntas "¿qué pasaría si...?"** que el usuario responde y tú corriges. No se añaden comentarios explicativos al código: docstrings Google (DEC-046) y comentarios solo para porqués no obvios con su `DEC-NNN`.
+   3. **Revisión guiada:** seguir un ejemplo concreto (input real → qué pasa en cada función → estado final con valores), con una referencia `archivo:línea` en cada paso para que el usuario lo siga en el código, las 2–3 decisiones no obvias, un **comando para que el usuario lo ejecute** y **2 preguntas "¿qué pasaría si...?"** que el usuario responde y tú corriges; cada pregunta se tiene que poder responder leyendo el código de la tarea actual o el que ya existe, nunca el de tareas futuras. No se añaden comentarios explicativos al código: docstrings Google (DEC-046) y comentarios solo para porqués no obvios con su `DEC-NNN`.
    4. **Hecho cuando:** tests de sus AC en verde (o el AC marcado `llm`/`manual` con su comando ejecutado), docstrings y anclas DEC, estado de la tarea actualizado en el spec y commit propuesto.
    5. Opcional por spec: el usuario escribe él mismo una pieza pequeña con tu revisión.
 5. **Cierre del spec:** lanza un agente revisor independiente. Recibe el spec, `docs/course_reference.txt` y el diff del spec completo, **no tu resumen**. Comprueba que cada AC tiene un test que verifica comportamiento real, que no hay regresiones de criterios anteriores y que se respetan los límites que fuerza el evaluador. El usuario clasifica los hallazgos (arreglar, descartar o pasar a `IMP`); lo que se arregla va en una tarea `R1` con el mismo proceso.

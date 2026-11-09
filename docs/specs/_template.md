@@ -43,7 +43,7 @@ Task status: todo | map | in progress | review | done
   - `function_name(arg: Type) -> ReturnType` — what it does in one line
   - Data flow: `a()` → `b()` → state key `x`
 - **Run it yourself:** `command that shows the result or a forced failure`
-- **Review notes:** answers to the "what if...?" questions, anything worth remembering
+- **Review notes:** changes agreed during the review and anything worth remembering (not the review questions and answers, which are only for learning)
 
 ## Independent review
 
