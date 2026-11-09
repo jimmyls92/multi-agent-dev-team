@@ -125,6 +125,7 @@ Método en prueba desde el Lab 2.1 (2026-11-09). Objetivo: tests fáciles a part
 Cada lab (o funcionalidad grande) se trabaja en este orden, sin saltarse fases:
 
 1. **Producto (funcional/negocio):** decidir cómo se comporta el agente y por qué. Por ejemplo, qué recuerda, qué alcance tiene o qué pasa en los casos límite. Presenta cada decisión con su impacto y tu recomendación; el usuario decide.
+   - **Al presentar cualquier decisión (producto o técnica):** empieza con una frase introductoria en lenguaje llano que diga de qué se habla y qué problema resuelve, antes de código, campos o jerga. Si hay un esquema o un modelo, explica primero para qué sirve cada pieza y luego enséñalo.
 2. **Técnico:** cuando el producto esté cerrado, propón cómo implementarlo: opciones con ventajas e inconvenientes y una recomendación. No le preguntes al usuario el "cómo"; explícale por qué importa.
 3. **Spec:** `docs/specs/lab_<n>_<m>_<tema>.md`, a partir de `docs/specs/_template.md` (en inglés). Normalmente uno por lab.
    - Compara el handout del lab, la guía del proyecto del módulo y la rúbrica; los huecos van en la tabla de diferencias. Si chocan, gana el proyecto. Si el lab ya encaja con el proyecto, el spec es mínimo (tabla de AC y 1–2 tareas).
