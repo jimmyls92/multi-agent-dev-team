@@ -32,7 +32,7 @@ from orchestration.state import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PM_MODEL = "openai/gpt-4.1"  # DEC-093
+DEFAULT_PM_MODEL = "openai/gpt-4.1"  # DEC-086, DEC-093
 MAX_TASKS = 8  # C2.4
 MIN_TASKS = 2  # C2.1, DEC-081
 

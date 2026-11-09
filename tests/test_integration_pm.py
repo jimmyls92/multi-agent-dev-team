@@ -1,23 +1,24 @@
-"""Integration tests of the PM inside the graph (spec `lab_2_1_pm_agent`, AC-2.1-16, AC-2.1-17, AC-2.1-19).
+"""Integration tests of the PM inside the graph (spec `lab_2_1_pm_agent`, AC-2.1-16, AC-2.1-17, AC-2.1-19, AC-2.1-23).
 
 The AC-2.1-19 test calls the real LLM and runs only with ``--run-llm``.
 """
 
 import pytest
 
-from main import DEMO_REQUIREMENT
-from orchestration.graph import run
+import agents.pm_agent as pm_agent
+from main import DEMO_REQUIREMENT, main
+from orchestration.graph import build_graph, run
 from orchestration.state import ProjectState
 from tests.fakes import ScriptedChatModel
-from tests.test_pm_agent import REQUIREMENT, _spec_reply, _valid_tasks
+from tests.test_pm_agent import REQUIREMENT, _eleven_tasks, _spec_reply, _valid_tasks
 
 
 def test_ac_2_1_16_graph_writes_task_list():
     model = ScriptedChatModel([_spec_reply(), _valid_tasks()])
 
-    state = run(REQUIREMENT, pm_model=model)
+    final = build_graph(model).invoke(ProjectState(requirement=REQUIREMENT))
 
-    assert isinstance(state, ProjectState)
+    state = ProjectState.model_validate(final)
     assert state.requirement == REQUIREMENT
     assert state.tasks
     for task in state.tasks:
@@ -33,6 +34,20 @@ def test_ac_2_1_17_graph_failure_reaches_end():
 
     assert state.error
     assert state.tasks == []
+
+
+def test_ac_2_1_23_consolidation_visible_end_to_end(monkeypatch, capsys):
+    model = ScriptedChatModel([_spec_reply(), _eleven_tasks()])
+    monkeypatch.setattr(pm_agent, "get_chat_model", lambda model_id: model)
+
+    code = main(["Build a large project"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "consolidated 11 tasks into 8" in out
+    assert "merged from: task_1, task_2" in out
+    assert "merged from: task_11" in out
+    assert "covers: REQ-3" in out
 
 
 @pytest.mark.llm

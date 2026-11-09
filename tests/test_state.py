@@ -1,4 +1,4 @@
-"""Tests for the shared project state (spec `lab_2_1_pm_agent`, AC-2.1-1, AC-2.1-2, AC-2.1-20)."""
+"""Tests for the shared project state (spec `lab_2_1_pm_agent`, AC-2.1-1, AC-2.1-2, AC-2.1-20, AC-2.1-22)."""
 
 import pytest
 from pydantic import ValidationError
@@ -89,6 +89,21 @@ def test_ac_2_1_2_state_json_round_trip():
 def test_ac_2_1_20_task_criteria_need_given_when_then():
     data = _state_data()
     del data["spec"]["tasks"][0]["acceptance_criteria"][0]["then"]
+
+    with pytest.raises(ValidationError):
+        ProjectState.model_validate(data)
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t"])
+def test_ac_2_1_22_blank_text_rejected(blank):
+    data = _state_data()
+    data["requirement"] = blank
+
+    with pytest.raises(ValidationError):
+        ProjectState.model_validate(data)
+
+    data = _state_data()
+    data["spec"]["acceptance_criteria"][0]["text"] = blank
 
     with pytest.raises(ValidationError):
         ProjectState.model_validate(data)

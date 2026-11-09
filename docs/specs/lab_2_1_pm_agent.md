@@ -1,6 +1,6 @@
 # Spec: Lab 2.1 — PM Agent
 
-- **Status:** approved
+- **Status:** done
 - **Sources:** lab handout `docs/labs/lab_2_1_pm_agent.md`, project guide
   (Module 2, `docs/course_reference.txt` Part A2), rubric C2.1–C2.5
 - **Decisions:** DEC-081..DEC-096 (the why lives there; do not repeat it here)
@@ -67,6 +67,15 @@ task list of 2 tasks that together cover all three.
 - **Given** valid state data
 - **When** one task acceptance criterion has no `then` and the data is
   validated as `ProjectState`
+- **Then** a `ValidationError` is raised
+
+#### AC-2.1-22 — Blank text is rejected
+
+- **Origin:** C4.6 (R1, review F3)
+- **Verify:** unit — `tests/test_state.py::test_ac_2_1_22_blank_text_rejected`
+- **Given** valid state data
+- **When** the requirement, or a spec criterion text, is `""`, `"   "` or
+  `"\n\t"` and the data is validated as `ProjectState`
 - **Then** a `ValidationError` is raised
 
 ### Structured call helper
@@ -173,11 +182,14 @@ task list of 2 tasks that together cover all three.
 
 - **Origin:** C2.4
 - **Verify:** unit — `tests/test_pm_agent.py::test_ac_2_1_12_node_consolidates`
-- **Given** a fake model whose task list has 11 tasks covering all criteria
+- **Given** a fake model whose task list has 11 tasks covering all criteria,
+  where only the last task covers `REQ-3`
 - **When** `pm_node` runs
 - **Then** the model was called exactly twice (no retry), `spec.tasks` and
-  `tasks` have 8 tasks, every spec criterion is covered by some task, and
-  a progress note says 11 tasks were consolidated into 8
+  `tasks` have 8 tasks, every spec criterion is covered by some task, the
+  `merged_from` lists together are `task_1`..`task_11` in order, every
+  original acceptance criterion is kept, and a progress note says 11 tasks
+  were consolidated into 8
 
 #### AC-2.1-13 — Progress notes
 
@@ -251,6 +263,16 @@ task list of 2 tasks that together cover all three.
 - **When** `main([""])` or `main(["   "])` runs
 - **Then** it exits with code 2, stderr says the requirement must not be
   empty, and the model is never called
+
+#### AC-2.1-23 — Consolidation is visible from `main.py`
+
+- **Origin:** C2.4 (R1, review F2)
+- **Verify:** integration — `tests/test_integration_pm.py::test_ac_2_1_23_consolidation_visible_end_to_end`
+- **Given** the PM on a fake model whose task list has 11 tasks
+- **When** `main(["requirement"])` runs
+- **Then** it returns 0 and stdout shows the consolidation note, the
+  `merged from` mapping of the first and last tasks and the task covering
+  `REQ-3`
 
 #### AC-2.1-19 — The graded demo requirement gives a covering spec
 
@@ -378,7 +400,36 @@ until they pass (green) → guided review → commit.
     C2.6's two-agent diagram; it must be done before `master` is
     fast-forwarded or a SHA is submitted.
 
+### R1 — Fixes from the independent review · done
+
+- **Covers:** AC-2.1-22, AC-2.1-23; stronger tests for AC-2.1-9, AC-2.1-12,
+  AC-2.1-16, AC-2.1-18
+- **Map:** fixed directly without a map (small, agreed with the user)
+  - `orchestration/state.py`: `NonEmptyStr` strips whitespace before the
+    length check
+  - Tests: AC-2.1-12 fails if the node truncates instead of consolidating
+    (checked by mutation); AC-2.1-9 checks "REQ-3 not covered" and the whole
+    second list; AC-2.1-16 validates the graph's raw dict; AC-2.1-18 uses
+    different files per task and checks every progress note; new
+    end-to-end consolidation test through `main.py`
+  - Docstrings: `main()` documents `SystemExit(2)`; nested test helper
+  - `docs/decisions.md`: `Code:` filled for DEC-081..DEC-094; DEC-086
+    anchored in code
+- **Run it yourself:** `.venv/bin/python -m pytest tests -v`
+- **Review notes:** —
+
 ## Independent review
 
-- **Date:**
+- **Date:** 2026-11-09
 - **Findings and triage:**
+  - F1 AC-2.1-12 test passed with truncation — fix (R1)
+  - F2 consolidation only visible in pytest — fix (R1, AC-2.1-23); how to
+    run it goes in the end-of-module README
+  - F3 whitespace-only text accepted — fix (R1, AC-2.1-22)
+  - F4 duplicate tasks pass validation — backlog (IMP-007)
+  - F5 AC-2.1-9 assertion too loose — fix (R1)
+  - F6 AC-2.1-18 assertions too loose — fix (R1)
+  - F7 AC-2.1-16 `isinstance` always true — fix (R1)
+  - F8 missing docstring sections — fix (R1)
+  - F9 DEC `Code: —` stale — fix (R1); empty Docker files — discard
+    (Module 4, C4.8)

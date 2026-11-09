@@ -199,8 +199,8 @@ def test_ac_2_1_9_uncovered_criterion_retried():
     state = _run(model)
 
     assert len(model.calls) == 3
-    assert "REQ-3" in _text(model.calls[2][-1:])
-    assert state.tasks[1].covers == ["REQ-2", "REQ-3"]
+    assert "REQ-3 not covered" in _text(model.calls[2][-1:])
+    assert [t.covers for t in state.tasks] == [["REQ-1"], ["REQ-2", "REQ-3"]]
 
 
 def test_ac_2_1_10_unknown_criterion_rejected():
@@ -225,9 +225,21 @@ def test_ac_2_1_11_single_task_retried():
     assert len(state.tasks) == 2
 
 
+def _eleven_tasks() -> AIMessage:
+    """Returns a scripted list of 11 tasks where only the last one covers REQ-3.
+
+    Dropping any task loses its requirement or its criteria, so only a real
+    consolidation keeps everything.
+
+    Returns:
+        The AI message calling the ``TaskList`` tool.
+    """
+    drafts = [_draft(k, ["REQ-1"] if k <= 5 else ["REQ-2"]) for k in range(1, 11)]
+    return _tasks_reply([*drafts, _draft(11, ["REQ-3"])])
+
+
 def test_ac_2_1_12_node_consolidates():
-    drafts = [_draft(k, [f"REQ-{(k - 1) % 3 + 1}"]) for k in range(1, 12)]
-    model = ScriptedChatModel([_spec_reply(), _tasks_reply(drafts)])
+    model = ScriptedChatModel([_spec_reply(), _eleven_tasks()])
 
     state = _run(model)
 
@@ -236,6 +248,10 @@ def test_ac_2_1_12_node_consolidates():
     assert len(state.tasks) == 8
     covered = {req for t in state.tasks for req in t.covers}
     assert covered == {"REQ-1", "REQ-2", "REQ-3"}
+    merged = [task_id for t in state.tasks for task_id in t.merged_from]
+    assert merged == [f"task_{k}" for k in range(1, 12)]
+    whens = [c.when for t in state.tasks for c in t.acceptance_criteria]
+    assert whens == [f"step {k}" for k in range(1, 12)]
     assert any("11" in note and "8" in note for note in state.progress)
 
 
@@ -270,7 +286,14 @@ def test_ac_2_1_15_uses_pm_model(monkeypatch, env_value, expected):
     requested = []
 
     def fake_get_chat_model(model_id):
-        """Records the requested model id and returns the fake model."""
+        """Returns a fake model and records the requested model id.
+
+        Args:
+            model_id: OpenRouter model id the PM asked for.
+
+        Returns:
+            A fake model with valid outputs.
+        """
         requested.append(model_id)
         return ScriptedChatModel([_spec_reply(), _valid_tasks()])
 

@@ -5,7 +5,7 @@ import pytest
 import agents.pm_agent as pm_agent
 from main import main
 from tests.fakes import ScriptedChatModel
-from tests.test_pm_agent import _spec_reply, _valid_tasks
+from tests.test_pm_agent import _draft, _spec_reply, _tasks_reply
 
 
 def _use_model(monkeypatch, model: ScriptedChatModel) -> None:
@@ -19,18 +19,25 @@ def _use_model(monkeypatch, model: ScriptedChatModel) -> None:
 
 
 def test_ac_2_1_18_main_output_and_exit_code(monkeypatch, capsys):
-    _use_model(monkeypatch, ScriptedChatModel([_spec_reply(), _valid_tasks()]))
+    drafts = [_draft(1, ["REQ-1"]), _draft(2, ["REQ-2", "REQ-3"])]
+    drafts[0]["files"], drafts[1]["files"] = ["app.py"], ["validation.py"]
+    _use_model(monkeypatch, ScriptedChatModel([_spec_reply(), _tasks_reply(drafts)]))
 
     code = main(["Build an echo API"])
 
     out = capsys.readouterr().out
     assert code == 0
     assert "Echo API" in out
-    for task_id, priority in [("task_1", 1), ("task_2", 2)]:
-        assert task_id in out
-        assert f"priority {priority}" in out
-    assert "app.py" in out
-    assert "PM Agent: analysing requirement." in out
+    assert "task_1 · priority 1" in out
+    assert "task_2 · priority 2" in out
+    assert "files: app.py" in out
+    assert "files: validation.py" in out
+    for note in [
+        "PM Agent: analysing requirement.",
+        "PM Agent: spec complete — decomposing into tasks.",
+        "PM Agent: 2 tasks created — handoff ready.",
+    ]:
+        assert note in out
 
     _use_model(monkeypatch, ScriptedChatModel([RuntimeError("API down")]))
 

@@ -14,9 +14,10 @@ Typical usage example:
 import operator
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
-NonEmptyStr = Annotated[str, Field(min_length=1)]
+# Surrounding whitespace is stripped first, so blank text is rejected (C4.6).
+NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 TaskStatus = Literal["pending", "in_progress", "done", "failed"]
 

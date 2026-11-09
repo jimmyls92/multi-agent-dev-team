@@ -59,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
 
     Returns:
         The exit code: 0 on success, 1 if the run ended with an error.
+
+    Raises:
+        SystemExit: With code 2 on invalid usage, e.g. an empty requirement
+            (raised by argparse).
     """
     parser = argparse.ArgumentParser(prog="python main.py", description="Multi-agent dev team.")
     parser.add_argument(
