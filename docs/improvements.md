@@ -116,6 +116,23 @@ each idea has a stable ID (`IMP-NNN`, never reused).
 - Notes: rare with the real model; the lab's real-LLM test already checks
   coverage of distinct criteria.
 
+## Coder node (Lab 2.2)
+
+### IMP-009 Keep `code` in step with the disk after a fatal error
+- Status: idea
+- Area: Coder node (Lab 2.2)
+- Why: when a fatal error happens after the Coder wrote files (e.g.
+  `store_outcome` fails after the loop), the node returns no `code`, so the
+  files are on disk but missing from `state.code`. The run stops there
+  (DEC-102), so nothing builds on the gap today, but QA (Module 3) or a
+  resumed run could read a stale `code`.
+- Rubric: C2.2 (accumulated code must be truthful); C4.2/C4.3 (retries or
+  an open breaker may let a run continue after an error, which would make
+  the gap visible). The fix must not report the task as a success.
+- Notes: options: scan the task's planned/known files on disk in the
+  `except` path, or have `run_agent` return partial steps with the error.
+  Raised during the T3 review of Lab 2.2.
+
 ## General
 
 ### IMP-008 One module for the models shared between agents
