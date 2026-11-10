@@ -239,15 +239,34 @@ and Lab 2.1 included) stays green at the end of every task.
   - Data flow: none new; the node writes `result` in T2
 - **Run it yourself:** `.venv/bin/python -m pytest tests/test_state.py -v`
 
-### T2 — Coder node: happy path and task prompt · todo
+### T2 — Coder node: happy path, task prompt and code · done
 
-- **Covers:** AC-2.2-2, AC-2.2-3, AC-2.2-4, AC-2.2-8, AC-2.2-9
-- **Map:** pending (includes `run_agent(model=...)`, the run context that
-  carries the window, and the before/after of the window logic, as agreed)
+- **Covers:** AC-2.2-2, AC-2.2-3, AC-2.2-4, AC-2.2-6, AC-2.2-8, AC-2.2-9
+- **Map:**
+  - Files: `agents/coder_agent.py` (modified), `tests/conftest.py`
+    (modified: `isolated_run` fixture, in-memory Chroma with a hash
+    embedding), `tests/test_coder_node.py` (new)
+  - `run_agent(task, window, model=None) -> CoderResult` — optional model
+    for the plan and the loop; without it, unchanged (DEC-105)
+  - `CoderRunContext(window)` — the run's context, one window per run
+    (DEC-099, DEC-104); lives with the Coder (the window is private and
+    importing `memory` loads Chroma)
+  - `_next_pending(tasks) -> TaskState | None` — first pending task (DEC-103)
+  - `_task_prompt(task, spec, existing_files) -> str` — task text with the
+    project context (DEC-098)
+  - `_written_files(result) -> dict[str, str]` — `write_file` steps inside
+    the workspace that exist, read from disk (DEC-106)
+  - `make_coder_node(model) -> coder_node(state, runtime) -> dict`
+  - Data flow: `_next_pending` → `_task_prompt` → `run_agent(prompt,
+    runtime.context.window, model)` → `tasks[i].{status, result}`, `code`,
+    `progress`, `error`
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_coder_node.py -v`
+- **Review notes:** AC-2.2-6 moved here from T3 (`code` is born in this
+  task).
 
-### T3 — Coder node: failures and code from disk · todo
+### T3 — Coder node: failures · todo
 
-- **Covers:** AC-2.2-5, AC-2.2-6, AC-2.2-7
+- **Covers:** AC-2.2-5, AC-2.2-7
 - **Map:** pending
 
 ### T4 — Router and the Coder graph · todo

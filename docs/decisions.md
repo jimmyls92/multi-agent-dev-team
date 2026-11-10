@@ -2004,7 +2004,7 @@ A decision can mix bases; then each part states its own.
   tools already let it read any file of the workspace.
 - Alternatives: only the task (blind to earlier work); all accumulated code
   in the prompt (cost grows with each task).
-- Code: pending (Lab 2.2)
+- Code: `agents/coder_agent.py` — `_task_prompt`, `make_coder_node`
 
 ### DEC-099 One memory window per graph run, shared by its tasks
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
@@ -2022,7 +2022,7 @@ A decision can mix bases; then each part states its own.
 - Why: in task 2 the Coder remembers what it did in task 1; the window keeps
   its meaning and slides with more than N tasks (up to 8, C2.4).
 - Alternatives: a fresh window per task (always empty, C1.2 evidence lost).
-- Code: pending (Lab 2.2)
+- Code: `agents/coder_agent.py` — `CoderRunContext`, `make_coder_node`
 
 ### DEC-100 Lab 2.2 builds the Coder node; PM→Coder wiring is Lab 2.3
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
@@ -2057,7 +2057,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: only statuses and code (C1.5 evidence and the plan/result
   of each task are lost from the state); only results (no single view of
   the project's files).
-- Code: pending (Lab 2.2)
+- Code: `agents/coder_agent.py` — `make_coder_node`
 
 ### DEC-102 A fatal error ends the run; the node never retries a whole task
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
@@ -2096,7 +2096,7 @@ A decision can mix bases; then each part states its own.
   under LangGraph's default limit of 25).
 - Alternatives: the lab's index and routing fields (two more fields that
   can disagree with `tasks`).
-- Code: pending (Lab 2.2)
+- Code: `agents/coder_agent.py` — `_next_pending`; router pending (T4)
 
 ### DEC-104 The run's memory window travels in the LangGraph run context
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
@@ -2112,7 +2112,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: a window created in `make_coder_node` (shared silently
   between runs once the graph is reused); the window's turns in the state
   (against DEC-048, grows the state and the traces).
-- Code: pending (Lab 2.2)
+- Code: `agents/coder_agent.py` — `CoderRunContext`; graph pending (T4)
 
 ### DEC-105 The node turns a task into the Coder's prompt; `run_agent` stays
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
@@ -2130,7 +2130,8 @@ A decision can mix bases; then each part states its own.
 - Alternatives: a new task-shaped entry point next to `run_agent` (two
   paths to keep in sync); storing only the description in memory (one more
   parameter; revisit if retrieval gets noisy, see IMP-006).
-- Code: pending (Lab 2.2)
+- Code: `agents/coder_agent.py` — `run_agent`, `_task_prompt`,
+  `make_coder_node`
 
 ### DEC-106 `code` holds the files each task actually wrote
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
@@ -2147,7 +2148,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: the planned `TaskSpec.files` (may name files that were
   never written); the PM not planning files (reopens the closed Lab 2.1
   spec and loses cross-task coordination).
-- Code: pending (Lab 2.2)
+- Code: `agents/coder_agent.py` — `_written_files`
 
 ### DEC-107 Each task keeps its `CoderResult` next to its status
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted

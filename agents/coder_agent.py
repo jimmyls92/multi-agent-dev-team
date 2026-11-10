@@ -6,7 +6,8 @@ its arguments are validated before the tool runs (DEC-076), and the task
 ends only through the validated ``Finish`` tool (DEC-073). A planning step
 runs before the loop (DEC-071). run_agent() runs one task and returns a
 CoderResult; chat() wraps it for one session message; main() is the command
-line (interactive session or a single task).
+line (interactive session or a single task). make_coder_node() wraps it as a
+LangGraph node that runs the next pending task of the shared state (Lab 2.2).
 
 Attributes:
     MODEL: OpenRouter model id, from the LLM_MODEL environment variable.
@@ -22,7 +23,8 @@ Attributes:
 
 import logging
 import os
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
@@ -45,11 +47,13 @@ from langchain_core.messages import (
     convert_to_messages,
     convert_to_openai_messages,
 )
+from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+import tools.handlers
 from llm_client import get_chat_model
 from memory import SlidingWindowBuffer, build_context, store_memory, store_outcome
-from orchestration.state import CoderResult, StepRecord
+from orchestration.state import CoderResult, ProjectSpec, ProjectState, StepRecord, TaskState
 from tools import ExecutionResult
 from tools.agent_tools import AGENT_TOOLS, check_tool_call
 from tools.handlers import resolve_in_workspace
@@ -527,7 +531,9 @@ def make_plan(task: str, window: SlidingWindowBuffer, model: BaseChatModel | Non
     return plan
 
 
-def run_agent(task: str, window: SlidingWindowBuffer) -> CoderResult:
+def run_agent(
+    task: str, window: SlidingWindowBuffer, model: BaseChatModel | None = None
+) -> CoderResult:
     """Runs one task through the planning step and the tool loop.
 
     Steps:
@@ -543,6 +549,9 @@ def run_agent(task: str, window: SlidingWindowBuffer) -> CoderResult:
     Args:
         task: The user's request.
         window: Short-term window of the session.
+        model: Chat model for the plan and the loop. Defaults to the
+            configured one (``get_chat_model(MODEL)``); tests pass a fake
+            model (DEC-105).
 
     Returns:
         A CoderResult. Reaching the iteration limit or a failed execution
@@ -553,8 +562,9 @@ def run_agent(task: str, window: SlidingWindowBuffer) -> CoderResult:
             then left untouched (DEC-028).
     """
     store_memory(task)  # DEC-019
-    plan = make_plan(task, window).render()
-    output = _default_agent().invoke(
+    plan = make_plan(task, window, model).render()
+    agent = _default_agent() if model is None else build_agent(model)
+    output = agent.invoke(
         {"messages": [HumanMessage(task)]},
         {"recursion_limit": RECURSION_LIMIT},
         context=CoderContext(task=task, window=window, plan=plan),
@@ -568,6 +578,133 @@ def run_agent(task: str, window: SlidingWindowBuffer) -> CoderResult:
     window.add_turn(convert_to_openai_messages(messages))  # DEC-057, DEC-077
     logger.info("Task finished: %s after %d iterations", result.status, result.iterations)
     return result
+
+
+# --- Graph node (Lab 2.2, DEC-097..DEC-107) ----------------------------------
+
+
+@dataclass
+class CoderRunContext:
+    """Data that lives for one graph run, passed as ``context=`` (DEC-104).
+
+    Attributes:
+        window: Short-term window shared by every task of the run, one turn
+            per task (DEC-099).
+    """
+    window: SlidingWindowBuffer = field(default_factory=SlidingWindowBuffer)
+
+
+def _next_pending(tasks: list[TaskState]) -> TaskState | None:
+    """Returns the first pending task, or None when none is left.
+
+    The PM lists tasks in priority order (DEC-085), so the first pending one
+    is the next to run (DEC-103).
+
+    Args:
+        tasks: The state's task list.
+
+    Returns:
+        The task to run next, or None.
+    """
+    return next((task for task in tasks if task.status == "pending"), None)
+
+
+def _task_prompt(task: TaskState, spec: ProjectSpec | None, existing_files: list[str]) -> str:
+    """Returns the task text the Coder receives for one task (DEC-098, DEC-105).
+
+    Args:
+        task: The task to run.
+        spec: The PM's spec; its name and description give the project
+            context. None leaves the context out.
+        existing_files: Files already written in this run (keys of
+            ``state.code``).
+
+    Returns:
+        The task, its Given/When/Then criteria, its planned files and the
+        files that already exist, as plain text.
+    """
+    lines = []
+    if spec is not None:
+        lines += [f"Project: {spec.name} — {spec.description}", ""]
+    lines += [f"Task {task.task_id}: {task.title}", task.description, "", "Acceptance criteria:"]
+    lines += [f"- Given {c.given}, when {c.when}, then {c.then}" for c in task.acceptance_criteria]
+    lines += [
+        "",
+        f"Planned files: {', '.join(task.files)}",
+        f"Files already written in this run: {', '.join(existing_files) or 'none'}",
+    ]
+    return "\n".join(lines)
+
+
+def _written_files(result: CoderResult) -> dict[str, str]:
+    """Returns the files the task wrote, read from disk (DEC-106).
+
+    Only ``write_file`` steps whose path resolves inside the workspace and
+    exists on disk count, so a rejected or failed write adds nothing.
+
+    Args:
+        result: The task's result; its steps hold the tool calls.
+
+    Returns:
+        File path relative to the workspace mapped to its content on disk.
+    """
+    files = {}
+    for step in result.steps:
+        if step.action != "write_file" or not step.action_input:
+            continue
+        path = _resolved(step.action_input.get("path"))
+        if path is not None and Path(path).is_file():
+            relative = Path(path).relative_to(tools.handlers.WORKSPACE_DIR).as_posix()
+            files[relative] = Path(path).read_text(encoding="utf-8")
+    return files
+
+
+def make_coder_node(
+    model: BaseChatModel | None = None,
+) -> Callable[[ProjectState, Runtime[CoderRunContext]], dict]:
+    """Returns the Coder node function for the graph.
+
+    Args:
+        model: Chat model for the Coder. None uses the configured one.
+
+    Returns:
+        The node: it takes the state and the run's runtime and returns a
+        partial update.
+    """
+
+    def coder_node(state: ProjectState, runtime: Runtime[CoderRunContext]) -> dict:
+        """Runs the next pending task and records its status, result and code.
+
+        Args:
+            state: Current state; reads ``tasks``, ``spec`` and ``code``.
+            runtime: The run's runtime; its context holds the window.
+
+        Returns:
+            Update with ``tasks``, ``code``, ``progress`` and ``error``; only
+            ``progress`` and ``error`` when no task is pending.
+        """
+        task = _next_pending(state.tasks)
+        if task is None:
+            error = "Coder Agent: no pending task to run."
+            return {"progress": [error], "error": error}
+
+        started = f"Coder Agent: starting {task.task_id} — {task.title}."
+        prompt = _task_prompt(task, state.spec, list(state.code))
+        result = run_agent(prompt, runtime.context.window, model)
+        status = "done" if result.status == "success" else "failed"  # DEC-101
+        finished = f"Coder Agent: {task.task_id} {status}. File: {result.main_file or 'none'}."
+        tasks = [
+            t.model_copy(update={"status": status, "result": result}) if t.task_id == task.task_id else t
+            for t in state.tasks
+        ]
+        return {
+            "tasks": tasks,
+            "code": {**state.code, **_written_files(result)},
+            "progress": [started, finished],
+            "error": "",
+        }
+
+    return coder_node
 
 
 MAX_ITERATIONS_MESSAGE = (
