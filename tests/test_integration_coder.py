@@ -47,7 +47,9 @@ def test_ac_2_2_11_window_per_run(isolated_run):
     second = ScriptedChatModel(successful_task() + successful_task())
     build_coder_graph(second).invoke(two_task_state(), context=CoderRunContext())
 
-    assert len(_non_system(second.calls[0])) == 1
+    only_message = _non_system(second.calls[0])
+    assert len(only_message) == 1
+    assert task_1_description in str(only_message[0].content)
 
 
 def test_ac_2_2_12_self_loop_runs_all_tasks(isolated_run):

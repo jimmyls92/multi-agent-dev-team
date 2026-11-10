@@ -7,6 +7,7 @@ so ``result`` comes from a real run.
 
 import logging
 
+import pytest
 from langgraph.graph import END
 from langgraph.runtime import Runtime
 
@@ -105,6 +106,58 @@ def test_ac_2_2_5_unsuccessful_task_failed(isolated_run):
     assert state.error == ""
 
 
+@pytest.mark.parametrize(
+    ("replies", "expected"),
+    [
+        (
+            [
+                tool_call_reply(
+                    "write_file",
+                    {"thought": "Write.", "path": "app.py", "content": "raise SystemExit(1)\n"},
+                    "call_w",
+                ),
+                tool_call_reply("exec_python", {"thought": "Run it.", "path": "app.py"}, "call_e"),
+                tool_call_reply(
+                    "Finish", {"thought": "Done.", "main_file": "app.py", "explanation": "Wrote it."}, "call_f"
+                ),
+            ],
+            "failed_execution",
+        ),
+        (
+            [
+                tool_call_reply(
+                    "write_file",
+                    {"thought": "Write.", "path": "app.py", "content": 'print("hello")\n'},
+                    "call_w",
+                ),
+                tool_call_reply(
+                    "Finish", {"thought": "Done.", "main_file": "app.py", "explanation": "Wrote it."}, "call_f"
+                ),
+            ],
+            "unverified",
+        ),
+        (
+            [
+                tool_call_reply(
+                    "Finish", {"thought": "Done.", "main_file": None, "explanation": "Just an answer."}, "call_f"
+                ),
+            ],
+            "answered",
+        ),
+    ],
+    ids=["failed_execution", "unverified", "answered"],
+)
+def test_ac_2_2_16_only_success_is_done(isolated_run, replies, expected):
+    model = ScriptedChatModel([tool_call_reply("Plan", {"steps": ["Do it"]}, "call_plan"), *replies])
+
+    _, state = _run_node(two_task_state(), model)
+
+    assert state.tasks[0].result.status == expected
+    assert state.tasks[0].status == "failed"
+    assert state.tasks[1].status == "pending"
+    assert state.error == ""
+
+
 def test_ac_2_2_6_code_from_written_files(isolated_run):
     model = ScriptedChatModel([
         tool_call_reply("Plan", {"steps": ["Write the files", "Run app.py"]}, "call_plan"),
@@ -183,3 +236,54 @@ def test_ac_2_2_10_router():
     assert route_after_coder(with_statuses("done", "pending")) == CODER_NODE
     assert route_after_coder(with_statuses("done", "failed")) == END
     assert route_after_coder(with_statuses("failed", "pending", error="RuntimeError: API down")) == END
+
+
+def test_ac_2_2_17_unreadable_file_skipped(isolated_run, caplog):
+    corrupt = 'open("data.txt", "wb").write(bytes([0xff, 0xfe, 0x00]))\nprint("ok")\n'
+    model = ScriptedChatModel([
+        tool_call_reply("Plan", {"steps": ["Write", "Run"]}, "call_plan"),
+        tool_call_reply("write_file", {"thought": "Data.", "path": "data.txt", "content": "text\n"}, "call_d"),
+        tool_call_reply("write_file", {"thought": "App.", "path": "app.py", "content": corrupt}, "call_a"),
+        tool_call_reply("exec_python", {"thought": "Run it.", "path": "app.py"}, "call_e"),
+        tool_call_reply(
+            "Finish", {"thought": "It runs.", "main_file": "app.py", "explanation": "Done."}, "call_f"
+        ),
+    ])
+
+    with caplog.at_level(logging.WARNING):
+        _, state = _run_node(two_task_state(), model)
+
+    assert state.tasks[0].status == "done"
+    assert "data.txt" not in state.code
+    assert state.code["app.py"] == (isolated_run / "app.py").read_text()
+    assert any(
+        record.levelno == logging.WARNING and "data.txt" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_ac_2_2_18_rejected_write_not_in_code(isolated_run):
+    (isolated_run / "old_lib.py").write_text("OLD = True\n")
+    model = ScriptedChatModel([
+        tool_call_reply("Plan", {"steps": ["Write", "Run"]}, "call_plan"),
+        tool_call_reply("write_file", {"thought": "No content.", "path": "old_lib.py"}, "call_bad"),
+        *successful_task()[1:],
+    ])
+
+    _, state = _run_node(two_task_state(), model)
+
+    rejected = [s for s in state.tasks[0].result.steps if s.action_input == {"path": "old_lib.py"}]
+    assert [s.rejected for s in rejected] == [True]
+    assert "old_lib.py" not in state.code
+    assert "app.py" in state.code
+
+
+def test_ac_2_2_19_missing_run_context(isolated_run):
+    model = ScriptedChatModel([])
+    before = two_task_state()
+
+    update = make_coder_node(model)(before, Runtime())
+
+    assert model.calls == []
+    assert "tasks" not in update
+    assert "context" in update["error"]

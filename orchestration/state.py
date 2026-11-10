@@ -111,12 +111,15 @@ class StepRecord(BaseModel):
         observation: Text sent back to the model: the tool's result, an
             error, or the nudge (DEC-073). None for the accepted Finish and
             for a text answer at the limit.
+        rejected: True when validation rejected the tool call, so the tool
+            did not run (DEC-076, DEC-106).
     """
     iteration: int
     thought: str | None = None
     action: str | None = None
     action_input: dict | None = None
     observation: str | None = None
+    rejected: bool = False
 
 
 class CoderResult(BaseModel):

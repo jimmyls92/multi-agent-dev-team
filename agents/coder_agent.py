@@ -469,6 +469,7 @@ def result_from_messages(
                 action=call["name"],
                 action_input=args,
                 observation=observation,
+                rejected=getattr(reply, "status", None) == "error",
             ))
 
     if finish is None:
@@ -639,8 +640,10 @@ def _task_prompt(task: TaskState, spec: ProjectSpec | None, existing_files: list
 def _written_files(result: CoderResult) -> dict[str, str]:
     """Returns the files the task wrote, read from disk (DEC-106).
 
-    Only ``write_file`` steps whose path resolves inside the workspace and
-    exists on disk count, so a rejected or failed write adds nothing.
+    Only ``write_file`` steps not rejected by validation, whose path
+    resolves inside the workspace and exists on disk, count. A file that
+    cannot be read as text is skipped with a warning, so the node never
+    raises here (DEC-102).
 
     Args:
         result: The task's result; its steps hold the tool calls.
@@ -650,12 +653,16 @@ def _written_files(result: CoderResult) -> dict[str, str]:
     """
     files = {}
     for step in result.steps:
-        if step.action != "write_file" or not step.action_input:
+        if step.action != "write_file" or step.rejected or not step.action_input:
             continue
         path = _resolved(step.action_input.get("path"))
-        if path is not None and Path(path).is_file():
-            relative = Path(path).relative_to(tools.handlers.WORKSPACE_DIR).as_posix()
+        if path is None or not Path(path).is_file():
+            continue
+        relative = Path(path).relative_to(tools.handlers.WORKSPACE_DIR).as_posix()
+        try:
             files[relative] = Path(path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning("Skipping %s in the accumulated code: %s", relative, exc)
     return files
 
 
@@ -699,11 +706,16 @@ def make_coder_node(
         Returns:
             Update with ``tasks``, ``code``, ``progress`` and ``error``;
             ``code`` is left out after a fatal error, and only ``progress``
-            and ``error`` are returned when no task is pending.
+            and ``error`` are returned when no task is pending or the run
+            has no context.
         """
         task = _next_pending(state.tasks)
         if task is None:
             error = "Coder Agent: no pending task to run."
+            return {"progress": [error], "error": error}
+        if runtime.context is None:  # DEC-109: configuration error, the task never ran
+            error = "Coder Agent: no run context; invoke the graph with context=CoderRunContext()."
+            logger.error(error)
             return {"progress": [error], "error": error}
 
         started = f"Coder Agent: starting {task.task_id} — {task.title}."
