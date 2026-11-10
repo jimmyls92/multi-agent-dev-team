@@ -279,10 +279,26 @@ and Lab 2.1 included) stays green at the end of every task.
 - **Review notes:** AC-2.2-5 was green on arrival (the status mapping came
   with T2); a missing run context is caught as a fatal error too.
 
-### T4 — Router and the Coder graph · todo
+### T4 — Router and the Coder graph · done
 
 - **Covers:** AC-2.2-10, AC-2.2-11, AC-2.2-12, AC-2.2-13, AC-2.2-14
-- **Map:** pending
+- **Map:**
+  - Files: `orchestration/graph.py` (modified), `tests/coder_helpers.py`
+    (new: two-task state and scripted tasks, shared by both test files),
+    `tests/test_coder_node.py` (modified: imports the helpers, router
+    test), `tests/test_integration_coder.py` (new)
+  - `CODER_NODE = "coder"`
+  - `route_after_coder(state) -> str` — `CODER_NODE` while a task is pending
+    and `error` is empty, else `END` (DEC-103)
+  - `_add_coder(builder, model) -> None` — adds the node and its self-loop;
+    reused by `build_graph` in Lab 2.3
+  - `build_coder_graph(coder_model=None) -> CompiledStateGraph` —
+    `StateGraph(ProjectState, context_schema=CoderRunContext)`,
+    `START → coder ⟲ → END` (DEC-100, DEC-104)
+  - Data flow: `invoke(state, context=CoderRunContext())` → coder step per
+    task → `route_after_coder` → coder | END
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_integration_coder.py -v`
+- **Review notes:** `run()` and `main.py` stay PM-only until Lab 2.3.
 
 ### T5 — Real-model run and docs · todo
 

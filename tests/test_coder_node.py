@@ -1,123 +1,27 @@
 """Unit tests of the Coder node with a fake model (spec `lab_2_2_coder_node`).
 
-Covers AC-2.2-2 to AC-2.2-9. Every
-test runs in ``isolated_run``: the scripted scripts are really written and
-executed in a temporary workspace, so ``result`` comes from a real run.
+Covers AC-2.2-2 to AC-2.2-10. The node tests run in ``isolated_run``: the
+scripted scripts are really written and executed in a temporary workspace,
+so ``result`` comes from a real run.
 """
 
 import logging
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langgraph.graph import END
 from langgraph.runtime import Runtime
 
-from agents.coder_agent import MAX_ITERATIONS, CoderRunContext, make_coder_node
+from agents.coder_agent import CoderRunContext, make_coder_node
+from orchestration.graph import CODER_NODE, route_after_coder
 from orchestration.state import ProjectState
+from tests.coder_helpers import (
+    all_text,
+    successful_task,
+    task_message,
+    two_task_state,
+    unsuccessful_task,
+    with_statuses,
+)
 from tests.fakes import ScriptedChatModel, tool_call_reply
-
-
-def _state_data() -> dict:
-    """Returns a two-task state after the PM, with both tasks pending.
-
-    Returns:
-        A dict that ``ProjectState.model_validate`` accepts.
-    """
-    tasks = [
-        {
-            "task_id": "task_1",
-            "title": "Create the greeting script",
-            "description": "Create app.py that prints a greeting.",
-            "acceptance_criteria": [
-                {
-                    "given": "the script exists",
-                    "when": "it is run",
-                    "then": "it prints a greeting",
-                }
-            ],
-            "covers": ["REQ-1"],
-            "files": ["app.py"],
-            "priority": 1,
-        },
-        {
-            "task_id": "task_2",
-            "title": "Add a farewell",
-            "description": "Extend app.py so it also prints a farewell.",
-            "acceptance_criteria": [
-                {
-                    "given": "the greeting script",
-                    "when": "it is run after the change",
-                    "then": "it prints the greeting and then a farewell",
-                }
-            ],
-            "covers": ["REQ-2"],
-            "files": ["app.py"],
-            "priority": 2,
-        },
-    ]
-    return {
-        "requirement": "Build a script that greets and says goodbye.",
-        "spec": {
-            "name": "Greeter",
-            "description": "A Python script that greets the user and says goodbye.",
-            "details": "## Overview\nA tiny script.",
-            "acceptance_criteria": [
-                {"id": "REQ-1", "text": "The script prints a greeting"},
-                {"id": "REQ-2", "text": "The script prints a farewell"},
-            ],
-            "tasks": tasks,
-        },
-        "tasks": tasks,
-    }
-
-
-def _state(**changes) -> ProjectState:
-    """Returns the two-task state with some top-level fields changed.
-
-    Args:
-        **changes: Fields of ``ProjectState`` to replace.
-
-    Returns:
-        The validated state.
-    """
-    return ProjectState.model_validate({**_state_data(), **changes})
-
-
-def _with_statuses(*statuses: str, **changes) -> ProjectState:
-    """Returns the two-task state with the given task statuses.
-
-    Args:
-        *statuses: Status of task_1 and task_2, in order.
-        **changes: Other fields of ``ProjectState`` to replace.
-
-    Returns:
-        The validated state.
-    """
-    data = _state_data()
-    data["tasks"] = [{**task, "status": status} for task, status in zip(data["tasks"], statuses)]
-    return ProjectState.model_validate({**data, **changes})
-
-
-def _successful_task(content: str = 'print("hello")\n', path: str = "app.py") -> list:
-    """Returns the replies of one task that writes a script, runs it and finishes.
-
-    Args:
-        content: Content of the script.
-        path: Path of the script in the workspace.
-
-    Returns:
-        The replies for the plan call and the four loop calls.
-    """
-    return [
-        tool_call_reply("Plan", {"steps": [f"Write {path}", f"Run {path}"]}, "call_plan"),
-        tool_call_reply(
-            "write_file", {"thought": "Write the script.", "path": path, "content": content}, "call_w"
-        ),
-        tool_call_reply("exec_python", {"thought": "Run it.", "path": path}, "call_e"),
-        tool_call_reply(
-            "Finish",
-            {"thought": "It runs.", "main_file": path, "explanation": f"Wrote {path}."},
-            "call_f",
-        ),
-    ]
 
 
 def _run_node(state: ProjectState, model: ScriptedChatModel) -> tuple[dict, ProjectState]:
@@ -137,34 +41,10 @@ def _run_node(state: ProjectState, model: ScriptedChatModel) -> tuple[dict, Proj
     return update, ProjectState.model_validate(merged)
 
 
-def _task_message(call: list[BaseMessage]) -> str:
-    """Returns the task message of one model call (its first human message).
-
-    Args:
-        call: Messages received by one model call.
-
-    Returns:
-        The content of the first ``HumanMessage``.
-    """
-    return next(m.content for m in call if isinstance(m, HumanMessage))
-
-
-def _all_text(call: list[BaseMessage]) -> str:
-    """Returns the content of every message of one model call, joined.
-
-    Args:
-        call: Messages received by one model call.
-
-    Returns:
-        The contents separated by newlines.
-    """
-    return "\n".join(str(m.content) for m in call)
-
-
 def test_ac_2_2_2_runs_first_pending_task(isolated_run):
-    model = ScriptedChatModel(_successful_task())
+    model = ScriptedChatModel(successful_task())
 
-    _, state = _run_node(_state(), model)
+    _, state = _run_node(two_task_state(), model)
 
     task_1, task_2 = state.tasks
     on_disk = (isolated_run / "app.py").read_text()
@@ -180,26 +60,26 @@ def test_ac_2_2_2_runs_first_pending_task(isolated_run):
 
 
 def test_ac_2_2_3_skips_finished_tasks(isolated_run):
-    model = ScriptedChatModel(_successful_task())
-    before = _with_statuses("done", "pending")
+    model = ScriptedChatModel(successful_task())
+    before = with_statuses("done", "pending")
 
     _, state = _run_node(before, model)
 
     assert state.tasks[0] == before.tasks[0]
     assert state.tasks[1].status == "done"
     for call in model.calls:
-        task_message = _task_message(call)
-        assert "Extend app.py so it also prints a farewell." in task_message
-        assert "Create app.py that prints a greeting." not in task_message
+        message = task_message(call)
+        assert "Extend app.py so it also prints a farewell." in message
+        assert "Create app.py that prints a greeting." not in message
 
 
 def test_ac_2_2_4_task_prompt_context(isolated_run):
-    model = ScriptedChatModel(_successful_task())
-    before = _with_statuses("done", "pending", code={"app.py": 'print("hello")\n'})
+    model = ScriptedChatModel(successful_task())
+    before = with_statuses("done", "pending", code={"app.py": 'print("hello")\n'})
 
     _run_node(before, model)
 
-    text = _all_text(model.calls[0])
+    text = all_text(model.calls[0])
     task_2 = before.tasks[1]
     assert "Greeter" in text
     assert "A Python script that greets the user and says goodbye." in text
@@ -208,18 +88,15 @@ def test_ac_2_2_4_task_prompt_context(isolated_run):
         assert criterion.given in text
         assert criterion.when in text
         assert criterion.then in text
-    task_message = _task_message(model.calls[0])
-    assert "Planned files: app.py" in task_message
-    assert "Files already written in this run: app.py" in task_message
+    message = task_message(model.calls[0])
+    assert "Planned files: app.py" in message
+    assert "Files already written in this run: app.py" in message
 
 
 def test_ac_2_2_5_unsuccessful_task_failed(isolated_run):
-    model = ScriptedChatModel(
-        [tool_call_reply("Plan", {"steps": ["Think"]}, "call_plan")]
-        + [AIMessage("Still thinking...") for _ in range(MAX_ITERATIONS)]
-    )
+    model = ScriptedChatModel(unsuccessful_task())
 
-    _, state = _run_node(_state(), model)
+    _, state = _run_node(two_task_state(), model)
 
     task_1, task_2 = state.tasks
     assert task_1.status == "failed"
@@ -251,7 +128,7 @@ def test_ac_2_2_6_code_from_written_files(isolated_run):
             "Finish", {"thought": "It runs.", "main_file": "app.py", "explanation": "Done."}, "call_f"
         ),
     ])
-    before = _state(code={"old.py": "OLD = True\n", "app.py": "stale\n"})
+    before = two_task_state(code={"old.py": "OLD = True\n", "app.py": "stale\n"})
 
     _, state = _run_node(before, model)
 
@@ -267,7 +144,7 @@ def test_ac_2_2_7_fatal_error_in_state(isolated_run, caplog):
     model = ScriptedChatModel([RuntimeError("API down")])
 
     with caplog.at_level(logging.ERROR):
-        update, state = _run_node(_state(), model)
+        update, state = _run_node(two_task_state(), model)
 
     task_1, task_2 = state.tasks
     assert task_1.status == "failed"
@@ -282,9 +159,9 @@ def test_ac_2_2_7_fatal_error_in_state(isolated_run, caplog):
 
 
 def test_ac_2_2_8_progress_notes(isolated_run):
-    model = ScriptedChatModel(_successful_task())
+    model = ScriptedChatModel(successful_task())
 
-    update, _ = _run_node(_state(), model)
+    update, _ = _run_node(two_task_state(), model)
 
     first, second = update["progress"]
     assert "task_1" in first and "Create the greeting script" in first
@@ -293,10 +170,16 @@ def test_ac_2_2_8_progress_notes(isolated_run):
 
 def test_ac_2_2_9_no_pending_task(isolated_run):
     model = ScriptedChatModel([])
-    before = _with_statuses("done", "failed")
+    before = with_statuses("done", "failed")
 
     _, state = _run_node(before, model)
 
     assert model.calls == []
     assert state.tasks == before.tasks
     assert "no pending task" in state.error
+
+
+def test_ac_2_2_10_router():
+    assert route_after_coder(with_statuses("done", "pending")) == CODER_NODE
+    assert route_after_coder(with_statuses("done", "failed")) == END
+    assert route_after_coder(with_statuses("failed", "pending", error="RuntimeError: API down")) == END

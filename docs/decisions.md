@@ -1989,7 +1989,8 @@ A decision can mix bases; then each part states its own.
   independent tasks unattempted).
 - Revisit when: Module 3 adds the QA loop, if building on a broken task
   turns out to waste too many iterations.
-- Code: `agents/coder_agent.py` — `make_coder_node`; loop pending (T4)
+- Code: `agents/coder_agent.py` — `make_coder_node`; `orchestration/graph.py` —
+  `route_after_coder`
 
 ### DEC-098 Each task gets the project context and the files that exist
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
@@ -2034,7 +2035,7 @@ A decision can mix bases; then each part states its own.
   in Lab 2.3.
 - Why: same split as the course; each lab stays small and reviewable.
 - Alternatives: wire PM→Coder now (bigger spec, overlaps Lab 2.3).
-- Code: pending (Lab 2.2)
+- Code: `orchestration/graph.py` — `build_coder_graph`; `tests/test_integration_coder.py`
 
 ### DEC-101 State records each task's status, the code on disk and its result
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
@@ -2096,7 +2097,8 @@ A decision can mix bases; then each part states its own.
   under LangGraph's default limit of 25).
 - Alternatives: the lab's index and routing fields (two more fields that
   can disagree with `tasks`).
-- Code: `agents/coder_agent.py` — `_next_pending`; router pending (T4)
+- Code: `agents/coder_agent.py` — `_next_pending`; `orchestration/graph.py` —
+  `route_after_coder`, `_add_coder`
 
 ### DEC-104 The run's memory window travels in the LangGraph run context
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
@@ -2112,7 +2114,8 @@ A decision can mix bases; then each part states its own.
 - Alternatives: a window created in `make_coder_node` (shared silently
   between runs once the graph is reused); the window's turns in the state
   (against DEC-048, grows the state and the traces).
-- Code: `agents/coder_agent.py` — `CoderRunContext`; graph pending (T4)
+- Code: `agents/coder_agent.py` — `CoderRunContext`; `orchestration/graph.py` —
+  `build_coder_graph`
 
 ### DEC-105 The node turns a task into the Coder's prompt; `run_agent` stays
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
