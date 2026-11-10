@@ -264,10 +264,20 @@ and Lab 2.1 included) stays green at the end of every task.
 - **Review notes:** AC-2.2-6 moved here from T3 (`code` is born in this
   task).
 
-### T3 — Coder node: failures · todo
+### T3 — Coder node: failures · done
 
 - **Covers:** AC-2.2-5, AC-2.2-7
-- **Map:** pending
+- **Map:**
+  - Files: `agents/coder_agent.py`, `tests/test_coder_node.py` (modified)
+  - `_with_task(tasks, task_id, **update) -> list[TaskState]` — the task list
+    with one task updated; used by both paths
+  - `coder_node` — `try/except` from the prompt to `run_agent`: a fatal error
+    marks the task `failed` with `result=None`, logs at ERROR and returns
+    `error` (DEC-102); `code` is left untouched
+  - Data flow: exception → `tasks[i].status = "failed"`, `progress`, `error`
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_coder_node.py -v`
+- **Review notes:** AC-2.2-5 was green on arrival (the status mapping came
+  with T2); a missing run context is caught as a fatal error too.
 
 ### T4 — Router and the Coder graph · todo
 

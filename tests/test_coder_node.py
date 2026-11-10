@@ -1,14 +1,16 @@
 """Unit tests of the Coder node with a fake model (spec `lab_2_2_coder_node`).
 
-Covers AC-2.2-2, AC-2.2-3, AC-2.2-4, AC-2.2-6, AC-2.2-8 and AC-2.2-9. Every
+Covers AC-2.2-2 to AC-2.2-9. Every
 test runs in ``isolated_run``: the scripted scripts are really written and
 executed in a temporary workspace, so ``result`` comes from a real run.
 """
 
-from langchain_core.messages import BaseMessage, HumanMessage
+import logging
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.runtime import Runtime
 
-from agents.coder_agent import CoderRunContext, make_coder_node
+from agents.coder_agent import MAX_ITERATIONS, CoderRunContext, make_coder_node
 from orchestration.state import ProjectState
 from tests.fakes import ScriptedChatModel, tool_call_reply
 
@@ -211,6 +213,21 @@ def test_ac_2_2_4_task_prompt_context(isolated_run):
     assert "Files already written in this run: app.py" in task_message
 
 
+def test_ac_2_2_5_unsuccessful_task_failed(isolated_run):
+    model = ScriptedChatModel(
+        [tool_call_reply("Plan", {"steps": ["Think"]}, "call_plan")]
+        + [AIMessage("Still thinking...") for _ in range(MAX_ITERATIONS)]
+    )
+
+    _, state = _run_node(_state(), model)
+
+    task_1, task_2 = state.tasks
+    assert task_1.status == "failed"
+    assert task_1.result.status == "max_iterations"
+    assert task_2.status == "pending"
+    assert state.error == ""
+
+
 def test_ac_2_2_6_code_from_written_files(isolated_run):
     model = ScriptedChatModel([
         tool_call_reply("Plan", {"steps": ["Write the files", "Run app.py"]}, "call_plan"),
@@ -244,6 +261,24 @@ def test_ac_2_2_6_code_from_written_files(isolated_run):
         "helpers.py": (isolated_run / "helpers.py").read_text(),
     }
     assert not (isolated_run.parent / "outside.py").exists()
+
+
+def test_ac_2_2_7_fatal_error_in_state(isolated_run, caplog):
+    model = ScriptedChatModel([RuntimeError("API down")])
+
+    with caplog.at_level(logging.ERROR):
+        update, state = _run_node(_state(), model)
+
+    task_1, task_2 = state.tasks
+    assert task_1.status == "failed"
+    assert task_1.result is None
+    assert task_2.status == "pending"
+    assert "API down" in state.error
+    assert any("API down" in note for note in update["progress"])
+    assert any(
+        record.levelno == logging.ERROR and "API down" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_ac_2_2_8_progress_notes(isolated_run):

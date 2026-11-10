@@ -1989,7 +1989,7 @@ A decision can mix bases; then each part states its own.
   independent tasks unattempted).
 - Revisit when: Module 3 adds the QA loop, if building on a broken task
   turns out to waste too many iterations.
-- Code: pending (Lab 2.2)
+- Code: `agents/coder_agent.py` — `make_coder_node`; loop pending (T4)
 
 ### DEC-098 Each task gets the project context and the files that exist
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
@@ -2077,7 +2077,7 @@ A decision can mix bases; then each part states its own.
   down, would hit every task).
 - Revisit when: Module 4 adds per-call retries with backoff and jitter
   (C4.2); the node stays as is.
-- Code: pending (Lab 2.2)
+- Code: `agents/coder_agent.py` — `make_coder_node`, `_with_task`
 
 ### DEC-103 The Coder self-loop is driven by task statuses
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted

@@ -659,6 +659,20 @@ def _written_files(result: CoderResult) -> dict[str, str]:
     return files
 
 
+def _with_task(tasks: list[TaskState], task_id: str, **update: Any) -> list[TaskState]:
+    """Returns the task list with one task's fields replaced.
+
+    Args:
+        tasks: The state's task list.
+        task_id: ID of the task to update.
+        **update: Fields of ``TaskState`` to replace.
+
+    Returns:
+        A new list; the other tasks are the same objects.
+    """
+    return [t.model_copy(update=update) if t.task_id == task_id else t for t in tasks]
+
+
 def make_coder_node(
     model: BaseChatModel | None = None,
 ) -> Callable[[ProjectState, Runtime[CoderRunContext]], dict]:
@@ -679,9 +693,13 @@ def make_coder_node(
             state: Current state; reads ``tasks``, ``spec`` and ``code``.
             runtime: The run's runtime; its context holds the window.
 
+        Never raises: a fatal error marks the task failed and is returned in
+        ``error``, which ends the run (DEC-102).
+
         Returns:
-            Update with ``tasks``, ``code``, ``progress`` and ``error``; only
-            ``progress`` and ``error`` when no task is pending.
+            Update with ``tasks``, ``code``, ``progress`` and ``error``;
+            ``code`` is left out after a fatal error, and only ``progress``
+            and ``error`` are returned when no task is pending.
         """
         task = _next_pending(state.tasks)
         if task is None:
@@ -689,16 +707,21 @@ def make_coder_node(
             return {"progress": [error], "error": error}
 
         started = f"Coder Agent: starting {task.task_id} — {task.title}."
-        prompt = _task_prompt(task, state.spec, list(state.code))
-        result = run_agent(prompt, runtime.context.window, model)
+        try:
+            prompt = _task_prompt(task, state.spec, list(state.code))
+            result = run_agent(prompt, runtime.context.window, model)
+        except Exception as exc:  # DEC-102: the node never raises out of the graph
+            error = f"{type(exc).__name__}: {exc}"
+            logger.error("Coder Agent failed on %s: %s", task.task_id, error)
+            return {
+                "tasks": _with_task(state.tasks, task.task_id, status="failed", result=None),
+                "progress": [started, f"Coder Agent: {task.task_id} failed — {error}"],
+                "error": error,
+            }
         status = "done" if result.status == "success" else "failed"  # DEC-101
         finished = f"Coder Agent: {task.task_id} {status}. File: {result.main_file or 'none'}."
-        tasks = [
-            t.model_copy(update={"status": status, "result": result}) if t.task_id == task.task_id else t
-            for t in state.tasks
-        ]
         return {
-            "tasks": tasks,
+            "tasks": _with_task(state.tasks, task.task_id, status=status, result=result),
             "code": {**state.code, **_written_files(result)},
             "progress": [started, finished],
             "error": "",
