@@ -88,7 +88,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 Spec activo: **Lab 2.2 (Coder node)**, spec **aprobado**. Spec: `docs/specs/lab_2_2_coder_node.md`. Enunciado y diferencias lab ↔ proyecto en `docs/labs/lab_2_2_coder_node.md`. Material original en `Multi-agents-lab-2-2/` (fuera de git).
 
-Producto cerrado (DEC-097..DEC-102) y técnico cerrado (DEC-103..DEC-107). Siguiente: T1 (mapa).
+Producto cerrado (DEC-097..DEC-102) y técnico cerrado (DEC-103..DEC-107). Siguiente: T2 (mapa).
 
 Lab 2.1 (PM Agent): cerrado (`docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096).
 

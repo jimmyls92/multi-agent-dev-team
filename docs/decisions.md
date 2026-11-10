@@ -1316,7 +1316,8 @@ A decision can mix bases; then each part states its own.
   until a second agent uses them, DEC-064).
 - Revisit when: Module 2 defines the shared state (C2.2); the model moves
   there.
-- Code: `agents/coder_agent.py` — `StepRecord`, `CoderResult`
+- Code: `orchestration/state.py` — `StepRecord`, `CoderResult` (moved from
+  `agents/coder_agent.py` in Lab 2.2, DEC-107)
 
 ### DEC-066 The smoke test is a pytest test that runs only with `--run-llm`
 - Date: 2026-11-05 · Area: Tests (Lab 1.3) · Status: accepted
@@ -2161,4 +2162,5 @@ A decision can mix bases; then each part states its own.
   (Module 3) and the assessor look; no parallel structure to keep aligned.
 - Alternatives: a `results` list (needs a task ID added or a wrapper); a
   `results` dict by task ID (a second structure parallel to `tasks`).
-- Code: pending (Lab 2.2)
+- Code: `orchestration/state.py` — `TaskState.result`, `CoderResult`,
+  `StepRecord`

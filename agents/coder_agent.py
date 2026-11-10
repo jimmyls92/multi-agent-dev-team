@@ -25,7 +25,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
@@ -49,6 +49,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from llm_client import get_chat_model
 from memory import SlidingWindowBuffer, build_context, store_memory, store_outcome
+from orchestration.state import CoderResult, StepRecord
 from tools import ExecutionResult
 from tools.agent_tools import AGENT_TOOLS, check_tool_call
 from tools.handlers import resolve_in_workspace
@@ -170,54 +171,6 @@ class CoderContext:
     task: str
     window: SlidingWindowBuffer
     plan: str
-
-
-# --- Output models (C1.4, C1.5, DEC-065, DEC-078) ----------------------------
-
-
-class StepRecord(BaseModel):
-    """Record of one action of the loop (C1.4, DEC-065, DEC-078).
-
-    Attributes:
-        iteration: Model call that produced the action, starting at 1.
-        thought: The ``thought`` argument of the tool call (DEC-072); None
-            when the model answered without a tool.
-        action: Tool called, ``Finish`` included; None when the model
-            answered without a tool.
-        action_input: Arguments of the call without ``thought``.
-        observation: Text sent back to the model: the tool's result, an
-            error, or the nudge (DEC-073). None for the accepted Finish and
-            for a text answer at the limit.
-    """
-    iteration: int
-    thought: str | None = None
-    action: str | None = None
-    action_input: dict | None = None
-    observation: str | None = None
-
-
-class CoderResult(BaseModel):
-    """Output of one whole task (C1.5, DEC-065).
-
-    Attributes:
-        status: How the task ended (DEC-055, DEC-056).
-        plan: The plan from the planning step (DEC-071), as a numbered list.
-        code: Content of main_file read from disk (DEC-052); empty without one.
-        explanation: Explanation from Finish; empty without one.
-        result: Output of the last valid execution (DEC-055, DEC-063);
-            empty without one.
-        main_file: Main file declared in Finish, if any.
-        iterations: Model calls made in the tool loop (DEC-070).
-        steps: Record of every action.
-    """
-    status: Literal["success", "failed_execution", "unverified", "max_iterations", "answered"]
-    plan: str = ""
-    code: str = ""
-    explanation: str = ""
-    result: str = ""
-    main_file: str | None = None
-    iterations: int = 0
-    steps: list[StepRecord] = Field(default_factory=list)
 
 
 # --- Middleware (DEC-073, DEC-074, DEC-076, DEC-077) -------------------------

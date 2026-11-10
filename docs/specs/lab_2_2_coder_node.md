@@ -226,10 +226,18 @@ Each task runs: map (approved) → tests for its ACs, failing (red) → code
 until they pass (green) → guided review → commit. The whole suite (Module 1
 and Lab 2.1 included) stays green at the end of every task.
 
-### T1 — State: `CoderResult` moves, tasks carry their result · todo
+### T1 — State: `CoderResult` moves, tasks carry their result · done
 
 - **Covers:** AC-2.2-1
-- **Map:** pending
+- **Map:**
+  - Files: `orchestration/state.py`, `agents/coder_agent.py`,
+    `tests/test_state.py` (modified)
+  - `StepRecord`, `CoderResult` — moved unchanged to `state.py`; the Coder
+    imports them, so `agents.coder_agent.CoderResult` still resolves
+  - `TaskState.result: CoderResult | None = None` — the task's output
+    (DEC-107)
+  - Data flow: none new; the node writes `result` in T2
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_state.py -v`
 
 ### T2 — Coder node: happy path and task prompt · todo
 

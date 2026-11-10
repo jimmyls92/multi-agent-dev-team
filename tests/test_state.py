@@ -1,4 +1,8 @@
-"""Tests for the shared project state (spec `lab_2_1_pm_agent`, AC-2.1-1, AC-2.1-2, AC-2.1-20, AC-2.1-22)."""
+"""Tests for the shared project state.
+
+Covers spec `lab_2_1_pm_agent` (AC-2.1-1, AC-2.1-2, AC-2.1-20, AC-2.1-22) and
+spec `lab_2_2_coder_node` (AC-2.2-1).
+"""
 
 import pytest
 from pydantic import ValidationError
@@ -107,3 +111,33 @@ def test_ac_2_1_22_blank_text_rejected(blank):
 
     with pytest.raises(ValidationError):
         ProjectState.model_validate(data)
+
+
+def test_ac_2_2_1_task_result_round_trip():
+    data = _state_data()
+    data["tasks"][0]["result"] = {
+        "status": "success",
+        "plan": "1. Write app.py\n2. Run it",
+        "code": "from flask import Flask\n",
+        "explanation": "Created the Flask app.",
+        "result": "exit code 0",
+        "main_file": "app.py",
+        "iterations": 3,
+        "steps": [
+            {
+                "iteration": 1,
+                "thought": "Write the app first.",
+                "action": "write_file",
+                "action_input": {"path": "app.py", "content": "from flask import Flask\n"},
+                "observation": "Wrote app.py",
+            }
+        ],
+    }
+    state = ProjectState.model_validate(data)
+
+    loaded = ProjectState.model_validate_json(state.model_dump_json())
+
+    assert loaded == state
+    assert loaded.tasks[0].result.status == "success"
+    assert loaded.tasks[0].result.steps[0].action == "write_file"
+    assert loaded.tasks[1].result is None
