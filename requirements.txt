@@ -6,3 +6,4 @@ langgraph>=1.2,<2  # DEC-068
 pytest
 pydantic>=2,<3
 pytest-timeout
+flask>=3,<4  # DEC-108

@@ -1,6 +1,6 @@
 # Spec: Lab 2.2 — Coder node
 
-- **Status:** approved
+- **Status:** in review
 - **Sources:** lab handout `docs/labs/lab_2_2_coder_node.md`, project guide
   (Module 2, `docs/course_reference.txt` Part A2, instruction 9), rubric
   C1.2–C1.5, C2.2, C2.3
@@ -300,11 +300,21 @@ and Lab 2.1 included) stays green at the end of every task.
 - **Run it yourself:** `.venv/bin/python -m pytest tests/test_integration_coder.py -v`
 - **Review notes:** `run()` and `main.py` stay PM-only until Lab 2.3.
 
-### T5 — Real-model run and docs · todo
+### T5 — Real-model run and docs · done
 
 - **Covers:** AC-2.2-15
-- **Map:** pending (lab doc and CLAUDE.md status; README waits for the end
-  of Module 2)
+- **Map:**
+  - Files: `requirements.txt` (`flask`, DEC-108),
+    `tests/test_integration_coder.py` (`test_ac_2_2_15_demo_tasks`, marked
+    `llm`), `docs/decisions.md`, this spec, `CLAUDE.md`
+  - The demo state splits the graded requirement into `task_1` (`GET
+    /health`) and `task_2` (`POST /echo` with 400 on invalid JSON), both
+    verified with `app.test_client()`; a subprocess then calls both
+    endpoints on the generated app
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_integration_coder.py::test_ac_2_2_15_demo_tasks --run-llm -v`
+- **Review notes:** passed twice with `openai/gpt-4.1-mini` (task_1 in 3
+  iterations, task_2 in 4, ~30–40 s). The server-start risk for PM-written
+  tasks is left for Lab 2.3 (DEC-108).
 
 ## Independent review
 

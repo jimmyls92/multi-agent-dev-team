@@ -2168,3 +2168,22 @@ A decision can mix bases; then each part states its own.
   `results` dict by task ID (a second structure parallel to `tasks`).
 - Code: `orchestration/state.py` — `TaskState.result`, `CoderResult`,
   `StepRecord`
+
+### DEC-108 Flask is a project dependency
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: Required (C2.5: the graded demo is graded on working
+  Flask/FastAPI code)
+- Context: the Coder runs its scripts with the project's interpreter
+  (`sys.executable`). Without Flask in the environment, any generated API
+  fails on `import flask`, so the graded demo can never succeed.
+- Decision: `flask>=3,<4` goes in `requirements.txt`. Generated APIs are
+  verified with `app.test_client()` in a `__main__` block, never by
+  starting the server (it would block until the 10 s timeout).
+- Why: the graded demo and the E2E fixture (`/health`, `/echo`) need it,
+  as will the Docker image (C4.8); one dependency the project needs anyway.
+- Alternatives: a stdlib `http.server` API (not what the guide asks for);
+  a non-web demo in the test (postpones C2.5 evidence and reopens the spec).
+- Revisit when: Lab 2.3 — the PM writes the tasks, so who tells the Coder
+  not to start servers (Coder prompt, PM prompt or both) is decided there.
+- Code: `requirements.txt`; `tests/test_integration_coder.py` —
+  `test_ac_2_2_15_demo_tasks`
