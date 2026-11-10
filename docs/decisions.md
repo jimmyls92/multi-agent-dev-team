@@ -1972,3 +1972,193 @@ A decision can mix bases; then each part states its own.
   for Docker); readable summary only (no direct view of the serialised
   state).
 - Code: `main.py` — `DEMO_REQUIREMENT`, `main`
+
+### DEC-097 A failed task does not stop the remaining tasks
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: Preferred
+- Context: the Coder runs the PM's tasks in order. A task can end without
+  success (iteration limit, failed or unverified execution) while later
+  tasks remain.
+- Decision: the task is marked `failed` and the Coder moves on to the next
+  task. The run is never reported as a success while any task failed.
+- Why: more partial output for the user and for QA (Module 3), which can
+  fix the failure; matches the lab (a failed artifact is a valid record and
+  the loop goes on); keeps the honest reporting C3.3 will need.
+- Alternatives: stop at the first failure (saves tokens, but leaves
+  independent tasks unattempted).
+- Revisit when: Module 3 adds the QA loop, if building on a broken task
+  turns out to waste too many iterations.
+- Code: pending (Lab 2.2)
+
+### DEC-098 Each task gets the project context and the files that exist
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: Preferred
+- Context: a task alone does not say what earlier tasks built; pasting all
+  the accumulated code makes every prompt grow with each task.
+- Decision: the Coder receives the task (description, acceptance criteria,
+  files) plus a short project context (the spec's name and description) and
+  the list of files already written in the run; it opens them with
+  `read_file` when it needs them.
+- Why: the Coder knows where it stands without bloating the prompt; the
+  tools already let it read any file of the workspace.
+- Alternatives: only the task (blind to earlier work); all accumulated code
+  in the prompt (cost grows with each task).
+- Code: pending (Lab 2.2)
+
+### DEC-099 One memory window per graph run, shared by its tasks
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: window of the last N turns, observable — Required (C1.2); one
+  window per run — Preferred
+- Context: DEC-048 defined a session as one window across user messages and
+  asked to revisit what the Coder keeps between PM tasks. Within a task the
+  agent already keeps all its iterations in its own messages (one turn,
+  DEC-057), so a fresh window per task would always be empty and never
+  slide.
+- Decision: a graph run is a Coder session (DEC-048): one window is created
+  per run and shared by all its tasks, each task being one turn. Chroma is
+  still queried before every LLM call; tasks that slide out of the window
+  come back through it (DEC-049).
+- Why: in task 2 the Coder remembers what it did in task 1; the window keeps
+  its meaning and slides with more than N tasks (up to 8, C2.4).
+- Alternatives: a fresh window per task (always empty, C1.2 evidence lost).
+- Code: pending (Lab 2.2)
+
+### DEC-100 Lab 2.2 builds the Coder node; PM→Coder wiring is Lab 2.3
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: Preferred
+- Context: the lab tests the Coder in isolation from a task fixture and
+  leaves the combined pipeline to Lab 2.3.
+- Decision: Lab 2.2 builds and tests the Coder node from a prepared state
+  with tasks already written; `main.py` and the full PM→Coder graph change
+  in Lab 2.3.
+- Why: same split as the course; each lab stays small and reviewable.
+- Alternatives: wire PM→Coder now (bigger spec, overlaps Lab 2.3).
+- Code: pending (Lab 2.2)
+
+### DEC-101 State records each task's status, the code on disk and its result
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: status per task and accumulated code — Required (C2.2); full
+  result per task — Preferred
+- Context: C2.2 asks for per-task status and accumulated code in shared
+  state; C1.5 asks the Coder's output to carry `code`, `explanation`, `plan`
+  and a real `result`. `ProjectState.code` exists since Lab 2.1 but stays
+  empty.
+- Decision: each task goes `pending → done | failed` in one node step (an
+  `in_progress` set inside the step would never be visible in the state,
+  so it stays unused for now); it is `done` only when the Coder's result
+  is `success`. `code` (file path →
+  content) is updated with the files as they are on disk after each task,
+  so a later task's edit replaces the earlier version. The full
+  `CoderResult` of each task is kept in the state, one per task.
+- Why: `code` shows where the project stands; the results show what
+  happened in each task, prove C1.5 per task and are what QA reads in
+  Module 3.
+- Alternatives: only statuses and code (C1.5 evidence and the plan/result
+  of each task are lost from the state); only results (no single view of
+  the project's files).
+- Code: pending (Lab 2.2)
+
+### DEC-102 A fatal error ends the run; the node never retries a whole task
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: failing into state — Required (lab); no task-level retry —
+  Required (C4.2: retries at the individual call)
+- Context: `run_agent` lets API and memory errors propagate (DEC-027) once
+  the client's own retries are spent. Invalid model output is already fed
+  back inside the loop (DEC-073, DEC-076), bounded by 10 iterations.
+- Decision: the Coder node catches any exception, writes it to
+  `state.error` and the progress log, marks the current task `failed` and
+  ends the run without reporting success, as the PM does (DEC-087). It
+  does not retry the task.
+- Why: a node that raises crashes the graph; retrying the whole task
+  would redo the plan and every iteration, which C4.2 rules out.
+- Alternatives: retry the task in the node (repeats the agent loop,
+  against C4.2); keep going with the next task (the cause, e.g. the API
+  down, would hit every task).
+- Revisit when: Module 4 adds per-call retries with backoff and jitter
+  (C4.2); the node stays as is.
+- Code: pending (Lab 2.2)
+
+### DEC-103 The Coder self-loop is driven by task statuses
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: self-loop, one graph step per task — Required (lab); routing from
+  statuses — Preferred
+- Context: the lab adds `current_task_index` and `routing` to the state to
+  pick the next task and leave the loop. Our tasks already carry a status
+  (DEC-101) and come sorted by priority (DEC-085).
+- Decision: the Coder node runs the first `pending` task. A router
+  `route_after_coder` sends control back to the Coder while a task is
+  `pending` and `error` is empty, and to END otherwise. No index or routing
+  field is added.
+- Why: one source of truth, so the state cannot contradict itself (an
+  index pointing past a pending task); each step turns one `pending` task
+  into `done` or `failed`, so the loop always ends (PM + 8 tasks = 9 steps,
+  under LangGraph's default limit of 25).
+- Alternatives: the lab's index and routing fields (two more fields that
+  can disagree with `tasks`).
+- Code: pending (Lab 2.2)
+
+### DEC-104 The run's memory window travels in the LangGraph run context
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: Preferred
+- Context: DEC-099 needs one window per graph run. The state must stay
+  JSON-serialisable and the window is private to the Coder (DEC-048).
+- Decision: the graph declares a `context_schema`; `run()` creates a new
+  window for each `invoke(..., context=...)` and the Coder node reads it
+  from the runtime.
+- Why: one window per run by construction, even if the graph is compiled
+  once and reused (Module 4 cache, Docker service); same mechanism the
+  Coder already uses inside its agent (`CoderContext`, DEC-077).
+- Alternatives: a window created in `make_coder_node` (shared silently
+  between runs once the graph is reused); the window's turns in the state
+  (against DEC-048, grows the state and the traces).
+- Code: pending (Lab 2.2)
+
+### DEC-105 The node turns a task into the Coder's prompt; `run_agent` stays
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: Preferred
+- Context: `run_agent(task: str, window)` already meets C1.2–C1.5 and is
+  tested; the handoff is a `TaskState`. `run_agent` always uses the
+  default model, so the node could not be tested with a fake one.
+- Decision: `make_coder_node(model)` lives in `agents/coder_agent.py`, like
+  `make_pm_node` (DEC-094). A helper builds the task text from the task
+  (description, Given/When/Then criteria, planned files) plus the context
+  of DEC-098. `run_agent` gains an optional `model`; without it nothing
+  changes. Long-term memory stores that whole text (DEC-019).
+- Why: reuses the Module 1 Coder untouched in behaviour; the fake model
+  makes the node testable like the PM.
+- Alternatives: a new task-shaped entry point next to `run_agent` (two
+  paths to keep in sync); storing only the description in memory (one more
+  parameter; revisit if retrieval gets noisy, see IMP-006).
+- Code: pending (Lab 2.2)
+
+### DEC-106 `code` holds the files each task actually wrote
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: Preferred
+- Context: the PM plans the files of each task (`TaskSpec.files`,
+  DEC-084) because only it sees all tasks and can make a later task extend
+  an earlier file. The Coder may still name or add files differently.
+- Decision: the planned files reach the Coder as guidance. After each task,
+  the files written by its valid `write_file` calls (as in DEC-080) are
+  read from disk into `code`, keyed by their path relative to the
+  workspace; a later write replaces the earlier content.
+- Why: `code` matches what is on disk, the same rule C1.5 applies to the
+  Coder's `code`; it never lists files that do not exist.
+- Alternatives: the planned `TaskSpec.files` (may name files that were
+  never written); the PM not planning files (reopens the closed Lab 2.1
+  spec and loses cross-task coordination).
+- Code: pending (Lab 2.2)
+
+### DEC-107 Each task keeps its `CoderResult` next to its status
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: Preferred
+- Context: DEC-101 keeps the full result of each task in the state;
+  `CoderResult` has no task ID. DEC-090 makes `tasks` the tasks as
+  executed. DEC-065 planned to move `CoderResult` to the shared state.
+- Decision: `TaskState` gains `result: CoderResult | None` (None until the
+  Coder runs it, or after a fatal error). `CoderResult` and `StepRecord`
+  move to `orchestration/state.py`; `agents/coder_agent.py` imports them.
+- Why: status and result of a task in one place, which is where QA
+  (Module 3) and the assessor look; no parallel structure to keep aligned.
+- Alternatives: a `results` list (needs a task ID added or a wrapper); a
+  `results` dict by task ID (a second structure parallel to `tasks`).
+- Code: pending (Lab 2.2)

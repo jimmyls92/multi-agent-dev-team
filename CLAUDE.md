@@ -82,15 +82,17 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 - `config.yaml` es la configuración del IDE (Continue) y no forma parte del sistema. Nunca debe contener una API key real.
 - Remoto: `origin` = https://github.com/jimmyls92/multi-agent-dev-team (público). Se trabaja en la rama de la semana (`week-1`, ...); `master` es la rama por defecto y se adelanta con fast-forward (`git fetch . week-1:master`) a lo que esté listo.
 - Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032); instalar con `UV_LINK_MODE=copy uv pip install -r requirements.txt`. Setup en el README.
-- El material de los labs (`lab_1_3_src/`, `lab-2-1/`) es solo referencia local y **nunca se commitea**.
+- El material de los labs (`lab_1_3_src/`, `lab-2-1/`, `Multi-agents-lab-2-2/`) es solo referencia local y **nunca se commitea**.
 
 ## Estado actual
 
-Spec activo: **Lab 2.1 (PM Agent)**, spec **cerrado**. Spec: `docs/specs/lab_2_1_pm_agent.md`. Enunciado y diferencias lab ↔ proyecto en `docs/labs/lab_2_1_pm_agent.md`; guía del Módulo 2 en `docs/course_reference.txt` (Part A2). Material original en `lab-2-1/` (fuera de git).
+Spec activo: **Lab 2.2 (Coder node)**, spec **aprobado**. Spec: `docs/specs/lab_2_2_coder_node.md`. Enunciado y diferencias lab ↔ proyecto en `docs/labs/lab_2_2_coder_node.md`. Material original en `Multi-agents-lab-2-2/` (fuera de git).
 
-Producto cerrado (DEC-081..DEC-088) y técnico cerrado (DEC-089..DEC-094). Spec cerrado (T1–T6 y R1 hechas, revisión independiente clasificada). Siguiente: Lab 2.2.
+Producto cerrado (DEC-097..DEC-102) y técnico cerrado (DEC-103..DEC-107). Siguiente: T1 (mapa).
 
-Los tests de `lab-2-1/test_lab21.py` sirven de inspiración para los AC; no se ejecutan contra nuestro código.
+Lab 2.1 (PM Agent): cerrado (`docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096).
+
+Los tests de los labs (`lab-2-1/test_lab21.py`, `Multi-agents-lab-2-2/tests/test_lab22.py`) sirven de inspiración para los AC; no se ejecutan contra nuestro código.
 
 Módulo 1: cerrado y subido (C1.1–C1.6). Memoria de dos capas (Lab 1.1), tools (Lab 1.2) y Coder con LangChain `create_agent` (Lab 1.3, DEC-068..DEC-080). Detalle en `docs/decisions.md` y el README.
 

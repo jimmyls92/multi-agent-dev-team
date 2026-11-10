@@ -118,4 +118,16 @@ each idea has a stable ID (`IMP-NNN`, never reused).
 
 ## General
 
-_No ideas yet._
+### IMP-008 One module for the models shared between agents
+- Status: idea
+- Area: Project layout (Lab 2.2)
+- Why: Pydantic models live in five files (`orchestration/state.py`, both
+  agents, `tools/handlers.py`, `tools/code_executor.py`). Shared ones
+  (state, handoff, `CoderResult`, `ExecutionResult`) could sit in one
+  `models.py`; LLM schemas (`Plan`, `Finish`, `SpecDraft`, `TaskDraft`)
+  and tool argument checks stay next to the code that uses them.
+- Rubric: C1.1/C5.3 (layout must still have the required folders), C2.2
+  (state stays typed). Pure move of classes and imports in its own commit;
+  the whole suite must stay green.
+- Notes: decided to postpone during Lab 2.2; `CoderResult` moves to
+  `orchestration/state.py` meanwhile (DEC-065).
