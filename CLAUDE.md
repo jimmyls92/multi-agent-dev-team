@@ -86,9 +86,9 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Spec activo: **Lab 2.2 (Coder node)**, spec **aprobado**. Spec: `docs/specs/lab_2_2_coder_node.md`. Enunciado y diferencias lab ↔ proyecto en `docs/labs/lab_2_2_coder_node.md`. Material original en `Multi-agents-lab-2-2/` (fuera de git).
+Spec activo: ninguno. Siguiente: **Lab 2.3** (conectar PM → Coder en el grafo).
 
-Producto cerrado (DEC-097..DEC-102) y técnico cerrado (DEC-103..DEC-107). T1–T5 hechas; revisión independiente del spec en curso.
+Lab 2.2 (Coder node): cerrado (`docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109). Material original en `Multi-agents-lab-2-2/` (fuera de git).
 
 Lab 2.1 (PM Agent): cerrado (`docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096).
 
@@ -105,7 +105,7 @@ Tests aplazados por decisión del usuario (como tarde en C4.7; proponer y aproba
 - **Tools:** confinamiento a `workspace/` (DEC-036, DEC-042), entorno sin credenciales (DEC-039, DEC-043), `cwd` del script (DEC-040), stdin cerrado, mensaje sin salida y truncado por el final (DEC-038), tope de lectura (DEC-041), muerte del grupo de procesos (DEC-044).
 - **Coder** (modelo falso): (a) **prioritario**, un modelo que solo da texto para en 10 con `max_iterations` (fija el orden de DEC-079); (b) uno que llama a tools sin terminar para en 10; (c) argumentos inválidos no ejecutan la tool (DEC-076); (d) `CoderResult` desde mensajes inventados (DEC-078).
 
-**Lab 2.3:** decidir quién le dice al Coder que verifique las APIs con `app.test_client()` y nunca arranque el servidor (prompt del Coder, del PM o ambos); si no, una tarea del PM puede bloquearse hasta el timeout (DEC-108).
+**Lab 2.3:** decidir quién le dice al Coder que verifique las APIs con `app.test_client()` y nunca arranque el servidor (prompt del Coder, del PM o ambos); si no, una tarea del PM puede bloquearse hasta el timeout (DEC-108). Añadir un AC `llm` con tareas escritas por el PM. Valorar IMP-010 (`recursion_limit` explícito).
 
 **README del Módulo 2 (bloqueante para avanzar `master` o entregar un SHA):** se actualiza al final del módulo, de una vez: estado actual, `PM_MODEL`, `python main.py` (demo por defecto, `--json`, códigos de salida 0/1/2), diagrama de dos agentes con el estado (C2.6), tests nuevos, layout y decisiones del Módulo 2.
 

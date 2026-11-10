@@ -1,10 +1,10 @@
 # Spec: Lab 2.2 — Coder node
 
-- **Status:** in review
+- **Status:** done
 - **Sources:** lab handout `docs/labs/lab_2_2_coder_node.md`, project guide
   (Module 2, `docs/course_reference.txt` Part A2, instruction 9), rubric
   C1.2–C1.5, C2.2, C2.3
-- **Decisions:** DEC-097..DEC-107 (the why lives there; do not repeat it here)
+- **Decisions:** DEC-097..DEC-109 (the why lives there; do not repeat it here)
 
 ## Goal
 
@@ -218,6 +218,49 @@ context holding a new window.
   `result.plan` and `result.result`; `code` has one file containing
   `/health` and `/echo`, equal to its content on disk
 
+### Independent review fixes (R1)
+
+#### AC-2.2-16 — Only a `success` result makes a task `done`
+
+- **Origin:** C2.2, DEC-101
+- **Verify:** unit — `tests/test_coder_node.py::test_ac_2_2_16_only_success_is_done`
+- **Given** the two-task state and, in turn, a scripted task that ends
+  `failed_execution` (the script raises), `unverified` (written, never run)
+  and `answered` (Finish without a main file)
+- **When** the node runs
+- **Then** `task_1` has that `result.status` and `status == "failed"`;
+  `task_2` is still `pending`; `error == ""`
+
+#### AC-2.2-17 — A file that cannot be read is skipped, the node does not raise
+
+- **Origin:** DEC-102, DEC-106
+- **Verify:** unit — `tests/test_coder_node.py::test_ac_2_2_17_unreadable_file_skipped`
+- **Given** a scripted task that writes `data.txt` and `app.py`, and
+  running `app.py` overwrites `data.txt` with non-UTF-8 bytes
+- **When** the node runs
+- **Then** `task_1` is `done`; `code` has `app.py` as on disk and no
+  `data.txt`; a WARNING record names `data.txt`
+
+#### AC-2.2-18 — A rejected write is not in `code`, even if the file exists
+
+- **Origin:** DEC-106 (DEC-080)
+- **Verify:** unit — `tests/test_coder_node.py::test_ac_2_2_18_rejected_write_not_in_code`
+- **Given** `old_lib.py` already in the workspace and a scripted task whose
+  first `write_file` of `old_lib.py` has no `content`, then a successful
+  task writing `app.py`
+- **When** the node runs
+- **Then** that step has `rejected == True`; `code` has `app.py` and no
+  `old_lib.py`
+
+#### AC-2.2-19 — A missing run context is a clear error
+
+- **Origin:** DEC-109
+- **Verify:** unit — `tests/test_coder_node.py::test_ac_2_2_19_missing_run_context`
+- **Given** the two-task state and a fake model with no replies
+- **When** the node runs with a runtime without context
+- **Then** the model is never called; the update has no `tasks`; `error`
+  mentions the context
+
 ## Tasks
 
 Task status: todo | map | in progress | review | done
@@ -316,7 +359,36 @@ and Lab 2.1 included) stays green at the end of every task.
   iterations, task_2 in 4, ~30–40 s). The server-start risk for PM-written
   tasks is left for Lab 2.3 (DEC-108).
 
+### R1 — Independent review fixes · done
+
+- **Covers:** AC-2.2-16, AC-2.2-17, AC-2.2-18, AC-2.2-19; F9 in AC-2.2-11
+- **Map:**
+  - Files: `orchestration/state.py`, `agents/coder_agent.py`,
+    `tests/test_coder_node.py`, `tests/test_integration_coder.py`
+  - `StepRecord.rejected: bool = False` — set in `result_from_messages`
+    from the `ToolMessage` status (DEC-106)
+  - `_written_files` — skips rejected steps; skips unreadable files with a
+    WARNING (DEC-102, DEC-106)
+  - `coder_node` — checks `runtime.context` before the task (DEC-109)
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_coder_node.py -v`
+- **Review notes:** done without guided review at the user's request.
+  AC-2.2-16 was green on arrival (it guards the DEC-101 mapping against a
+  regression); AC-2.2-17..19 were red before the fix.
+
 ## Independent review
 
-- **Date:**
+- **Date:** 2026-11-10
 - **Findings and triage:**
+
+| ID | Severity | Finding | Triage |
+|---|---|---|---|
+| F1 | medium | Only `max_iterations` tested as `failed`; a regression to "failed only on max_iterations" stays green | Fixed in R1 (AC-2.2-16) |
+| F2 | medium | `_written_files` outside the `try`: a binary or unreadable file raises out of the node | Fixed in R1 (AC-2.2-17) |
+| F3 | low | A rejected `write_file` of an existing file entered `code` | Fixed in R1 (AC-2.2-18) |
+| F4 | low | No run context gave a misleading `AttributeError` task failure | Fixed in R1 (AC-2.2-19, DEC-109) |
+| F5 | low | DEC-103 said LangGraph's default limit is 25 (it is 10007) | Doc fixed in R1; explicit limit → IMP-010 |
+| F6 | low | DEC-104 said `run()` creates the window (it is still PM-only) | Doc fixed in R1 |
+| F7 | medium | AC-2.2-15 relies on the test's task text forbidding `app.run()` | Discarded here: already pending for Lab 2.3 (DEC-108) |
+| F8 | low | `read_text` turns CRLF into LF in `code` | Discarded: `code` and `result.code` agree, as a text reader sees them |
+| F9 | low | AC-2.2-11 counted the second run's messages but not their content | Fixed in R1 |
+| F10 | low | `code` misses files after a late fatal error | Discarded: already IMP-009 |

@@ -133,6 +133,19 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   `except` path, or have `run_agent` return partial steps with the error.
   Raised during the T3 review of Lab 2.2.
 
+### IMP-010 Explicit recursion limit on the full graph
+- Status: idea
+- Area: Coder node (Lab 2.2)
+- Why: LangGraph 1.2's default recursion limit is 10007 steps, so it is no
+  safety net. The loop ends by construction today (DEC-103), but Module 3
+  adds the QA→Coder loop; a bug in a router would then run until the cost
+  shows it.
+- Rubric: C2.4 (at most 8 tasks), C3.3 (QA loop limit), C4.4 (cost). The
+  limit must be above PM + 8 tasks + QA rounds, or it would stop valid runs.
+- Notes: pass `config={"recursion_limit": ...}` on the outer invoke in
+  `run()`, computed from the task count and the QA limit. Raised by the
+  independent review of the Lab 2.2 spec (F5).
+
 ## General
 
 ### IMP-008 One module for the models shared between agents

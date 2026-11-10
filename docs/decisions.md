@@ -2093,8 +2093,9 @@ A decision can mix bases; then each part states its own.
   field is added.
 - Why: one source of truth, so the state cannot contradict itself (an
   index pointing past a pending task); each step turns one `pending` task
-  into `done` or `failed`, so the loop always ends (PM + 8 tasks = 9 steps,
-  under LangGraph's default limit of 25).
+  into `done` or `failed`, so the loop always ends (PM + 8 tasks = 9
+  steps). LangGraph 1.2's default recursion limit is 10007, so it is no
+  safety net; an explicit limit is IMP-010.
 - Alternatives: the lab's index and routing fields (two more fields that
   can disagree with `tasks`).
 - Code: `agents/coder_agent.py` — `_next_pending`; `orchestration/graph.py` —
@@ -2105,9 +2106,10 @@ A decision can mix bases; then each part states its own.
 - Basis: Preferred
 - Context: DEC-099 needs one window per graph run. The state must stay
   JSON-serialisable and the window is private to the Coder (DEC-048).
-- Decision: the graph declares a `context_schema`; `run()` creates a new
-  window for each `invoke(..., context=...)` and the Coder node reads it
-  from the runtime.
+- Decision: the graph declares a `context_schema`; whoever invokes the
+  Coder graph (the tests now, `run()` from Lab 2.3) creates a new window
+  for each `invoke(..., context=...)` and the Coder node reads it from the
+  runtime. A missing context is a configuration error (DEC-109).
 - Why: one window per run by construction, even if the graph is compiled
   once and reused (Module 4 cache, Docker service); same mechanism the
   Coder already uses inside its agent (`CoderContext`, DEC-077).
@@ -2145,13 +2147,17 @@ A decision can mix bases; then each part states its own.
 - Decision: the planned files reach the Coder as guidance. After each task,
   the files written by its valid `write_file` calls (as in DEC-080) are
   read from disk into `code`, keyed by their path relative to the
-  workspace; a later write replaces the earlier content.
+  workspace; a later write replaces the earlier content. A call rejected by
+  validation is marked `StepRecord.rejected` and skipped; a file that
+  cannot be read as text (binary, unreadable) is skipped with a WARNING, so
+  the node never raises (DEC-102).
 - Why: `code` matches what is on disk, the same rule C1.5 applies to the
   Coder's `code`; it never lists files that do not exist.
 - Alternatives: the planned `TaskSpec.files` (may name files that were
   never written); the PM not planning files (reopens the closed Lab 2.1
   spec and loses cross-task coordination).
-- Code: `agents/coder_agent.py` — `_written_files`
+- Code: `agents/coder_agent.py` — `_written_files`,
+  `result_from_messages`; `orchestration/state.py` — `StepRecord.rejected`
 
 ### DEC-107 Each task keeps its `CoderResult` next to its status
 - Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
@@ -2187,3 +2193,21 @@ A decision can mix bases; then each part states its own.
   not to start servers (Coder prompt, PM prompt or both) is decided there.
 - Code: `requirements.txt`; `tests/test_integration_coder.py` —
   `test_ac_2_2_15_demo_tasks`
+
+### DEC-109 A missing run context is a configuration error; the task stays pending
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Basis: Preferred
+- Context: the window comes from the run context (DEC-104). If the Coder
+  graph is invoked without `context=`, `runtime.context` is None; before
+  this decision the node caught the `AttributeError` and marked the first
+  task `failed` with a message that hid the cause (independent review F4).
+- Decision: the node checks the context before running a task. Without
+  it, it returns an `error` naming the fix (`context=CoderRunContext()`),
+  logs it at ERROR and leaves every task untouched; the router ends the
+  run (DEC-103).
+- Why: the task never ran, so `pending` is the truthful status; the error
+  tells the caller what to change instead of blaming the task.
+- Alternatives: mark the task `failed` (reports a task failure that never
+  happened); create a window on the fly (hides a wiring bug and breaks one
+  window per run, DEC-099).
+- Code: `agents/coder_agent.py` — `make_coder_node`
