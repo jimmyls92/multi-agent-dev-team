@@ -1,12 +1,10 @@
 """Integration tests of the Coder graph's self-loop (spec `lab_2_2_coder_node`).
 
 Covers AC-2.2-11 to AC-2.2-15. The graph runs from a prepared two-task state
-(DEC-100) in ``isolated_run``: with a fake model, and for AC-2.2-15 with the
-real Coder model on the graded demo (``--run-llm``).
+(DEC-100) in ``isolated_run``: with a fake model, and for AC-2.2-15 (changed
+by AC-2.3-15 in spec `lab_2_3_pipeline`) with the real Coder model on the
+graded demo (``--run-llm``).
 """
-
-import subprocess
-import sys
 
 import pytest
 from langchain_core.messages import SystemMessage
@@ -14,6 +12,7 @@ from langchain_core.messages import SystemMessage
 from agents.coder_agent import CoderRunContext
 from orchestration.graph import CODER_NODE, build_coder_graph
 from orchestration.state import ProjectState
+from tests.api_fixture import check_in_process, check_real_server, find_api
 from tests.coder_helpers import successful_task, two_task_state, unsuccessful_task
 from tests.fakes import ScriptedChatModel
 
@@ -101,21 +100,19 @@ def test_ac_2_2_14_fatal_error_ends_loop(isolated_run):
 def _demo_state() -> ProjectState:
     """Returns the graded demo (/health and /echo) split into two pending tasks.
 
+    The descriptions say nothing about how to verify the app: the Coder's
+    prompt does (DEC-112).
+
     Returns:
         The validated state, as the PM would leave it.
     """
-    verify = (
-        "Verify it by running app.py: its `if __name__ == '__main__':` block must "
-        "use app.test_client() to call the endpoints and print the responses. "
-        "Never call app.run()."
-    )
     tasks = [
         {
             "task_id": "task_1",
             "title": "Create the Flask app with GET /health",
             "description": (
                 "Create app.py with a Flask app named `app` and a GET /health route "
-                'that returns the JSON {"status": "ok"} with HTTP 200. ' + verify
+                'that returns the JSON {"status": "ok"} with HTTP 200.'
             ),
             "acceptance_criteria": [
                 {
@@ -134,8 +131,7 @@ def _demo_state() -> ProjectState:
             "description": (
                 "Edit app.py (read it first) to add a POST /echo route that returns "
                 "the JSON body it receives with HTTP 200, and HTTP 400 with an error "
-                "message when the body is not valid JSON. Keep GET /health unchanged. "
-                + verify
+                "message when the body is not valid JSON. Keep GET /health unchanged."
             ),
             "acceptance_criteria": [
                 {
@@ -175,20 +171,6 @@ def _demo_state() -> ProjectState:
     })
 
 
-# Runs in a subprocess with the workspace as working directory.
-DEMO_BEHAVIOR_CHECK = """
-from app import app
-client = app.test_client()
-health = client.get("/health")
-assert health.status_code == 200 and health.get_json() == {"status": "ok"}, health.data
-echo = client.post("/echo", json={"a": 1, "b": [2, 3]})
-assert echo.status_code == 200 and echo.get_json() == {"a": 1, "b": [2, 3]}, echo.data
-bad = client.post("/echo", data="not json", content_type="application/json")
-assert bad.status_code == 400, bad.data
-print("DEMO OK")
-"""
-
-
 @pytest.mark.llm
 def test_ac_2_2_15_demo_tasks(isolated_run):
     final = ProjectState.model_validate(
@@ -200,16 +182,14 @@ def test_ac_2_2_15_demo_tasks(isolated_run):
         assert task.status == "done", task.model_dump_json(indent=2)
         assert task.result.plan.strip()
         assert task.result.result.strip()
-    apps = [path for path, content in final.code.items() if "/health" in content and "/echo" in content]
-    assert len(apps) == 1, final.code.keys()
-    assert final.code[apps[0]] == (isolated_run / apps[0]).read_text(encoding="utf-8")
+    for task in final.tasks:
+        for step in task.result.steps:
+            if step.action == "exec_python":
+                assert "exceeded timeout" not in (step.observation or ""), step
+    api = find_api(final.code)
+    assert final.code[api] == (isolated_run / api).read_text(encoding="utf-8")
 
-    check = subprocess.run(
-        [sys.executable, "-c", DEMO_BEHAVIOR_CHECK],
-        cwd=(isolated_run / apps[0]).parent,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+    check = check_in_process(isolated_run / api)
     assert check.returncode == 0, check.stderr
-    assert "DEMO OK" in check.stdout
+    assert "FIXTURE OK" in check.stdout
+    check_real_server(isolated_run / api)

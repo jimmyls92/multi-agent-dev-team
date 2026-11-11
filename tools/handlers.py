@@ -9,7 +9,7 @@ unconfined, so their tests keep calling them with any path.
 dispatch_tool is the single entry point for the agents: it never raises and
 always returns a ToolOutcome, whose observation goes back to the LLM
 (DEC-062) and whose execution carries the structured result of exec_python
-(DEC-063).
+(DEC-063). It never runs a script that starts a web server (DEC-116).
 
 Attributes:
     WORKSPACE_DIR: Absolute path of the agent's working directory, from the
@@ -25,6 +25,7 @@ Typical usage example:
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -197,6 +198,53 @@ TOOL_HANDLERS = {
 }
 
 
+# DEC-116: names bound to a Flask app, and the calls that start a server.
+_FLASK_APP = re.compile(r"^\s*(\w+)\s*=\s*(?:flask\.)?Flask\(", re.MULTILINE)
+_SERVER_CALL = re.compile(r"\buvicorn\.run\(|\.serve_forever\(")
+
+
+def _server_start(path: str) -> str | None:
+    """Returns the call that makes a script start a web server, if any (DEC-116).
+
+    Args:
+        path: Absolute path of the script, already confined to the workspace.
+
+    Returns:
+        The matching call text, e.g. ``"app.run("``; None when the script
+        does not start a server or cannot be read (exec_python then reports
+        the problem itself).
+    """
+    try:
+        source = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    for name in _FLASK_APP.findall(source):
+        match = re.search(rf"\b{re.escape(name)}\.run\(", source)
+        if match:
+            return match.group(0)
+    match = _SERVER_CALL.search(source)
+    return match.group(0).lstrip(".") if match else None
+
+
+def _server_refusal(path: str, call: str) -> str:
+    """Returns the observation for a script that starts a server and was not run.
+
+    Args:
+        path: Absolute path of the script.
+        call: The call that starts the server.
+
+    Returns:
+        An "Error: ..." message that says what to do instead.
+    """
+    name = Path(path).name
+    return (
+        f"Error: {name} starts a web server ({call}...), which never ends, so it was "
+        f"not run. Keep that call inside `if __name__ == \"__main__\":` in {name}, "
+        "then write a separate check script that imports it and calls it in-process "
+        "(for Flask, app.test_client()), and run the check script."
+    )
+
+
 class ToolOutcome(BaseModel):
     """Result of one tool call made through dispatch_tool (DEC-067).
 
@@ -222,9 +270,9 @@ def dispatch_tool(name: str, args: object) -> ToolOutcome:
             rejected by the Pydantic wrappers (DEC-042).
 
     Returns:
-        A ToolOutcome. Unknown tools, non-object arguments, invalid arguments
-        and unexpected errors give an "Error: ..." observation and no
-        execution.
+        A ToolOutcome. Unknown tools, non-object arguments, invalid arguments,
+        a script that starts a web server (DEC-116) and unexpected errors
+        give an "Error: ..." observation and no execution.
     """
     try:
         if name not in TOOL_HANDLERS:
@@ -247,6 +295,9 @@ def dispatch_tool(name: str, args: object) -> ToolOutcome:
             parsed = _validate(ExecPythonArgs, name, args)
             if isinstance(parsed, str):
                 return ToolOutcome(observation=parsed)
+            call = _server_start(parsed.path)
+            if call is not None:  # DEC-116: a server never ends; it is not run
+                return ToolOutcome(observation=_server_refusal(parsed.path, call))
             execution = run_python(**parsed.model_dump())
             return ToolOutcome(observation=execution.output, execution=execution)
         return ToolOutcome(observation=TOOL_HANDLERS[name](**args))

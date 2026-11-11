@@ -4,7 +4,7 @@
 - **Sources:** lab handout `docs/labs/lab_2_3_pipeline.md`, project guide
   (Module 2, `docs/course_reference.txt` Part A2, instructions 9 and 14),
   rubric C2.3–C2.6
-- **Decisions:** DEC-110..DEC-115 (the why lives there; do not repeat it here)
+- **Decisions:** DEC-110..DEC-116 (the why lives there; do not repeat it here)
 
 ## Goal
 
@@ -202,7 +202,8 @@ isolated, so the real `workspace/` is never archived by a test.
   how to verify the app or that it must not be started
 - **When** the Coder graph runs it with the real model
 - **Then** both tasks are `done`; no `exec_python` observation reports a
-  timeout; the in-process fixture of AC-2.2-15 passes
+  timeout; the in-process fixture passes; and running the API file with
+  `python` starts a server that answers the fixture over HTTP
 
 #### AC-2.3-16 — The graded API task goes through PM and Coder and passes the fixture
 
@@ -218,6 +219,20 @@ isolated, so the real `workspace/` is never archived by a test.
   `POST /echo` with a non-JSON body → 400); and running that file with
   `python` starts a server that answers the same three requests over HTTP
   (the URL read from its output), then is stopped
+
+#### AC-2.3-17 — `exec_python` never runs a file that starts a web server
+
+- **Origin:** ours, DEC-116 (added in T4 after AC-2.3-15 failed 4 of 5 runs)
+- **Verify:** unit — `tests/test_server_guard.py::test_ac_2_3_17_server_file_not_run`,
+  `tests/test_server_guard.py::test_ac_2_3_17_check_script_runs`
+- **Given** a workspace with a Flask app that calls `app.run()`, a FastAPI
+  app started with `uvicorn.run(`, a stdlib server with `.serve_forever(`,
+  and a check script that imports the Flask app and calls `subprocess.run(`;
+  each writes a marker file when it runs
+- **When** `dispatch_tool("exec_python", ...)` is called on each
+- **Then** the three servers are not run (no marker, no execution) and the
+  observation is an error that asks for a check script; the check script
+  runs and its output is returned
 
 ### Regressions adapted
 
@@ -300,12 +315,32 @@ Task status: todo | map | in progress | review | done
 - **Review notes:** closed without answering the review questions, at the
   user's request.
 
-### T4 — Coder server rule and real-model runs · todo
+### T4 — Coder server rule and real-model runs · done
 
-- **Covers:** AC-2.3-15, AC-2.3-16
-- **Map:** (to approve)
-- **Run it yourself:**
-- **Review notes:**
+- **Covers:** AC-2.3-15, AC-2.3-16, AC-2.3-17
+- **Map:**
+  - Files: `agents/coder_agent.py` (prompts), `tools/handlers.py` (server
+    guard), `tests/api_fixture.py` (new), `tests/test_server_guard.py`
+    (new), `tests/test_integration_coder.py`, `tests/test_integration_pipeline.py`
+  - `CODER_SYSTEM_PROMPT`, `PLAN_SYSTEM_PROMPT` — never run a server file;
+    keep its `__main__` block; verify with a check script (DEC-112)
+  - `_server_start(path) -> str | None`, `_server_refusal(path, call) -> str`
+    — `dispatch_tool` refuses `exec_python` on a file that creates a Flask
+    app and calls its `.run(`, or calls `uvicorn.run(` / `.serve_forever(`
+    (DEC-116)
+  - `find_api(code) -> str` — the one file that creates `Flask(` and names
+    both routes; `check_in_process(api_file)` — the three requests through
+    the test client in a subprocess; `check_real_server(api_file)` — `python
+    <file>` in its own process group, the same requests over HTTP
+- **Run it yourself:** `.venv/bin/python -m pytest --run-llm -v tests/test_integration_coder.py::test_ac_2_2_15_demo_tasks tests/test_integration_pipeline.py::test_ac_2_3_16_graded_demo`
+- **Review notes:** the first real runs showed that a prompt rule is not
+  enough for `gpt-4.1-mini`: its plan said "run app.py" and it then hit
+  the timeout or removed the `__main__` block (4 of 5 runs of AC-2.3-15).
+  Agreed fix: the code guard of DEC-116 (AC-2.3-17) plus firmer prompts.
+  `find_api` looks for `Flask(` because the check scripts mention the
+  routes too. AC-2.3-15 also checks the real server. After the fix:
+  AC-2.3-15 passed 3 times in a row, AC-2.3-16 twice, and the whole suite
+  with `--run-llm` passed (93 tests).
 
 ### T5 — Module 2 README · todo
 

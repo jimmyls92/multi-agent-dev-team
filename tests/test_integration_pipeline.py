@@ -1,13 +1,18 @@
 """Integration tests of the PM + Coder graph through ``run()`` (spec `lab_2_3_pipeline`).
 
 Covers AC-2.3-6 to AC-2.3-11 with fake PM and Coder models in
-``isolated_run``.
+``isolated_run``, and AC-2.3-16 with the real models on the graded demo
+(``--run-llm``).
 """
+
+import pytest
 
 import orchestration.graph as graph_module
 import orchestration.workspace as workspace_module
 from agents.pm_agent import MAX_TASKS
+from main import DEMO_REQUIREMENT
 from orchestration.graph import CODER_NODE, run
+from tests.api_fixture import check_in_process, check_real_server, find_api
 from tests.coder_helpers import all_text, successful_task
 from tests.fakes import ScriptedChatModel
 from tests.test_pm_agent import _draft, _spec_reply, _tasks_reply, _valid_tasks
@@ -142,3 +147,21 @@ def test_ac_2_3_11_eight_tasks_within_limit(isolated_run):
     starts = [_position(final.progress, f"starting task_{k} ") for k in range(1, 9)]
     assert starts == sorted(starts)
 
+
+
+@pytest.mark.llm
+def test_ac_2_3_16_graded_demo(isolated_run):
+    final = run(DEMO_REQUIREMENT)
+
+    assert final.error == "", final.progress
+    assert len(final.tasks) >= 2
+    for task in final.tasks:
+        assert task.status == "done", task.model_dump_json(indent=2)
+    api = find_api(final.code)
+    api_file = isolated_run / api
+    assert final.code[api] == api_file.read_text(encoding="utf-8")
+
+    check = check_in_process(api_file)
+    assert check.returncode == 0, check.stderr
+    assert "FIXTURE OK" in check.stdout
+    check_real_server(api_file)

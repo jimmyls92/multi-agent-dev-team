@@ -2275,6 +2275,8 @@ A decision can mix bases; then each part states its own.
   the model, but `python app.py` does not start a server, a risk for
   C2.5); the rule in both prompts (duplicated, may drift); in the PM
   prompt only (depends on the PM writing it into every task).
+- Code: `agents/coder_agent.py` — `CODER_SYSTEM_PROMPT`, `PLAN_SYSTEM_PROMPT`;
+  `tests/api_fixture.py`
 
 ### DEC-113 Each project gets its own folder under the workspace, named by code
 - Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: superseded by DEC-114
@@ -2339,3 +2341,27 @@ A decision can mix bases; then each part states its own.
 - Alternatives: wait for Module 3 (no guard until then); `invoke` with the
   limit (the exception loses the state).
 - Code: `orchestration/graph.py` — `STEP_LIMIT`, `run`
+
+### DEC-116 `exec_python` refuses a file that starts a web server
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Basis: Preferred (protects C2.5; makes DEC-112 hold by construction)
+- Context: with the DEC-112 rule in its prompts, the real Coder
+  (`gpt-4.1-mini`) still planned "run app.py to check it" in most runs.
+  It then either hit the 10 s timeout, or removed the `__main__` block so
+  the file could run, so `python app.py` no longer served the API (4 of 5
+  runs of AC-2.3-15).
+- Decision: before running a file, `exec_python` (through
+  `dispatch_tool`) reads it; if it creates a Flask app and calls its
+  `.run(`, or calls `uvicorn.run(` or `.serve_forever(`, the file is not
+  run and the observation explains why and what to do instead (a check
+  script that imports it). The prompt rules of DEC-112 stay and are
+  reinforced in the plan and loop prompts.
+- Why: "the Coder never runs a server" becomes true in code, as path
+  confinement is (DEC-036); no 10 s wait or wasted iteration; the model
+  has no reason left to drop the `__main__` block.
+- Alternatives: prompt changes only (not reliable with a small model, and
+  every attempt costs real runs); accept the timeout and test only the
+  real server (does not stop the model from removing `__main__`).
+- Limits: a heuristic for Flask, FastAPI/uvicorn and stdlib servers; any
+  other long-running program still ends at the timeout, as before.
+- Code: `tools/handlers.py` — `_server_start`, `_server_refusal`, `dispatch_tool`

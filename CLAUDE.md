@@ -86,7 +86,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Spec activo: **Lab 2.3** (`docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-115). Tarea activa: **T4** (regla del servidor en el Coder y ejecuciones con modelos reales).
+Spec activo: **Lab 2.3** (`docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-115). Tarea activa: **T5** (README del Módulo 2).
 
 Lab 2.2 (Coder node): cerrado (`docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109). Material original en `Multi-agents-lab-2-2/` (fuera de git).
 

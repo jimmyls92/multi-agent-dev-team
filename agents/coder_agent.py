@@ -66,6 +66,7 @@ logger = logging.getLogger(__name__)
 
 # --- Prompts, plan and finish (DEC-069..DEC-074) -----------------------------
 
+# DEC-112: the Coder's prompts, not the PM's, keep it from running servers.
 CODER_SYSTEM_PROMPT = f"""You are an expert Python developer working as an autonomous coding agent.
 You solve the user's task step by step with your tools.
 
@@ -77,6 +78,14 @@ How you work:
 - For a coding task, write the code to a file and run it with exec_python
   before finishing; fix it and run it again if the run fails. Only finish
   once the last run shows the code works.
+- Web servers and APIs are the exception: never run their file, because a
+  server never ends (exec_python refuses such a file). The API file must end
+  with an `if __name__ == "__main__":` block that starts the server (for
+  Flask, `app.run()`), so that running it serves the API; keep that block
+  when you edit the file and never remove it to make the file runnable.
+  To verify the API, write a separate check script that imports it and
+  calls it in-process (for Flask, `app.test_client()`), and run the check
+  script. "main_file" is still the API file, not the check script.
 - If a tool returns an error, fix the cause instead of repeating the same call.
 - You end the task only by calling the Finish tool: "main_file" is the main
   file you wrote in this task (the same path form you used with the tools),
@@ -91,8 +100,13 @@ autonomous coding agent. Later you will be able to write files, run Python
 scripts and read files; now you only plan.
 
 Write a short, concrete plan for the task: a few steps, each one sentence.
-For a coding task, include writing the code, running it and checking the
-output. For a question that needs no code, one step is enough."""
+- For a coding task, include writing the code, running it and checking the
+  output.
+- For a web server or API, never plan to run its file: a server never ends
+  and the run tool refuses it. Keep its `if __name__ == "__main__":` block
+  that starts the server, and plan a separate check script that imports it
+  and calls it in-process (for Flask, `app.test_client()`); run that script.
+- For a question that needs no code, one step is enough."""
 
 PLAN_HEADING = "Your plan for this task:"
 
