@@ -342,14 +342,27 @@ Task status: todo | map | in progress | review | done
   AC-2.3-15 passed 3 times in a row, AC-2.3-16 twice, and the whole suite
   with `--run-llm` passed (93 tests).
 
-### T5 — Module 2 README · todo
+### T5 — Module 2 README · done
 
 - **Covers:** C2.6 (diagram of PM, Coder, shared state and data flow;
   instructions that match the system) — `manual`
-- **Map:** (to approve)
-- **Run it yourself:**
-- **Review notes:** the README is updated once for the whole module
-  (CLAUDE.md, "Pendientes").
+- **Map:** `README.md`: current state (Module 2), framework unchanged plus
+  `PM_MODEL`, "Running the team" (`main.py`, output, `RESULT:` verdict and
+  exit codes, workspace archive, trying the generated API), "How the team
+  works" (Mermaid diagram of the graph and the state's reads and writes,
+  steps, `ProjectState` field table), tests by area and the `llm` tests,
+  layout, design decisions by C2.1–C2.6.
+- **Run it yourself:** `python main.py; echo $?` and compare the output with
+  "Running the team"; `python main.py ""; echo $?` → 2.
+- **Review notes:** the diagram's edges match
+  `build_graph().get_graph().draw_mermaid()` (START→pm, pm→coder, pm→END,
+  coder→coder, coder→END); every DEC cited exists; each README command was
+  run. A real `python main.py` run (2026-11-11) matched the documented
+  output: the API passed the request fixture in-process and as a real
+  server, but the PM planned a third task, "Add requirements.txt", that
+  cannot be executed, so it ended `failed` and the verdict was
+  `RESULT: incomplete — task_3 failed` (exit 1). Raised for the
+  independent review.
 
 ## Independent review
 
