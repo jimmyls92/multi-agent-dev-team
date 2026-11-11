@@ -2388,3 +2388,22 @@ A decision can mix bases; then each part states its own.
   (loses the files from the plan and may break coverage, C2.4).
 - Code: `agents/pm_agent.py` — `TASKS_SYSTEM_PROMPT`, `TaskDraft._has_python_file`
 
+### DEC-118 A body that is not JSON gets 400, whatever its content type
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Basis: Preferred (protects C2.5: the assessor supplies its own request
+  fixture)
+- Context: the fixture only sent malformed JSON with a JSON content type.
+  Flask's `request.get_json()` answers 415 to a body with another or no
+  content type, so an API passing our fixture could fail the assessor's
+  "invalid input" request (independent review F2).
+- Decision: the fixture sends four invalid bodies (malformed JSON, a
+  `text/plain` body, an empty body, no content type) and each must get
+  400. The Coder's API rule asks to answer 400 to any body that is not
+  JSON (for Flask, `get_json(silent=True)` and 400 when it is None).
+- Why: "basic input validation" reads as 400 for bad input; one rule
+  covers every way a client can send a body that is not JSON.
+- Alternatives: accept 415 as valid (the guide's fixture is unknown, so
+  400 is the safer reading); put the rule in the PM prompt (DEC-112 keeps
+  API rules in the Coder).
+- Code: `tests/api_fixture.py` — `INVALID_BODIES`; `agents/coder_agent.py` —
+  `CODER_SYSTEM_PROMPT`

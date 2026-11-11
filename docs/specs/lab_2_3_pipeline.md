@@ -420,13 +420,19 @@ Task status: todo | map | in progress | review | done
   `RESULT: incomplete — task_3 failed` (exit 1). Raised for the
   independent review.
 
-### R1a — Robust graded demo · todo
+### R1a — Robust graded demo · done
 
 - **Covers:** AC-2.3-18, AC-2.3-19 (and AC-2.3-22 at the end of R1)
 - **Map:** `TASKS_SYSTEM_PROMPT` rule and a `TaskDraft.files` validator
   (at least one `.py`); the request fixture adds three non-JSON bodies
   that must get 400; the Coder's API rule asks for
   `get_json(silent=True)` and a 400 when it is None.
+- **Run it yourself:** `pytest tests/test_api_fixture.py tests/test_pm_agent.py -k "2_3"`
+- **Review notes:** the fixture's HTTP requests moved from `urllib` to
+  `http.client`, because `urllib` adds a form Content-Type to every POST
+  and could not send a body without one. The validator lives on
+  `TaskDraft` (the LLM's output), not on `TaskSpec`, so state built in
+  code is not constrained.
 
 ### R1b — Priority and live progress · todo
 

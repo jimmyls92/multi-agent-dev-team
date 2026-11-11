@@ -2,9 +2,11 @@
 
 The generated API is checked twice: in-process with Flask's test client,
 and as a real server started with ``python <file>`` (DEC-112). Both send the
-same three requests: ``GET /health`` → 200 ``{"status": "ok"}``; ``POST
-/echo`` with a JSON body → 200 and the same body; ``POST /echo`` with a
-body that is not JSON → 400.
+same requests: ``GET /health`` → 200 ``{"status": "ok"}``; ``POST /echo``
+with a JSON body → 200 and the same body; ``POST /echo`` with a body that
+is not JSON → 400, for each case in ``INVALID_BODIES``: malformed JSON, a
+``text/plain`` body, an empty body and a body with no content type
+(DEC-118).
 
 Typical usage example:
 
@@ -13,6 +15,7 @@ Typical usage example:
     check_real_server(api_file)
 """
 
+import http.client
 import json
 import os
 import queue
@@ -22,12 +25,18 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 from pathlib import Path
 
 ECHO_BODY = {"a": 1, "b": [2, 3]}
 SERVER_START_SECONDS = 15
+# DEC-118: (body, Content-Type or None) pairs that must each get 400.
+INVALID_BODIES = [
+    (b"not json", "application/json"),
+    (b"not json", "text/plain"),
+    (b"", "application/json"),
+    (b"not json", None),
+]
 
 # Runs in a subprocess: imports the file without running its __main__ block.
 _IN_PROCESS_CHECK = """
@@ -47,10 +56,12 @@ health = client.get("/health")
 assert health.status_code == 200 and health.get_json() == {"status": "ok"}, health.data
 echo = client.post("/echo", json=%(body)r)
 assert echo.status_code == 200 and echo.get_json() == %(body)r, echo.data
-bad = client.post("/echo", data="not json", content_type="application/json")
-assert bad.status_code == 400, (bad.status_code, bad.data)
+for data, content_type in %(invalid)r:
+    headers = {"Content-Type": content_type} if content_type else {}
+    bad = client.post("/echo", data=data, headers=headers)
+    assert bad.status_code == 400, (data, content_type, bad.status_code, bad.data)
 print("FIXTURE OK")
-""" % {"body": ECHO_BODY}
+""" % {"body": ECHO_BODY, "invalid": INVALID_BODIES}
 
 _CREATES_APP = re.compile(r"\bFlask\(")
 _URL_PATTERN = re.compile(r"Running on (http://[\w.\-]+:\d+)")
@@ -134,23 +145,34 @@ def _wait_for_url(process: subprocess.Popen) -> str:
     raise AssertionError(f"no 'Running on' URL within {SERVER_START_SECONDS}s: {''.join(seen)}")
 
 
-def _request(url: str, data: bytes | None = None) -> tuple[int, bytes]:
+def _request(
+    url: str, data: bytes | None = None, content_type: str | None = "application/json"
+) -> tuple[int, bytes]:
     """Returns the status code and body of one HTTP request.
+
+    Uses ``http.client``, which sends only the headers given (``urllib``
+    adds a form Content-Type to every POST).
 
     Args:
         url: Full URL of the request.
-        data: JSON-typed body for a POST; None sends a GET.
+        data: Body for a POST; None sends a GET.
+        content_type: Content-Type of a POST body; None sends none.
 
     Returns:
         The status code (also for 4xx and 5xx answers) and the body.
     """
-    headers = {"Content-Type": "application/json"} if data is not None else {}
-    request = urllib.request.Request(url, data=data, headers=headers)
+    parts = urllib.parse.urlsplit(url)
+    connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=5)
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            return response.status, response.read()
-    except urllib.error.HTTPError as error:
-        return error.code, error.read()
+        if data is None:
+            connection.request("GET", parts.path)
+        else:
+            headers = {"Content-Type": content_type} if content_type else {}
+            connection.request("POST", parts.path, body=data, headers=headers)
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
 
 
 def check_real_server(api_file: Path) -> None:
@@ -180,8 +202,9 @@ def check_real_server(api_file: Path) -> None:
         assert status == 200 and json.loads(body) == {"status": "ok"}, (status, body)
         status, body = _request(f"{url}/echo", json.dumps(ECHO_BODY).encode())
         assert status == 200 and json.loads(body) == ECHO_BODY, (status, body)
-        status, body = _request(f"{url}/echo", b"not json")
-        assert status == 400, (status, body)
+        for data, content_type in INVALID_BODIES:
+            status, body = _request(f"{url}/echo", data, content_type)
+            assert status == 400, (data, content_type, status, body)
     finally:
         try:
             os.killpg(process.pid, signal.SIGTERM)

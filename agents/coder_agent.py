@@ -67,6 +67,7 @@ logger = logging.getLogger(__name__)
 # --- Prompts, plan and finish (DEC-069..DEC-074) -----------------------------
 
 # DEC-112: the Coder's prompts, not the PM's, keep it from running servers.
+# DEC-118: they also ask APIs to answer 400, not 415, to a body that is not JSON.
 CODER_SYSTEM_PROMPT = f"""You are an expert Python developer working as an autonomous coding agent.
 You solve the user's task step by step with your tools.
 
@@ -86,6 +87,9 @@ How you work:
   To verify the API, write a separate check script that imports it and
   calls it in-process (for Flask, `app.test_client()`), and run the check
   script. "main_file" is still the API file, not the check script.
+  An endpoint that reads a JSON body must answer 400 to any body that is not
+  JSON, whatever its content type, or an empty one (for Flask, use
+  `request.get_json(silent=True)` and return 400 when it is None).
 - If a tool returns an error, fix the cause instead of repeating the same call.
 - You end the task only by calling the Finish tool: "main_file" is the main
   file you wrote in this task (the same path form you used with the tools),

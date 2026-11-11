@@ -260,7 +260,8 @@ instead of calling it; the tests marked `llm` are skipped, and with
 | Coder node | `test_coder_node.py` | One task per step: its prompt, status, result and accumulated code; failures and fatal errors |
 | Graph | `test_pipeline.py`, `test_integration_pm.py`, `test_integration_coder.py`, `test_integration_pipeline.py` | The PM → Coder handoff in one graph (after the PM step the state holds a non-empty, valid task list, and the Coder receives each task's ID, description and criteria), task order, progress after each task, 8 tasks within the step limit, the step limit itself, workspace archive |
 | Entry point | `test_main.py` | Output, `RESULT:` verdict and exit codes |
-| Real LLM (`llm`) | `test_smoke.py`, `test_integration_pm.py`, `test_integration_coder.py`, `test_integration_pipeline.py` | A Coder task run and its code executed; the PM's spec for the demo task; the **graded demo** run through PM and Coder, whose API passes the request fixture in `tests/api_fixture.py` (`GET /health`, `POST /echo`, invalid JSON → 400) both in-process and as a real server |
+| Real LLM (`llm`) | `test_smoke.py`, `test_integration_pm.py`, `test_integration_coder.py`, `test_integration_pipeline.py` | A Coder task run and its code executed; the PM's spec for the demo task; the **graded demo** run through PM and Coder, whose API passes the request fixture in `tests/api_fixture.py` (`GET /health`, `POST /echo`, and 400 for each body that is not JSON) both in-process and as a real server |
+| Request fixture | `test_api_fixture.py` | The fixture passes a correct API and fails one that answers 415 to a body that is not JSON (DEC-118) |
 
 The mocked tests use scripted fake chat models (`tests/fakes.py`), so they
 check the agents' and the graph's behavior without an API key.
@@ -410,6 +411,8 @@ Specs with the acceptance criteria and tests of each lab:
 - The Coder never runs a server: `exec_python` refuses a file that starts
   one, and APIs are checked with a script that calls them in-process; the
   API file still serves when run with `python` — DEC-112, DEC-116
+- A body that is not JSON gets 400 whatever its content type, and the
+  request fixture checks four such bodies — DEC-118
 - A run succeeds only with no error and every task done; the verdict line
   and the exit code say so — DEC-111
 
