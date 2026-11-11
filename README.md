@@ -144,9 +144,10 @@ them.
 2. **`pm`** (`agents/pm_agent.py`) makes two structured calls: the spec
    (name, description, markdown details, acceptance criteria), then the
    tasks, each with an ID, description, Given/When/Then criteria, the spec
-   criteria it covers, files and priority. Every output is validated with
-   Pydantic and gets one corrective retry (DEC-083, DEC-087, DEC-088,
-   DEC-095). More than 8 tasks are merged deterministically into 8 groups of
+   criteria it covers, files (at least one `.py`: every task changes code
+   that can be run) and priority. Every output is validated with Pydantic
+   and gets one corrective retry (DEC-083, DEC-087, DEC-088, DEC-095,
+   DEC-117). More than 8 tasks are merged deterministically into 8 groups of
    consecutive tasks, keeping every covered criterion (DEC-082, DEC-092).
    The PM never raises: a failure is written to `error`.
 3. **Handoff** (`route_after_pm`): the Coder runs only when the PM left no
@@ -254,7 +255,7 @@ instead of calling it; the tests marked `llm` are skipped, and with
 | Area | Files | What they check |
 |---|---|---|
 | Tools | `test_file_io.py`, `test_code_executor.py`, `test_server_guard.py` | File reads and writes, script output, errors and timeouts, and that a file starting a web server is never run (DEC-116) |
-| PM | `test_pm_agent.py`, `test_llm_helpers.py` | Spec and task schemas, the corrective retry, consolidation of more than 8 tasks with every criterion still covered |
+| PM | `test_pm_agent.py`, `test_llm_helpers.py` | Spec and task schemas (every task has a `.py` file), the corrective retry, consolidation of more than 8 tasks with every criterion still covered |
 | Shared state | `test_state.py` | Invalid values are rejected and the state survives a JSON round trip |
 | Coder node | `test_coder_node.py` | One task per step: its prompt, status, result and accumulated code; failures and fatal errors |
 | Graph | `test_pipeline.py`, `test_integration_pm.py`, `test_integration_coder.py`, `test_integration_pipeline.py` | The PM → Coder handoff in one graph (after the PM step the state holds a non-empty, valid task list, and the Coder receives each task's ID, description and criteria), task order, progress after each task, 8 tasks within the step limit, the step limit itself, workspace archive |
@@ -372,7 +373,7 @@ Specs with the acceptance criteria and tests of each lab:
 - The spec has name, description, markdown details and acceptance criteria;
   every criterion must be covered by a task — DEC-083
 - 2 to 8 tasks, as few as the requirement allows; several tasks may extend
-  the same file — DEC-081, DEC-084
+  the same file; every task changes Python code — DEC-081, DEC-084, DEC-117
 - Task criteria are structured Given/When/Then — DEC-095
 - Each structured call is Pydantic-validated (`create_agent` with
   `ToolStrategy`) and an invalid output gets one corrective retry —

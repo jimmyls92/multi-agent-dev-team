@@ -16,7 +16,7 @@ import os
 from collections.abc import Callable
 
 from langchain_core.language_models import BaseChatModel
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agents.llm_helpers import structured_call
 from llm_client import get_chat_model
@@ -63,6 +63,9 @@ specification you receive into coding tasks for a coding agent.
   must be covered by at least one task; use only IDs from the specification.
 - files: relative paths of the files the task creates or edits. Several tasks may edit
   the same file.
+- Every task creates or changes Python code that can be checked by running a script, so
+  its files include at least one .py file. Dependency lists, documentation and
+  configuration are never tasks of their own: list such files in a coding task's files.
 
 The project is written in Python."""
 
@@ -97,6 +100,28 @@ class TaskDraft(BaseModel):
     acceptance_criteria: list[TaskCriterion] = Field(min_length=1)
     covers: list[NonEmptyStr] = Field(min_length=1)
     files: list[NonEmptyStr] = Field(min_length=1)
+
+    @field_validator("files")
+    @classmethod
+    def _has_python_file(cls, files: list[str]) -> list[str]:
+        """Returns the files if at least one is a Python file (DEC-117).
+
+        Args:
+            files: The task's files.
+
+        Returns:
+            The same files.
+
+        Raises:
+            ValueError: If no file ends in ``.py``.
+        """
+        # DEC-117: only a task with code to run can end done; others fail the demo.
+        if not any(f.endswith(".py") for f in files):
+            raise ValueError(
+                f"files {files} have no .py file: every task must create or change "
+                "Python code; put dependency or documentation files in a coding task"
+            )
+        return files
 
 
 class TaskListBase(BaseModel):

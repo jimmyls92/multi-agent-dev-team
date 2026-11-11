@@ -225,6 +225,19 @@ def test_ac_2_1_11_single_task_retried():
     assert len(state.tasks) == 2
 
 
+def test_ac_2_3_18_task_needs_python_file():
+    no_code = {**_draft(2, ["REQ-2", "REQ-3"]), "files": ["requirements.txt"]}
+    first = _tasks_reply([_draft(1, ["REQ-1"]), no_code], "tasks_1")
+    model = ScriptedChatModel([_spec_reply(), first, _valid_tasks("tasks_2")])
+
+    state = _run(model)
+
+    assert len(model.calls) == 3
+    assert ".py" in _text(model.calls[2][-1:])
+    assert state.error == ""
+    assert all(any(f.endswith(".py") for f in t.files) for t in state.tasks)
+
+
 def _eleven_tasks() -> AIMessage:
     """Returns a scripted list of 11 tasks where only the last one covers REQ-3.
 

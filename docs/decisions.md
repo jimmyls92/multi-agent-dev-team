@@ -2369,3 +2369,22 @@ A decision can mix bases; then each part states its own.
   nothing forces to import the API (IMP-012).
 - Code: `tools/handlers.py` — `_server_start`, `_server_refusal`, `dispatch_tool`
 
+### DEC-117 Every PM task changes Python code
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Basis: Preferred (protects C2.5 and DEC-111)
+- Context: a task is `done` only when the Coder ends `success`, which needs
+  a main file and a run of code (DEC-101). In a real demo run the PM
+  planned "Add requirements.txt" as its own task; it could never succeed,
+  so the run ended `incomplete` with a working API (independent review F1).
+- Decision: the PM's task prompt says every task creates or changes
+  Python code that can be checked by running a script, and that
+  dependency, documentation and configuration files go in a coding task's
+  `files`. `TaskDraft.files` must include a `.py` file; a list without one
+  is a validation error and gets the corrective retry (DEC-088).
+- Why: the prompt alone is not reliable with an LLM; the validator makes
+  the rule hold, and the retry tells the model what to change.
+- Alternatives: count a written non-Python file as `success` (a task that
+  never ran code would look verified); drop such tasks after planning
+  (loses the files from the plan and may break coverage, C2.4).
+- Code: `agents/pm_agent.py` — `TASKS_SYSTEM_PROMPT`, `TaskDraft._has_python_file`
+
