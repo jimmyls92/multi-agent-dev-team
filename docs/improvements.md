@@ -166,6 +166,43 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   that only replaces the "folder exists" refusal.
 - Notes: revisit once QA (Module 3) and state persistence (Module 4) exist.
 
+### IMP-012 A refused server file needs a check that imports it
+- Status: idea
+- Area: Pipeline (Lab 2.3)
+- Why: the API file is never run (DEC-116), so a task ends `success` when
+  any script ran without error after the last write, e.g. a `check.py`
+  that only prints "ok" (independent review F3). Option: when the main
+  file is one the guard refuses, count only runs of scripts that import
+  it, and record in `CoderResult` which file produced `result`.
+- Rubric: C1.5 (`result` from a real execution of the delivered code),
+  DEC-111 (an honest verdict). The change only narrows what counts as
+  `success`; QA's real tests (C3.1) cover the gap from Module 3.
+- Notes: -
+
+### IMP-013 Detect servers with the AST instead of regexes
+- Status: idea
+- Area: Pipeline (Lab 2.3)
+- Why: the regex guard misses `app: Flask = Flask(...)`,
+  `create_app().run()`, `waitress.serve(app)` and `uvicorn.Server(...).run()`,
+  and refuses a check script that names `app.run(` in a comment
+  (independent review F4). A misses only costs the 10 s timeout and an
+  iteration.
+- Rubric: C1.3 (the timeout stays the safety net), C2.5. Parse the file
+  with `ast`; a file that does not parse keeps today's behaviour.
+- Notes: -
+
+### IMP-014 Memories of files from archived runs
+- Status: idea
+- Area: Pipeline (Lab 2.3)
+- Why: Chroma keeps memories across runs, but each run starts with an empty
+  workspace (DEC-114); a recalled "app.py done" may lead the Coder to
+  finish without writing the file (it then ends `unverified`). The task
+  prompt already says which files exist in this run (DEC-098), which
+  mitigates it (independent review F8).
+- Rubric: C1.2 (retrieval before every call must stay), C2.5. Option:
+  filter or label memories from earlier runs; revisit with IMP-011.
+- Notes: -
+
 ## General
 
 ### IMP-008 One module for the models shared between agents

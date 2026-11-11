@@ -4,7 +4,7 @@
 - **Sources:** lab handout `docs/labs/lab_2_3_pipeline.md`, project guide
   (Module 2, `docs/course_reference.txt` Part A2, instructions 9 and 14),
   rubric C2.3–C2.6
-- **Decisions:** DEC-110..DEC-116 (the why lives there; do not repeat it here)
+- **Decisions:** DEC-110..DEC-120 (the why lives there; do not repeat it here)
 
 ## Goal
 
@@ -234,6 +234,62 @@ isolated, so the real `workspace/` is never archived by a test.
   observation is an error that asks for a check script; the check script
   runs and its output is returned
 
+### Independent review fixes (R1)
+
+#### AC-2.3-18 — A task without a Python file is retried
+
+- **Origin:** ours, DEC-117 (review F1)
+- **Verify:** unit — `tests/test_pm_agent.py::test_ac_2_3_18_task_needs_python_file`
+- **Given** a fake PM whose first task list has a task whose only file is
+  `requirements.txt`, and whose corrective retry is valid
+- **When** the PM node runs
+- **Then** there are three model calls, the last one names the `.py` rule,
+  and every task in the state has at least one `.py` file
+
+#### AC-2.3-19 — The request fixture rejects an API that answers 415 to non-JSON
+
+- **Origin:** C2.5, DEC-118 (review F2)
+- **Verify:** unit — `tests/test_api_fixture.py::test_ac_2_3_19_fixture_tells_apart`
+- **Given** a reference Flask API that reads the body with
+  `get_json(silent=True)` and answers 400 when it is None, and a variant
+  that uses `get_json()`
+- **When** `check_in_process` and `check_real_server` run on each
+- **Then** both checks pass for the reference API; for the variant the
+  in-process check fails and the real-server check raises, on a body sent
+  as `text/plain`, an empty body or a body with no content type (each
+  must get 400)
+
+#### AC-2.3-20 — The Coder runs the pending task with the lowest priority
+
+- **Origin:** C2.3, C2.4, DEC-119 (review F5)
+- **Verify:** unit — `tests/test_coder_node.py::test_ac_2_3_20_lowest_priority_first`;
+  AC-2.3-6 also checks that each task's ID reaches the Coder
+- **Given** a state whose tasks are listed as `task_2` (priority 2) then
+  `task_1` (priority 1), both pending
+- **When** the Coder node runs once
+- **Then** `task_1` is done, its ID is in the Coder's prompt, and `task_2`
+  is still pending
+
+#### AC-2.3-21 — Each progress note is logged when its step ends
+
+- **Origin:** C2.4, DEC-120 (review F6)
+- **Verify:** integration — `tests/test_integration_pipeline.py::test_ac_2_3_21_progress_logged_live`
+- **Given** a run with the fake two-task PM and Coder
+- **When** the Coder starts `task_2`
+- **Then** an INFO record with "task_1 done" has already been logged
+
+#### AC-2.3-22 — The graded demo succeeds on repeated real runs
+
+- **Origin:** C2.5 (review F1, F2)
+- **Verify:** llm — `python main.py` 5 times with a temporary
+  `WORKSPACE_DIR`, then the extended fixture on each API; AC-2.3-16 with
+  the extended fixture
+- **Given** the graded demo requirement and the real models
+- **When** `python main.py` runs 5 times
+- **Then** each run ends `RESULT: success` with exit 0, and each API
+  passes the extended fixture in-process and as a real server; any
+  failure is recorded with its cause
+
 ### Regressions adapted
 
 `run()` and `main()` now run the Coder after the PM, so these Lab 2.1 tests
@@ -364,7 +420,34 @@ Task status: todo | map | in progress | review | done
   `RESULT: incomplete — task_3 failed` (exit 1). Raised for the
   independent review.
 
+### R1a — Robust graded demo · todo
+
+- **Covers:** AC-2.3-18, AC-2.3-19 (and AC-2.3-22 at the end of R1)
+- **Map:** `TASKS_SYSTEM_PROMPT` rule and a `TaskDraft.files` validator
+  (at least one `.py`); the request fixture adds three non-JSON bodies
+  that must get 400; the Coder's API rule asks for
+  `get_json(silent=True)` and a 400 when it is None.
+
+### R1b — Priority and live progress · todo
+
+- **Covers:** AC-2.3-20, AC-2.3-21; AC-2.3-6 checks the task ID
+- **Map:** `_next_pending` returns the pending task with the lowest
+  priority; `run()` logs each new progress note at INFO as the step that
+  wrote it ends.
+
 ## Independent review
 
-- **Date:**
+- **Date:** 2026-11-11
 - **Findings and triage:**
+
+| ID | Severity | Finding | Triage |
+|---|---|---|---|
+| F1 | high | The PM may plan a task with no Python code (e.g. "Add requirements.txt"); it can never end `success`, so the demo ends `incomplete` with a working API (seen in the T5 real run) | Fix in R1 |
+| F2 | medium | The request fixture's only invalid input is malformed JSON with a JSON content type; a body with another or no content type gets 415 from Flask's `get_json()`, so an assessor fixture may fail | Fix in R1 |
+| F3 | medium | With the API file never run, `success` can rest on any script run after the last write, even one that never touches the API | IMP-012; limit noted in DEC-116 |
+| F4 | low | The server guard misses some patterns (annotated assignment, `waitress.serve`, `create_app().run()`) and refuses a check script that names `app.run(` | IMP-013 |
+| F5 | low | AC-2.3-6 does not check that the Coder receives the task ID; the Coder takes tasks by list position, not by `priority` | Fix in R1 |
+| F6 | low | Progress notes are printed only at the end of the run; nothing shows each task as it completes | Fix in R1 |
+| F7 | low | `agents/coder_agent.py` went from CRLF to LF in T4 (1724 changed lines for 16) | Separate `chore` commit (`.gitattributes`) |
+| F8 | plausible | Chroma memories outlive the archived workspace; the Coder may recall a file that no longer exists | IMP-014 |
+| F9 | plausible | A misconfigured `WORKSPACE_DIR` outside the repo has its contents archived | Discarded: user configuration, moved not deleted, documented in the README |

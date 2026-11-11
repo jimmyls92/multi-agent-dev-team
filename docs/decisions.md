@@ -2363,5 +2363,9 @@ A decision can mix bases; then each part states its own.
   every attempt costs real runs); accept the timeout and test only the
   real server (does not stop the model from removing `__main__`).
 - Limits: a heuristic for Flask, FastAPI/uvicorn and stdlib servers; any
-  other long-running program still ends at the timeout, as before.
+  other long-running program still ends at the timeout, as before (better
+  detection: IMP-013). Since the API file itself is never run, a task's
+  `success` comes from the last script run after the last write, which
+  nothing forces to import the API (IMP-012).
 - Code: `tools/handlers.py` — `_server_start`, `_server_refusal`, `dispatch_tool`
+
