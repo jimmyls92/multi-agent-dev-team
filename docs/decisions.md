@@ -2184,12 +2184,14 @@ A decision can mix bases; then each part states its own.
   fails on `import flask`, so the graded demo can never succeed.
 - Decision: `flask>=3,<4` goes in `requirements.txt`. Generated APIs are
   verified with `app.test_client()` in a `__main__` block, never by
-  starting the server (it would block until the 10 s timeout).
+  starting the server (it would block until the 10 s timeout). The
+  verification part is superseded by DEC-112 (separate check script;
+  `__main__` serves the app); the Flask dependency stands.
 - Why: the graded demo and the E2E fixture (`/health`, `/echo`) need it,
   as will the Docker image (C4.8); one dependency the project needs anyway.
 - Alternatives: a stdlib `http.server` API (not what the guide asks for);
   a non-web demo in the test (postpones C2.5 evidence and reopens the spec).
-- Revisit when: Lab 2.3 — the PM writes the tasks, so who tells the Coder
+- Revisit when: (resolved by DEC-112) Lab 2.3 — the PM writes the tasks, so who tells the Coder
   not to start servers (Coder prompt, PM prompt or both) is decided there.
 - Code: `requirements.txt`; `tests/test_integration_coder.py` —
   `test_ac_2_2_15_demo_tasks`
@@ -2211,3 +2213,125 @@ A decision can mix bases; then each part states its own.
   happened); create a window on the fly (hides a wiring bug and breaks one
   window per run, DEC-099).
 - Code: `agents/coder_agent.py` — `make_coder_node`
+
+### DEC-110 The Coder runs after the PM only with no error and at least one task
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Basis: Preferred
+- Context: the lab routes after the PM on a shared `routing` string, the
+  error and a non-empty task list. Our PM already guarantees 2–8 tasks on
+  success (DEC-081) and routing reads the state, not a signal field
+  (DEC-103).
+- Decision: a router after the PM sends control to the Coder when `error`
+  is empty and `tasks` is not empty; otherwise the run ends without
+  calling the Coder. No `routing` field is added.
+- Why: a PM failure never reaches the Coder (the assessor forces one); the
+  empty-list guard makes a future PM regression fail at the boundary
+  instead of inside the Coder; one source of truth, as in DEC-103.
+- Alternatives: route on `error` only (an empty list would reach the
+  Coder, which reports "no pending task"); a `routing` field (a second
+  signal that can contradict the state).
+
+### DEC-111 A run succeeds only with no error and every task done
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Basis: Preferred (anticipates C3.3: never report success with failures)
+- Context: with PM and Coder in one run there are three endings: all tasks
+  done, some task `failed` while the loop went on (DEC-097), or a fatal
+  error (DEC-087, DEC-102).
+- Decision: a run is a success only when `error` is empty and every task
+  is `done`. `main.py` ends with one verdict line (`RESULT: success`,
+  `RESULT: incomplete — <task IDs> failed` or `RESULT: error — ...`) and
+  exits 0 on success, 1 on an incomplete run or an error, 2 on invalid
+  usage. It also prints, per task, its status, main file, iterations and
+  an excerpt of its result, and the files generated.
+- Why: the user, the assessor and scripts (Docker, CI) can tell a success
+  from a run with unresolved issues without reading the log; the README
+  can document exactly how.
+- Alternatives: success when there is no fatal error (a failed task would
+  exit 0); a separate exit code for incomplete runs (more cases to
+  document for little gain).
+
+### DEC-112 Long-running programs are never run; the Coder verifies them through an import
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Basis: Preferred (protects C2.5: executable Flask code that passes the
+  request fixture)
+- Context: DEC-108 left open who tells the Coder not to start servers once
+  the PM writes the tasks. A script that calls `app.run()` never ends, so
+  `exec_python` kills it at the 10 s timeout and nothing is verified. In
+  Lab 2.2 the test's task text asked for `app.test_client()` checks inside
+  `app.py`'s `__main__` block.
+- Decision: a generated API starts its server from its own `__main__`
+  block (`python app.py` serves it). The Coder never runs a program that
+  does not end: it writes a separate check script that imports it and
+  calls it in-process (for Flask, `app.test_client()`) and runs that. The
+  rule lives in the Coder's system prompt only; the PM prompt does not
+  change.
+- Why: the assessor can run `python app.py` and send the fixture to a
+  real server; the check script is the same pattern QA uses in Module 3
+  (pytest + `test_client`); the Coder is the one that executes code, so a
+  rule there holds whatever wording the PM uses.
+- Alternatives: `__main__` runs the checks and never serves (simpler for
+  the model, but `python app.py` does not start a server, a risk for
+  C2.5); the rule in both prompts (duplicated, may drift); in the PM
+  prompt only (depends on the PM writing it into every task).
+
+### DEC-113 Each project gets its own folder under the workspace, named by code
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: superseded by DEC-114
+- Basis: Preferred (keeps C1.3 confinement; protects C2.2 and C2.5)
+- Context: every run wrote into the same `workspace/`, which already holds
+  files from earlier runs; a second demo run could read a stale `app.py`,
+  and nobody could tell which files belong to which run.
+- Decision: each run writes into `workspace/<project>/` and the Coder's
+  tools are confined to that folder. The project name comes from the user
+  (`--project`) or, without it, from the PM spec's `name`; code turns it
+  into a slug of lowercase letters, digits and hyphens and rejects
+  anything else, so the LLM never chooses the folder. A name given by the
+  user whose folder already holds files stops the run with exit code 2
+  before any LLM call; a name taken from the spec gets a numeric suffix
+  (`echo-api-2`) instead. Nothing is deleted. `main.py` prints the folder.
+- Why: one meaningful folder per project; no mixing of old and new files;
+  repeated runs without `--project` always work (Docker, the assessor);
+  a narrower confinement boundary than the whole workspace.
+- Alternatives: one folder per run (safe but meaningless names); empty the
+  workspace at start (deletes work silently); reuse an existing folder
+  (the Coder does not know its files, so old code mixes in — continuing a
+  project is IMP-011).
+
+### DEC-114 Each run starts with an empty workspace; earlier files are archived
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Basis: Provisional (simplification until projects can be continued)
+- Context: DEC-113 planned one folder per project, but no run can continue
+  an earlier project yet (IMP-011), so the folders only kept old and new
+  files apart. The assessor runs the system many times in a row.
+- Decision: before invoking the graph, `run()` moves everything in
+  `WORKSPACE_DIR` to `<workspace>_history/<timestamp>/` (next to the
+  workspace, ignored by git) and starts with an empty workspace; `main.py`
+  prints where it went. If the workspace is the repo root or contains it,
+  nothing is moved and the run stops with an error. The tools keep the
+  single `WORKSPACE_DIR` boundary (DEC-036).
+- Why: no mixing of old and new files, nothing lost, no extra step for
+  repeated runs; the archive is outside the tools' boundary, so the Coder
+  cannot read it; far less code than per-project folders.
+- Alternatives: per-project folders (DEC-113; waits for IMP-011); delete
+  the workspace (loses work; dangerous with a misconfigured
+  `WORKSPACE_DIR`); refuse a non-empty workspace (friction for repeated
+  runs, may look like a failure to the assessor).
+- Revisit when: IMP-011 (continue a project) is implemented; per-project
+  folders come with it.
+- Code: `orchestration/workspace.py` — `archive_workspace`
+
+### DEC-115 The full graph has an explicit step limit and never loses the state
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Basis: Preferred (guards C2.4 and the future C3.3 loop; C4.4 cost)
+- Context: LangGraph's default recursion limit is 10007 steps, so it is no
+  safety net (IMP-010). Today the Coder loop ends by construction (one
+  task per step, at most 8 tasks), but Module 3 adds the QA loop. When the
+  limit is hit, `invoke` raises and the state is lost.
+- Decision: `run()` passes `recursion_limit = 1 + MAX_TASKS + 2` (PM, one
+  step per task, margin) and iterates `graph.stream(..., stream_mode=
+  "values")`, keeping the last state. If the limit is hit, it returns that
+  state with `error` set; it never raises.
+- Why: a routing bug stops after a few steps instead of running until the
+  cost shows it; the run still ends with an honest error and the progress
+  so far, like any other failure (DEC-087, DEC-102).
+- Alternatives: wait for Module 3 (no guard until then); `invoke` with the
+  limit (the exception loses the state).

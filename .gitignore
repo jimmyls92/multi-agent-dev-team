@@ -15,7 +15,9 @@ docs/course_reference.txt
 
 # Agent working directory (Lab 1.2 tools, DEC-036)
 workspace/
+workspace_history/
 
 # Lab source material (local reference only, contains its own .env)
 lab-2-1/
 Multi-agents-lab-2-2/
+Multi-agents-lab-2-3/

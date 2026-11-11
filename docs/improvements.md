@@ -134,7 +134,7 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   Raised during the T3 review of Lab 2.2.
 
 ### IMP-010 Explicit recursion limit on the full graph
-- Status: idea
+- Status: planned
 - Area: Coder node (Lab 2.2)
 - Why: LangGraph 1.2's default recursion limit is 10007 steps, so it is no
   safety net. The loop ends by construction today (DEC-103), but Module 3
@@ -144,7 +144,27 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   limit must be above PM + 8 tasks + QA rounds, or it would stop valid runs.
 - Notes: pass `config={"recursion_limit": ...}` on the outer invoke in
   `run()`, computed from the task count and the QA limit. Raised by the
-  independent review of the Lab 2.2 spec (F5).
+  independent review of the Lab 2.2 spec (F5). Planned in Lab 2.3 as DEC-115.
+
+## Pipeline (Lab 2.3)
+
+### IMP-011 Continue an existing project
+- Status: idea
+- Area: Pipeline (Lab 2.3)
+- Why: today a run always starts a new project folder and refuses an
+  existing one (DEC-113). Extending a project ("add a /users endpoint")
+  would need: the PM planning from the existing code and spec instead of
+  the requirement alone (reopens the Lab 2.1 spec), `state.code` seeded
+  from the project folder so the Coder reads before editing, the previous
+  run's spec and task statuses persisted, and QA tests (Module 3) to catch
+  regressions in what already worked.
+  It also brings one folder per project under the workspace (DEC-113,
+  superseded for now by DEC-114: each run archives the previous files).
+- Rubric: no criterion asks for it. C2.2 (accumulated code must be
+  truthful) and C2.5 (working demo) must stay met: a fresh project keeps
+  today's behaviour, and continuing is an explicit opt-in (`--continue`)
+  that only replaces the "folder exists" refusal.
+- Notes: revisit once QA (Module 3) and state persistence (Module 4) exist.
 
 ## General
 
