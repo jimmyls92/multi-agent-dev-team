@@ -2,10 +2,16 @@
 
 ``structured_call`` asks the model for one output with a Pydantic schema
 and gives it one chance to fix an invalid output (DEC-088, DEC-091).
+``PYTHON_ENVIRONMENT`` tells every agent which packages the generated code
+may use (DEC-121).
 
 Typical usage example:
 
     spec = structured_call(model, SpecDraft, SPEC_PROMPT, requirement)
+
+Attributes:
+    PYTHON_ENVIRONMENT: Prompt rule naming the packages installed for the
+        generated code.
 """
 
 from typing import TypeVar
@@ -18,6 +24,14 @@ from langchain_core.messages import BaseMessage, ToolMessage
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
+
+# DEC-121: generated code runs with this project's interpreter; only Flask is
+# installed for it (DEC-108), so naming it keeps agents off FastAPI and others.
+PYTHON_ENVIRONMENT = (
+    "The project is written in Python 3.11. Besides the standard library, the only "
+    "third-party package installed is Flask: use Flask for any web server or API, and "
+    "do not use FastAPI, requests or any other package, because they are not installed."
+)
 
 
 class StructuredOutputError(Exception):

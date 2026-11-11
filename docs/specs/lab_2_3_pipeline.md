@@ -1,10 +1,10 @@
 # Spec: Lab 2.3 — PM + Coder pipeline
 
-- **Status:** in progress
+- **Status:** done
 - **Sources:** lab handout `docs/labs/lab_2_3_pipeline.md`, project guide
   (Module 2, `docs/course_reference.txt` Part A2, instructions 9 and 14),
   rubric C2.3–C2.6
-- **Decisions:** DEC-110..DEC-120 (the why lives there; do not repeat it here)
+- **Decisions:** DEC-110..DEC-121 (the why lives there; do not repeat it here)
 
 ## Goal
 
@@ -278,6 +278,16 @@ isolated, so the real `workspace/` is never archived by a test.
 - **When** the Coder starts `task_2`
 - **Then** an INFO record with "task_1 done" has already been logged
 
+#### AC-2.3-23 — Every agent is told that Flask is the only package installed
+
+- **Origin:** C2.5, DEC-121 (found while verifying R1: the PM chose FastAPI,
+  which is not installed)
+- **Verify:** unit — `tests/test_integration_pipeline.py::test_ac_2_3_23_environment_rule_in_prompts`
+- **Given** a run with the fake two-task PM and Coder
+- **When** `run()` ends
+- **Then** both PM calls and every Coder call (plan and loop) carry the
+  environment rule, which names Flask as the only third-party package
+
 #### AC-2.3-22 — The graded demo succeeds on repeated real runs
 
 - **Origin:** C2.5 (review F1, F2)
@@ -447,6 +457,19 @@ Task status: todo | map | in progress | review | done
   prompt has always started with `Task <id>:`); now it is pinned.
   AC-2.3-21 spies on `run_agent` to read the log at the moment task_2
   starts, so it fails if the notes are only logged at the end.
+
+### R1c — Installed packages in the prompts · done
+
+- **Covers:** AC-2.3-23 (then AC-2.3-22 and AC-2.3-16, real runs)
+- **Map:** `agents/llm_helpers.py` gets `PYTHON_ENVIRONMENT`, the rule
+  text; the PM's spec and task prompts and the Coder's plan and loop
+  prompts include it.
+- **Review notes (real runs, 2026-11-11):** after R1a and R1b,
+  `python main.py` ×5 all ended `RESULT: success` (exit 0) and each API
+  passed the extended fixture in-process and as a real server (AC-2.3-22);
+  AC-2.3-16 then passed 2 of 4: one run chose FastAPI (not installed), one
+  failure was not captured. After R1c, AC-2.3-16 passed 5 of 5 and the
+  whole suite with `--run-llm` gave 98 passed.
 
 ## Independent review
 

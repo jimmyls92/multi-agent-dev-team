@@ -2443,3 +2443,25 @@ A decision can mix bases; then each part states its own.
 - Alternatives: print from the nodes (agents would write to the console);
   log inside each node (two places, and `run()` notes would be missed).
 - Code: `orchestration/graph.py` — `run`
+
+### DEC-121 Every agent is told that Flask is the only package installed
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Basis: Preferred (protects C2.5)
+- Context: generated code runs with this project's interpreter, where
+  Flask is the only web framework installed (DEC-108). Nothing told the
+  agents so; in a real demo run the PM chose FastAPI, the Coder's check
+  failed with `No module named 'fastapi'` and the run ended `incomplete`
+  (found while verifying the R1 fixes).
+- Decision: `PYTHON_ENVIRONMENT` in `agents/llm_helpers.py` says the
+  project is Python 3.11 and that, besides the standard library, Flask is
+  the only third-party package, to be used for any web server or API. The
+  PM's spec and task prompts and the Coder's plan and loop prompts end
+  with it.
+- Why: one rule in both agents, so the spec never asks for a package the
+  Coder cannot import, and the request fixture (Flask) matches.
+- Alternatives: install FastAPI, uvicorn and httpx too (more dependencies,
+  and the fixture and the server guard would need FastAPI support).
+- Revisit when: a module needs another package for generated code (e.g.
+  pytest for QA in Module 3).
+- Code: `agents/llm_helpers.py` — `PYTHON_ENVIRONMENT`; `agents/pm_agent.py`,
+  `agents/coder_agent.py` — system prompts

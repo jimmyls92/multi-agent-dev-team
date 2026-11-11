@@ -12,6 +12,7 @@ import pytest
 import agents.coder_agent as coder_module
 import orchestration.graph as graph_module
 import orchestration.workspace as workspace_module
+from agents.llm_helpers import PYTHON_ENVIRONMENT
 from agents.pm_agent import MAX_TASKS
 from main import DEMO_REQUIREMENT
 from orchestration.graph import CODER_NODE, run
@@ -169,6 +170,19 @@ def test_ac_2_3_21_progress_logged_live(isolated_run, monkeypatch, caplog):
 
     assert final.error == ""
     assert any("task_1 done" in m for m in logged_at_start["task_2"])
+
+
+def test_ac_2_3_23_environment_rule_in_prompts(isolated_run):
+    pm, coder = _two_task_models()
+
+    final = run(REQUIREMENT, pm_model=pm, coder_model=coder)
+
+    assert final.error == ""
+    calls = pm.calls + coder.calls
+    assert len(pm.calls) == 2 and len(coder.calls) == 2 * len(successful_task())
+    for call in calls:
+        assert PYTHON_ENVIRONMENT in all_text(call)
+    assert "Flask" in PYTHON_ENVIRONMENT and "only" in PYTHON_ENVIRONMENT
 
 
 @pytest.mark.llm

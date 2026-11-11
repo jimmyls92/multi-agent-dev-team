@@ -416,6 +416,8 @@ Specs with the acceptance criteria and tests of each lab:
   API file still serves when run with `python` — DEC-112, DEC-116
 - A body that is not JSON gets 400 whatever its content type, and the
   request fixture checks four such bodies — DEC-118
+- Every agent is told that Flask is the only third-party package
+  installed, so no plan asks for FastAPI or other packages — DEC-121
 - A run succeeds only with no error and every task done; the verdict line
   and the exit code say so — DEC-111
 

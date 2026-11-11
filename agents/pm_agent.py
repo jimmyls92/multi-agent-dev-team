@@ -18,7 +18,7 @@ from collections.abc import Callable
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from agents.llm_helpers import structured_call
+from agents.llm_helpers import PYTHON_ENVIRONMENT, structured_call
 from llm_client import get_chat_model
 from orchestration.state import (
     NonEmptyStr,
@@ -36,7 +36,7 @@ DEFAULT_PM_MODEL = "openai/gpt-4.1"  # DEC-086, DEC-093
 MAX_TASKS = 8  # C2.4
 MIN_TASKS = 2  # C2.1, DEC-081
 
-SPEC_SYSTEM_PROMPT = """You are a senior technical product manager. Turn the user's software
+SPEC_SYSTEM_PROMPT = f"""You are a senior technical product manager. Turn the user's software
 requirement into a technical specification that a coding agent will implement without
 asking questions.
 
@@ -49,7 +49,7 @@ asking questions.
   ## Non-Functional Requirements, ## File Structure, ## Constraints & Assumptions.
   Be concrete: no "TBD" and no open questions; decide and state assumptions instead.
 
-The project is written in Python."""
+{PYTHON_ENVIRONMENT}"""
 
 TASKS_SYSTEM_PROMPT = f"""You are a senior technical product manager. Split the
 specification you receive into coding tasks for a coding agent.
@@ -67,7 +67,7 @@ specification you receive into coding tasks for a coding agent.
   its files include at least one .py file. Dependency lists, documentation and
   configuration are never tasks of their own: list such files in a coding task's files.
 
-The project is written in Python."""
+{PYTHON_ENVIRONMENT}"""
 
 
 class SpecDraft(BaseModel):

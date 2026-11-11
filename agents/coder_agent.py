@@ -51,6 +51,7 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 import tools.handlers
+from agents.llm_helpers import PYTHON_ENVIRONMENT
 from llm_client import get_chat_model
 from memory import SlidingWindowBuffer, build_context, store_memory, store_outcome
 from orchestration.state import CoderResult, ProjectSpec, ProjectState, StepRecord, TaskState
@@ -97,9 +98,11 @@ How you work:
   question, even one about files from earlier tasks; the answer then goes in
   "explanation".
 - You have at most {MAX_ITERATIONS} responses for the whole task; finish before you run out.
-- Follow your plan below, but let the observations decide each next step."""
+- Follow your plan below, but let the observations decide each next step.
 
-PLAN_SYSTEM_PROMPT = """You are an expert Python developer about to work on the user's task as an
+{PYTHON_ENVIRONMENT}"""
+
+PLAN_SYSTEM_PROMPT = f"""You are an expert Python developer about to work on the user's task as an
 autonomous coding agent. Later you will be able to write files, run Python
 scripts and read files; now you only plan.
 
@@ -110,7 +113,9 @@ Write a short, concrete plan for the task: a few steps, each one sentence.
   and the run tool refuses it. Keep its `if __name__ == "__main__":` block
   that starts the server, and plan a separate check script that imports it
   and calls it in-process (for Flask, `app.test_client()`); run that script.
-- For a question that needs no code, one step is enough."""
+- For a question that needs no code, one step is enough.
+
+{PYTHON_ENVIRONMENT}"""
 
 PLAN_HEADING = "Your plan for this task:"
 
