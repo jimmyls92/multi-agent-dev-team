@@ -230,7 +230,8 @@ change without changing what they check:
   exactly this test).
 - AC-2.1-17, AC-2.1-19: isolated.
 - AC-2.1-18, AC-2.1-23: isolated, with a fake Coder that completes every
-  task; the exit code stays 0 and the printed checks stay.
+  task; the exit code stays 0 and the printed checks stay. Done in T2,
+  since `main()` runs the Coder as soon as `run()` does.
 
 ## Tasks
 
@@ -254,12 +255,32 @@ Task status: todo | map | in progress | review | done
 - **Run it yourself:** `.venv/bin/python -m pytest tests/test_workspace.py -v`
 - **Review notes:**
 
-### T2 — Full graph and `run()` · todo
+### T2 — Full graph and `run()` · done
 
-- **Covers:** AC-2.3-5..AC-2.3-11; adapted AC-2.1-16, AC-2.1-17, AC-2.1-19
-- **Map:** (to approve)
-- **Run it yourself:**
-- **Review notes:**
+- **Covers:** AC-2.3-5..AC-2.3-11; adapted AC-2.1-16..AC-2.1-19, AC-2.1-23
+- **Map:**
+  - Files: `orchestration/graph.py` (modified), `tests/test_pipeline.py`
+    (new), `tests/test_integration_pipeline.py` (new), `tests/conftest.py`
+    (safety nets), `tests/test_integration_pm.py` and `tests/test_main.py`
+    (adapted)
+  - `PM_NODE = "pm"`, `STEP_LIMIT = 1 + MAX_TASKS + 2` (DEC-115)
+  - `route_after_pm(state) -> str` — `CODER_NODE` with no error and at
+    least one task, else `END` (DEC-110)
+  - `build_graph(pm_model=None, coder_model=None) -> CompiledStateGraph` —
+    `START → pm → coder ⟲ → END`, `context_schema=CoderRunContext`
+  - `run(requirement, pm_model=None, coder_model=None) -> ProjectState` —
+    archives the workspace (DEC-114), streams the graph with a new
+    `CoderRunContext` and the step limit, keeps the last state; an archive
+    failure or the limit end with `error` set
+  - `tests/conftest.py`: autouse `_temporary_workspace`,
+    `_fresh_coder_agent`, `_refuse_real_models`
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_pipeline.py tests/test_integration_pipeline.py -v`
+- **Review notes:** the Coder's default agent is cached per process
+  (`_default_agent`); a test that reached it through `main()` reused the
+  exhausted fake of an earlier test, so `_fresh_coder_agent` clears the
+  cache around every test. In AC-2.3-6 the Coder's task message is looked
+  for in every message of the call, since the run's window (DEC-099) puts
+  the earlier task first.
 
 ### T3 — Command line verdict · todo
 

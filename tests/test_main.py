@@ -1,9 +1,15 @@
-"""Tests for the command-line entry point (spec `lab_2_1_pm_agent`, AC-2.1-18, AC-2.1-21)."""
+"""Tests for the command-line entry point (spec `lab_2_1_pm_agent`, AC-2.1-18, AC-2.1-21).
+
+Since Lab 2.3 ``main`` runs the Coder after the PM, so a run that reaches
+the Coder uses a fake Coder in ``isolated_run``.
+"""
 
 import pytest
 
+import agents.coder_agent as coder_agent
 import agents.pm_agent as pm_agent
 from main import main
+from tests.coder_helpers import successful_task
 from tests.fakes import ScriptedChatModel
 from tests.test_pm_agent import _draft, _spec_reply, _tasks_reply
 
@@ -18,10 +24,12 @@ def _use_model(monkeypatch, model: ScriptedChatModel) -> None:
     monkeypatch.setattr(pm_agent, "get_chat_model", lambda model_id: model)
 
 
-def test_ac_2_1_18_main_output_and_exit_code(monkeypatch, capsys):
+def test_ac_2_1_18_main_output_and_exit_code(isolated_run, monkeypatch, capsys):
     drafts = [_draft(1, ["REQ-1"]), _draft(2, ["REQ-2", "REQ-3"])]
     drafts[0]["files"], drafts[1]["files"] = ["app.py"], ["validation.py"]
     _use_model(monkeypatch, ScriptedChatModel([_spec_reply(), _tasks_reply(drafts)]))
+    coder = ScriptedChatModel(successful_task() + successful_task("X = 1\n", "validation.py"))
+    monkeypatch.setattr(coder_agent, "get_chat_model", lambda model_id: coder)
 
     code = main(["Build an echo API"])
 

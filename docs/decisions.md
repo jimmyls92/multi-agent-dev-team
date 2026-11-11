@@ -2230,6 +2230,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: route on `error` only (an empty list would reach the
   Coder, which reports "no pending task"); a `routing` field (a second
   signal that can contradict the state).
+- Code: `orchestration/graph.py` — `route_after_pm`, `build_graph`
 
 ### DEC-111 A run succeeds only with no error and every task done
 - Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
@@ -2317,7 +2318,8 @@ A decision can mix bases; then each part states its own.
   runs, may look like a failure to the assessor).
 - Revisit when: IMP-011 (continue a project) is implemented; per-project
   folders come with it.
-- Code: `orchestration/workspace.py` — `archive_workspace`
+- Code: `orchestration/workspace.py` — `archive_workspace`; `orchestration/graph.py` — `run`;
+  `tests/conftest.py` — `_temporary_workspace`
 
 ### DEC-115 The full graph has an explicit step limit and never loses the state
 - Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
@@ -2335,3 +2337,4 @@ A decision can mix bases; then each part states its own.
   so far, like any other failure (DEC-087, DEC-102).
 - Alternatives: wait for Module 3 (no guard until then); `invoke` with the
   limit (the exception loses the state).
+- Code: `orchestration/graph.py` — `STEP_LIMIT`, `run`
