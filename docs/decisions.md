@@ -2087,7 +2087,8 @@ A decision can mix bases; then each part states its own.
 - Context: the lab adds `current_task_index` and `routing` to the state to
   pick the next task and leave the loop. Our tasks already carry a status
   (DEC-101) and come sorted by priority (DEC-085).
-- Decision: the Coder node runs the first `pending` task. A router
+- Decision: the Coder node runs the first `pending` task (superseded by
+  DEC-119: the pending task with the lowest priority). A router
   `route_after_coder` sends control back to the Coder while a task is
   `pending` and `error` is empty, and to END otherwise. No index or routing
   field is added.
@@ -2407,3 +2408,38 @@ A decision can mix bases; then each part states its own.
   API rules in the Coder).
 - Code: `tests/api_fixture.py` — `INVALID_BODIES`; `agents/coder_agent.py` —
   `CODER_SYSTEM_PROMPT`
+
+### DEC-119 The Coder picks the pending task with the lowest priority
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Basis: Required (C2.3: the Coder consumes the handoff's priority; C2.4:
+  tasks run in order); the rule — Preferred
+- Context: DEC-103 ran the first `pending` task in list order. The PM
+  numbers priorities in list order (DEC-085), so the result was right, but
+  the Coder never read `priority`, and a state built any other way would
+  run in the wrong order (independent review F5).
+- Decision: `_next_pending` returns the pending task with the lowest
+  `priority`; ties keep list order. Supersedes the task choice of DEC-103;
+  the status-driven loop stays.
+- Why: the handoff field the rubric names is the one that decides the
+  order; same behaviour for every state the PM writes.
+- Alternatives: keep list order and only test it (the Coder would still
+  ignore `priority`); sort `tasks` in the PM (the order would depend on
+  the writer again).
+- Code: `agents/coder_agent.py` — `_next_pending`
+
+### DEC-120 Progress notes are logged as each step ends
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Basis: Preferred (C2.4: per-task progress after each completion)
+- Context: the state got each task's notes as it finished, but `main.py`
+  printed `[PROGRESS]` only after the whole run, so a person watching the
+  console saw no task finish until the end (independent review F6).
+- Decision: `run()` logs every new progress note at INFO as soon as the
+  graph step that wrote it ends (it already streams the steps, DEC-115),
+  plus the archive note before the graph starts. `main.py` keeps the full
+  `[PROGRESS]` list in its final summary.
+- Why: one place covers the PM and the Coder notes; the default
+  `LOG_LEVEL=INFO` shows them live on stderr, and `--json` output on stdout
+  stays clean.
+- Alternatives: print from the nodes (agents would write to the console);
+  log inside each node (two places, and `run()` notes would be missed).
+- Code: `orchestration/graph.py` — `run`

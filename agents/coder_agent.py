@@ -614,18 +614,20 @@ class CoderRunContext:
 
 
 def _next_pending(tasks: list[TaskState]) -> TaskState | None:
-    """Returns the first pending task, or None when none is left.
+    """Returns the pending task with the lowest priority, or None when none is left.
 
-    The PM lists tasks in priority order (DEC-085), so the first pending one
-    is the next to run (DEC-103).
+    The PM numbers priorities in list order (DEC-085), so this is also the
+    first pending task; reading ``priority`` makes the Coder follow the
+    handoff field itself (DEC-103, DEC-119).
 
     Args:
         tasks: The state's task list.
 
     Returns:
-        The task to run next, or None.
+        The task to run next, or None. Ties keep list order.
     """
-    return next((task for task in tasks if task.status == "pending"), None)
+    pending = [task for task in tasks if task.status == "pending"]
+    return min(pending, key=lambda task: task.priority, default=None)
 
 
 def _task_prompt(task: TaskState, spec: ProjectSpec | None, existing_files: list[str]) -> str:

@@ -5,8 +5,11 @@ Covers AC-2.3-6 to AC-2.3-11 with fake PM and Coder models in
 (``--run-llm``).
 """
 
+import logging
+
 import pytest
 
+import agents.coder_agent as coder_module
 import orchestration.graph as graph_module
 import orchestration.workspace as workspace_module
 from agents.pm_agent import MAX_TASKS
@@ -64,6 +67,7 @@ def test_ac_2_3_6_pm_to_coder_handoff(isolated_run):
     tasks_per_call = len(successful_task())
     for task, first_call in zip(final.tasks, (coder.calls[0], coder.calls[tasks_per_call])):
         message = all_text(first_call)
+        assert task.task_id in message
         assert task.description in message
         for criterion in task.acceptance_criteria:
             assert criterion.when in message and criterion.then in message
@@ -147,6 +151,24 @@ def test_ac_2_3_11_eight_tasks_within_limit(isolated_run):
     starts = [_position(final.progress, f"starting task_{k} ") for k in range(1, 9)]
     assert starts == sorted(starts)
 
+def test_ac_2_3_21_progress_logged_live(isolated_run, monkeypatch, caplog):
+    pm, coder = _two_task_models()
+    logged_at_start = {}
+    real_run_agent = coder_module.run_agent
+
+    def spy(task, window, model=None):
+        """Returns run_agent's result after noting the INFO messages logged so far."""
+        task_id = task.split("Task ", 1)[1].split(":", 1)[0]
+        logged_at_start[task_id] = [r.getMessage() for r in caplog.records]
+        return real_run_agent(task, window, model)
+
+    monkeypatch.setattr(coder_module, "run_agent", spy)
+    caplog.set_level(logging.INFO, logger="orchestration.graph")
+
+    final = run(REQUIREMENT, pm_model=pm, coder_model=coder)
+
+    assert final.error == ""
+    assert any("task_1 done" in m for m in logged_at_start["task_2"])
 
 
 @pytest.mark.llm

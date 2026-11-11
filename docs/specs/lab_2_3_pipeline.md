@@ -434,12 +434,19 @@ Task status: todo | map | in progress | review | done
   `TaskDraft` (the LLM's output), not on `TaskSpec`, so state built in
   code is not constrained.
 
-### R1b — Priority and live progress · todo
+### R1b — Priority and live progress · done
 
 - **Covers:** AC-2.3-20, AC-2.3-21; AC-2.3-6 checks the task ID
 - **Map:** `_next_pending` returns the pending task with the lowest
   priority; `run()` logs each new progress note at INFO as the step that
   wrote it ends.
+- **Run it yourself:** `python main.py "Build a CLI that prints the
+  Fibonacci numbers up to n"` and watch the `task_N done` lines appear
+  while the run goes on.
+- **Review notes:** AC-2.3-6 already passed with the task ID check (the
+  prompt has always started with `Task <id>:`); now it is pinned.
+  AC-2.3-21 spies on `run_agent` to read the log at the moment task_2
+  starts, so it fails if the notes are only logged at the end.
 
 ## Independent review
 

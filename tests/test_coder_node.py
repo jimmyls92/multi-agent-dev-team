@@ -16,6 +16,7 @@ from orchestration.graph import CODER_NODE, route_after_coder
 from orchestration.state import ProjectState
 from tests.coder_helpers import (
     all_text,
+    state_data,
     successful_task,
     task_message,
     two_task_state,
@@ -287,3 +288,17 @@ def test_ac_2_2_19_missing_run_context(isolated_run):
     assert model.calls == []
     assert "tasks" not in update
     assert "context" in update["error"]
+
+
+def test_ac_2_3_20_lowest_priority_first(isolated_run):
+    data = state_data()
+    data["tasks"] = list(reversed(data["tasks"]))
+    model = ScriptedChatModel(successful_task())
+
+    _, state = _run_node(ProjectState.model_validate(data), model)
+
+    by_id = {t.task_id: t for t in state.tasks}
+    assert [t.task_id for t in state.tasks] == ["task_2", "task_1"]
+    assert by_id["task_1"].status == "done"
+    assert by_id["task_2"].status == "pending"
+    assert "Task task_1:" in all_text(model.calls[0])

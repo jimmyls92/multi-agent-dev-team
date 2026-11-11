@@ -157,6 +157,8 @@ def run(
 
     Never raises once the requirement is valid: a workspace that cannot be
     archived and a run that hits the step limit end with ``error`` set.
+    Each progress note is logged at INFO when the step that wrote it ends
+    (DEC-120).
 
     Args:
         requirement: The user's requirement.
@@ -181,6 +183,9 @@ def run(
             update={"progress": [f"Workspace: previous files moved to {archive}."]}
         )
 
+    for note in state.progress:
+        logger.info(note)
+    logged = len(state.progress)
     last = state.model_dump()
     try:
         # DEC-115: stream keeps the last state, which invoke would lose on the limit.
@@ -190,7 +195,10 @@ def run(
             config={"recursion_limit": STEP_LIMIT},
             stream_mode="values",
         ):
-            pass
+            # DEC-120: each step's notes are logged as soon as the step ends.
+            for note in last["progress"][logged:]:
+                logger.info(note)
+            logged = len(last["progress"])
     except GraphRecursionError:
         return _failed(
             ProjectState.model_validate(last), f"Run stopped: step limit of {STEP_LIMIT} reached."

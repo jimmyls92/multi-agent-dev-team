@@ -77,7 +77,8 @@ run starts with an empty workspace (DEC-114). The output lists:
 
 - `[PROGRESS]`: one note per step, in order: the PM's spec and tasks
   ("handoff ready"), then "starting task_N" and "task_N done/failed" for each
-  task.
+  task. With the default `LOG_LEVEL=INFO`, each note is also logged live to
+  the console as soon as its step ends (DEC-120).
 - `[SPEC]`, `[ACCEPTANCE CRITERIA]` and `[TASKS]`: the PM's spec and each
   task with its priority, status, files, the spec criteria it covers, the
   tasks it was merged from (when more than 8 were consolidated), its
@@ -155,7 +156,7 @@ them.
    `pending`, are the handoff; they are JSON-serializable (`--json`)
    (DEC-110).
 4. **`coder`** (`agents/coder_agent.py`) runs **one task per step**: the
-   first `pending` task, in priority order (DEC-085, DEC-103). It turns the
+   `pending` task with the lowest priority (DEC-085, DEC-103, DEC-119). It turns the
    task, its criteria, the project context and the files already written
    into the Coder's prompt and runs the Module 1 ReACT agent (DEC-098,
    DEC-105). It then sets the task's status (`done` only for a `success`
@@ -171,7 +172,7 @@ them.
 |---|---|---|
 | `requirement` | `run()` | PM |
 | `spec`: name, description, details, acceptance criteria, tasks as planned | PM | Coder (project context), `main.py` |
-| `tasks`: each `TaskSpec` plus `status` (`pending`/`done`/`failed`) and `result` (`CoderResult`) | PM creates them; the Coder updates status and result | Coder (next pending task), routers, `main.py` |
+| `tasks`: each `TaskSpec` plus `status` (`pending`/`done`/`failed`) and `result` (`CoderResult`) | PM creates them; the Coder updates status and result | Coder (pending task with the lowest priority), routers, `main.py` |
 | `code`: file path → content on disk, every file the run wrote | Coder | Coder (files already written), `main.py` |
 | `progress`: notes, appended by each step | `run()`, PM, Coder | `main.py` |
 | `error`: empty unless the run must stop | `run()`, PM, Coder | routers, `main.py` |
@@ -395,8 +396,10 @@ Specs with the acceptance criteria and tests of each lab:
   context and existing files into the Coder's prompt — DEC-098, DEC-105
 
 **C2.4 Execution and progress**
-- Priority is the execution order; the Coder runs the first pending task,
-  one per step, and loops while tasks are pending — DEC-085, DEC-103
+- Priority is the execution order; the Coder runs the pending task with
+  the lowest priority, one per step, and loops while tasks are pending —
+  DEC-085, DEC-103, DEC-119
+- Each progress note is logged as soon as its step ends — DEC-120
 - More than 8 tasks are merged into 8 even groups of consecutive tasks,
   keeping their criteria and `merged_from` — DEC-082, DEC-092
 - A failed task does not stop the others; a fatal error ends the run — DEC-097,
