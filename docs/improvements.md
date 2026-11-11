@@ -134,7 +134,7 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   Raised during the T3 review of Lab 2.2.
 
 ### IMP-010 Explicit recursion limit on the full graph
-- Status: planned
+- Status: done (DEC-115, Lab 2.3)
 - Area: Coder node (Lab 2.2)
 - Why: LangGraph 1.2's default recursion limit is 10007 steps, so it is no
   safety net. The loop ends by construction today (DEC-103), but Module 3
