@@ -2250,6 +2250,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: success when there is no fatal error (a failed task would
   exit 0); a separate exit code for incomplete runs (more cases to
   document for little gain).
+- Code: `main.py` — `_verdict`, `_print_state`, `main`
 
 ### DEC-112 Long-running programs are never run; the Coder verifies them through an import
 - Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted

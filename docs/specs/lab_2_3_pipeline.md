@@ -282,12 +282,23 @@ Task status: todo | map | in progress | review | done
   for in every message of the call, since the run's window (DEC-099) puts
   the earlier task first.
 
-### T3 — Command line verdict · todo
+### T3 — Command line verdict · done
 
-- **Covers:** AC-2.3-12, AC-2.3-13, AC-2.3-14; adapted AC-2.1-18, AC-2.1-23
-- **Map:** (to approve)
-- **Run it yourself:**
-- **Review notes:**
+- **Covers:** AC-2.3-12, AC-2.3-13, AC-2.3-14
+- **Map:**
+  - Files: `main.py` (modified), `tests/test_main.py` (modified)
+  - `_verdict(state) -> tuple[int, str]` — exit code and `RESULT:` line:
+    error, then no tasks, then unfinished tasks, else success (DEC-111)
+  - `_result_line(task) -> str` — main file, iterations and the first
+    non-empty output line, cut to `RESULT_EXCERPT_CHARS`
+  - `_print_state(state)` — prints the spec and tasks whenever the PM
+    produced them (also after a later error), each task's result line, the
+    workspace and its files, then the error
+  - `main()` — prints the verdict last; `--json` prints only the state; the
+    exit code follows `_verdict` in both modes
+- **Run it yourself:** `.venv/bin/python -m pytest tests/test_main.py -v`
+- **Review notes:** closed without answering the review questions, at the
+  user's request.
 
 ### T4 — Coder server rule and real-model runs · todo
 
