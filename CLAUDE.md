@@ -78,7 +78,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 ## Notas del repo
 
 - Los nombres ya coinciden con el scaffold de la guía. Los tests van en `tests/`; no crear `test/`.
-- Git no versiona carpetas vacías. Antes de entregar, comprobar que `orchestration/` tiene algún archivo para que aparezca en el repo (C1.1).
+- Git no versiona carpetas vacías y no se usan `.gitkeep`. Antes de entregar, comprobar que cada carpeta obligatoria tiene algún archivo versionado para que aparezca en el repo (C1.1).
 - `config.yaml` es la configuración del IDE (Continue) y no forma parte del sistema. Nunca debe contener una API key real.
 - Remoto: `origin` = https://github.com/jimmyls92/multi-agent-dev-team (público). Se trabaja en la rama de la semana (`week-1`, ...); `master` es la rama por defecto y se adelanta con fast-forward (`git fetch . week-1:master`) a lo que esté listo.
 - Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032); instalar con `UV_LINK_MODE=copy uv pip install -r requirements.txt`. Setup en el README.
@@ -86,15 +86,9 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Spec activo: ninguno. Siguiente paso: entregar el Módulo 2 (ver "Pendientes").
+Spec activo: ninguno. Rama: `week-3`. Siguiente paso: empezar el Módulo 3 (añadir su guía como Part A3 en `docs/course_reference.txt`, revisar las decisiones `Provisional` que apunten a él y elegir el protocolo MCP o A2A).
 
-Lab 2.3 (pipeline PM → Coder): cerrado (`docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-121).
-
-Lab 2.2 (Coder node): cerrado (`docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109). Material original en `Multi-agents-lab-2-2/` (fuera de git).
-
-Lab 2.1 (PM Agent): cerrado (`docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096).
-
-Los tests de los labs (`lab-2-1/test_lab21.py`, `Multi-agents-lab-2-2/tests/test_lab22.py`) sirven de inspiración para los AC; no se ejecutan contra nuestro código.
+Módulo 2: cerrado y subido (C2.1–C2.6), `master` = `week-2`. PM Agent (Lab 2.1, `docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096), Coder node (Lab 2.2, `docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109) y pipeline PM → Coder (Lab 2.3, `docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-121).
 
 Módulo 1: cerrado y subido (C1.1–C1.6). Memoria de dos capas (Lab 1.1), tools (Lab 1.2) y Coder con LangChain `create_agent` (Lab 1.3, DEC-068..DEC-080). Detalle en `docs/decisions.md` y el README.
 
@@ -106,8 +100,6 @@ Tests aplazados por decisión del usuario (como tarde en C4.7; proponer y aproba
 - **Memoria** (mockeados): el input actual nunca vuelve como recuerdo (DEC-031); un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029); los duplicados exactos se actualizan (DEC-011).
 - **Tools:** confinamiento a `workspace/` (DEC-036, DEC-042), entorno sin credenciales (DEC-039, DEC-043), `cwd` del script (DEC-040), stdin cerrado, mensaje sin salida y truncado por el final (DEC-038), tope de lectura (DEC-041), muerte del grupo de procesos (DEC-044).
 - **Coder** (modelo falso): (a) **prioritario**, un modelo que solo da texto para en 10 con `max_iterations` (fija el orden de DEC-079); (b) uno que llama a tools sin terminar para en 10; (c) argumentos inválidos no ejecutan la tool (DEC-076); (d) `CoderResult` desde mensajes inventados (DEC-078).
-
-**Entrega del Módulo 2:** `week-2` no está subida y `origin/master` sigue en el Módulo 1. Tras el cierre del spec de Lab 2.3: push y avanzar `master`.
 
 Otros:
 - Mejoras de memoria IMP-001..IMP-005 en `idea`. "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
