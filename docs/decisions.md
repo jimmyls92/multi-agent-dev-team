@@ -2465,3 +2465,239 @@ A decision can mix bases; then each part states its own.
   pytest for QA in Module 3).
 - Code: `agents/llm_helpers.py` — `PYTHON_ENVIRONMENT`; `agents/pm_agent.py`,
   `agents/coder_agent.py` — system prompts
+
+### DEC-122 The QA agent never modifies the Coder's code
+- Date: 2026-11-16 · Area: QA Agent (Module 3) · Status: accepted
+- Basis: Required (C3.2: QA returns structured fixes and the Coder revises);
+  how it is enforced — Preferred
+- Context: Module 3 adds a QA agent that reviews and tests the Coder's
+  output. A QA that edits code itself would mix the two roles and skip the
+  Coder revision that C3.2 grades.
+- Decision: the QA only reads, tests and reports; every fix goes back to
+  the Coder as a structured instruction. The rule is enforced by the tools
+  each agent gets (the QA has no write access to the Coder's files), not
+  by a prompt. The QA may write its own pytest files (C3.1); where they go
+  is decided in Lab 3.2.
+- Why: separation of responsibilities (the user's principle): one agent
+  detects, one agent fixes. Enforcing it through tools means a model that
+  ignores its prompt still cannot break it.
+- Alternatives: let the QA patch trivial defects itself (fails C3.2 and
+  blurs who owns the code).
+- Code: — (applies from Lab 3.2)
+
+### DEC-123 The graded protocol route is chosen at Lab 3.3
+- Date: 2026-11-16 · Area: Protocol (Module 3) · Status: accepted
+- Basis: Provisional
+- Context: C3.5 grades one route: MCP (official SDK, a server exposing the
+  file-system tools and the Coder as its client) or A2A (Coder/QA messages
+  with sender, receiver, intent, payload, correlation_id and intent
+  validation). The labs build both: MCP in Labs 3.1-3.2, A2A in Lab 3.3. No
+  lab makes the Coder an MCP client.
+- Decision: the route is chosen when Lab 3.3 starts, with both protocols
+  seen. Until then, Lab 3.1's MCP server is built so the MCP route stays
+  open (DEC-124). If MCP is chosen, a separate spec makes the Coder an MCP
+  client before Module 3 closes.
+- Why: nothing in Lab 3.1 needs the choice; deciding after seeing both
+  avoids committing early.
+- Alternatives: choose MCP now (premature; A2A not seen yet).
+- Revisit when: Lab 3.3 starts.
+- Code: —
+
+### DEC-124 The MCP server's root is the agents' workspace
+- Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
+- Basis: Preferred (keeps the C3.5 MCP route open, DEC-123)
+- Context: the lab's server reads from a sample `project_files/` folder.
+  In this project, the code the Coder writes lives in `WORKSPACE_DIR`
+  (DEC-036, DEC-045).
+- Decision: the MCP server serves `WORKSPACE_DIR`, not a `project_files/`
+  folder.
+- Why: the server is the shared file layer between agents; pointed at
+  `workspace/` it sees the Coder's real output, and the same root works if
+  the Coder becomes its client.
+- Alternatives: a `project_files/` folder as in the lab (no other component
+  uses it; the code would have to be copied there).
+- Code: — (Lab 3.1)
+
+### DEC-125 The MCP server exposes `read_file` and a recursive listing
+- Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
+- Basis: Preferred
+- Context: anything the server exposes is usable by every client that
+  connects, so it should expose only what the agents need. `workspace/`
+  can hold subfolders and noise (`__pycache__/`, hidden files) that the
+  lab's flat `project_files/` did not.
+- Decision: one tool, `read_file(path)`, and one resource,
+  `file://project/listing` (text/plain): every file under the root,
+  recursively, one path per line, relative to the root, skipping
+  `__pycache__/` and hidden entries. No `write_file` on the server for now.
+- Why: each listed line can be passed unchanged to `read_file`, so the QA
+  sees what exists and reads it without guessing paths. Without a write
+  tool the QA cannot edit the Coder's code (DEC-122).
+- Alternatives: a top-level listing as in the lab (folders hide their
+  files, noise included); add `write_file` now (not needed until a Coder
+  MCP client exists, DEC-123).
+- Revisit when: the MCP route is chosen in Lab 3.3 (the Coder client
+  needs `write_file`).
+- Code: — (Lab 3.1)
+
+### DEC-126 The MCP server reuses the tool safety rules and hides what the listing hides
+- Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
+- Basis: Required (C1.3, C4.6: validated tool arguments, no crash on bad
+  input); hiding hidden files and `__pycache__/` — Preferred
+- Context: MCP servers are trust boundaries: the caller is an LLM that can
+  be wrong or manipulated, and everything exposed is reachable by any
+  connected client.
+- Decision: `read_file` on the server applies the same rules as the local
+  tools: confinement to `WORKSPACE_DIR` via `resolve_in_workspace`
+  (DEC-036, DEC-042), strict Pydantic argument validation, never raising
+  (every failure returns `ERROR: ...` with `isError=True`), and the
+  `READ_MAX_CHARS` cap (DEC-041). On top of that it rejects any path with a
+  hidden component (`.env`, `.git/...`) or a `__pycache__` component, the
+  same entries the listing skips (DEC-125).
+- Why: what the listing does not show cannot be read either, so a secret
+  that lands in `workspace/` by accident is not reachable over MCP; one
+  set of rules for local tools and the server.
+- Alternatives: confinement only, as the local `read_file` (a stray `.env`
+  in the workspace would be readable).
+- Code: — (Lab 3.1)
+
+### DEC-127 The MCP server logs one line per request to stderr
+- Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
+- Basis: Required if the MCP route is chosen (C3.5 evidence: invocation
+  logs linked to the grading run); otherwise lab success criterion
+- Context: the lab requires the server log to show `read_file` going
+  through the protocol. With stdio, stdout carries the protocol messages.
+- Decision: the server logs to stderr, one line per event (start with its
+  root, each tool call and resource read with its result and size),
+  prefixed with the server's PID. Rejected calls log at WARNING. File
+  contents are never logged.
+- Why: a PID different from the client's proves the call crossed a process
+  boundary; it is the invocation log C3.5 asks for at almost no cost.
+  Not logging contents keeps secrets out of logs and traces (DEC-126).
+- Alternatives: also log returned contents (noisy, leaks what DEC-126
+  hides); no server log (fails the lab and, on the MCP route, C3.5).
+- Code: — (Lab 3.1)
+
+### DEC-128 The MCP server and client live in `tools/` and run as modules
+- Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
+- Basis: Required (C1.1, C5.3: the mandated layout); module placement —
+  Preferred
+- Context: the lab puts `mcp_server.py`, `mcp_client.py` and a demo
+  `main.py` at the repo root. Our `main.py` already runs the pipeline.
+- Decision: the server is `tools/mcp_server.py`, started with
+  `python -m tools.mcp_server`; the client is `tools/mcp_client.py`, whose
+  `python -m tools.mcp_client [path]` is the lab's demo (lists tools and
+  resources, reads one file).
+- Why: the server exposes file-system tools and reuses the safety code in
+  `tools/`; running it as a module makes those imports work from the repo
+  root without touching `sys.path`.
+- Alternatives: a new `protocols/` package (an extra folder the guide does
+  not ask for); files at the root as in the lab (breaks the layout and
+  needs `sys.path` hacks).
+- Code: — (Lab 3.1)
+
+### DEC-129 The MCP SDK is pinned to the 1.x line
+- Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
+- Basis: Required (C3.5: official Python MCP SDK); the 1.x line — Preferred
+- Context: the official SDK has two maintained lines: 1.x (1.30.0,
+  2026-09) and 2.x (2.3.0, 2026-10), whose API is reorganised and whose
+  types moved to a separate `mcp-types` package. The lab and its tests use
+  the 1.x API (`Server`, `request_handlers`, `stdio_client`).
+- Decision: `mcp>=1.30,<2`.
+- Why: it is the official SDK and the API the course material teaches;
+  2.x is unverified here and would move us away from the handouts.
+- Alternatives: 2.x (newer, API not checked against the labs).
+- Revisit when: the Coder becomes an MCP client (DEC-123) or 1.x stops
+  receiving fixes.
+- Code: — (Lab 3.1)
+
+### DEC-130 The MCP server uses the low-level `Server` and its own validation
+- Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
+- Basis: Preferred (applies DEC-126)
+- Context: the SDK offers the low-level `Server` (handlers and JSON Schema
+  written by hand) and `FastMCP` (schema from type hints, exceptions turned
+  into errors). The low-level `call_tool` also validates the arguments
+  against `inputSchema` by default and answers `Input validation error:
+  ...`, without our `ERROR:` prefix.
+- Decision: low-level `Server`, as in the lab, with
+  `call_tool(validate_input=False)`: the strict Pydantic model is the only
+  validator. Every failure is returned as a `CallToolResult` with
+  `isError=True` and text starting with `ERROR:`; handlers never raise.
+- Why: one validator and one error format for every failure (bad
+  arguments, unknown tool, rejected path), so a client tells an error from
+  content by `isError` or the prefix, never by guessing.
+- Alternatives: `FastMCP` (the SDK decides validation and error text);
+  keep the SDK's schema validation (two validators, two error formats).
+- Code: — (Lab 3.1)
+
+### DEC-131 The server's `read_file` reuses the local pieces and reports relative paths
+- Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
+- Basis: Preferred (applies DEC-126)
+- Context: `file_io.read_file` returns its errors as text that includes the
+  absolute path (`Error reading file '/abs/path': ...`), which would leak
+  the server's layout to any client.
+- Decision: the server validates with `ReadFileArgs` (strict, confined),
+  then checks exposure and that the target is an existing file, then calls
+  `file_io.read_file` for the read and the `READ_MAX_CHARS` cap. A residual
+  error (permissions, not UTF-8) is recognised by its exact prefix and
+  rewritten as `ERROR: <relative path>: <reason>`. One function,
+  `_is_exposed`, decides visibility for both the listing and `read_file`;
+  it checks the requested path and the resolved one, so a visible symlink
+  to a hidden file is rejected. The workspace is read from
+  `tools.handlers.WORKSPACE_DIR` at call time.
+- Why: one set of rules (DEC-126) without touching Module 1 code; "what is
+  not listed cannot be read" holds by construction; reading the root at
+  call time keeps the test fixtures' temporary workspace working.
+- Alternatives: a separate reader in the server (duplicates the truncation
+  of DEC-041); make `file_io` raise exceptions (cleaner, but changes Module
+  1 code for no graded gain).
+- Code: — (Lab 3.1)
+
+### DEC-132 The client starts the server with an explicit workspace
+- Date: 2026-11-16 · Area: MCP client (Lab 3.1) · Status: accepted
+- Basis: Preferred
+- Context: with stdio the client starts the server as a child process. The
+  1.x SDK passes the child only a small set of variables (`HOME`, `PATH`,
+  ...), not the whole environment.
+- Decision: the client starts `[sys.executable, "-m", "tools.mcp_server"]`
+  with `cwd` at the repo root and `WORKSPACE_DIR` set explicitly in `env`
+  to the client's workspace. The server still runs `load_dotenv()` through
+  `tools.handlers`, so the API key is in its process; it never calls the
+  LLM or runs code, and never returns or logs environment values.
+- Why: the server always serves the same root the caller sees, and tests
+  can point it at a temporary folder instead of the real `workspace/`.
+- Alternatives: let the server read `WORKSPACE_DIR` from `.env` (tests
+  could not isolate it and would read the real `workspace/`).
+- Code: — (Lab 3.1)
+
+### DEC-133 MCP tests run the real server: in memory, plus one stdio test
+- Date: 2026-11-16 · Area: Tests (Lab 3.1) · Status: accepted
+- Basis: Required (C4.7 and the C2.x notes: tests check behaviour, not
+  fixed objects); the split — Preferred
+- Context: the lab tests the client with `MagicMock` sessions, which pass
+  even if the server has no handler or a wrong schema. The SDK's
+  `create_connected_server_and_client_session` connects a real
+  `ClientSession` to our server inside the test process.
+- Decision: almost every server and client test goes through the full MCP
+  protocol against the real server in memory (no subprocess, no network).
+  One test starts the server over stdio as a separate process and checks
+  that the call works and that the server's stderr log shows a PID other
+  than the test's. No test mocks the session.
+- Why: the in-memory tests are as fast as mocks and catch server bugs; the
+  stdio test is the only proof that the call crosses a process boundary
+  (lab criterion; C3.5 evidence if MCP is chosen) and costs 1-2 s.
+- Alternatives: mocks only, as in the lab (prove nothing about the
+  server); no stdio test and a `manual` check of the PID (depends on
+  someone looking).
+- Code: — (Lab 3.1)
+
+### DEC-134 Async tests use pytest-asyncio in auto mode
+- Date: 2026-11-16 · Area: Tests (Lab 3.1) · Status: accepted
+- Basis: Preferred
+- Context: the MCP APIs are async, so tests need a plugin that runs
+  coroutines. No test in the repo was async before Lab 3.1.
+- Decision: `pytest-asyncio` with `asyncio_mode = auto` in `pytest.ini`.
+- Why: it is what the lab uses and `async def test_...` needs no marker;
+  auto mode changes nothing for the existing synchronous tests.
+- Alternatives: the `anyio` plugin that ships with `mcp` (no new
+  dependency, but a marker and an `anyio_backend` fixture on every test).
+- Code: — (Lab 3.1)

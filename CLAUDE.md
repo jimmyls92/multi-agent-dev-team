@@ -73,7 +73,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 - Framework: **LangGraph** desde el Módulo 1 (DEC-068, sustituye a DEC-047); el Coder usa `create_agent` de LangChain con tool calling nativo y middleware (DEC-069). Documentarlo en el README. Si se cambia de framework, justificarlo (C2.6).
 - LLM: la guía permite GPT-4o, Claude Sonnet u Ollama. Si se usa un equivalente, por ejemplo vía OpenRouter, indicarlo en el README.
 - Patrón del agente: **ReACT** (lo exige la guía).
-- Protocolo del Módulo 3: **pendiente** (MCP con el SDK oficial de Python, **o** A2A con `sender`, `receiver`, `intent`, `payload`, `correlation_id` y validación de intent).
+- Protocolo del Módulo 3: **pendiente hasta el Lab 3.3** (DEC-123; MCP con el SDK oficial de Python, **o** A2A con `sender`, `receiver`, `intent`, `payload`, `correlation_id` y validación de intent).
 
 ## Notas del repo
 
@@ -86,7 +86,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Spec activo: ninguno. Rama: `week-3`. Siguiente paso: empezar el Módulo 3 (añadir su guía como Part A3 en `docs/course_reference.txt`, revisar las decisiones `Provisional` que apunten a él y elegir el protocolo MCP o A2A).
+Spec activo: Lab 3.1 (servidor MCP), `docs/specs/lab_3_1_mcp_server.md` aprobado. Producto (DEC-122..DEC-127) y técnico (DEC-128..DEC-134) cerrados; siguiente: mapa de T1. Rama: `week-3`. Material en `Multi-Agent-lab-3-1/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
 
 Módulo 2: cerrado y subido (C2.1–C2.6), `master` = `week-2`. PM Agent (Lab 2.1, `docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096), Coder node (Lab 2.2, `docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109) y pipeline PM → Coder (Lab 2.3, `docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-121).
 
@@ -107,6 +107,7 @@ Otros:
 
 ## Notas técnicas de LangChain/LangGraph
 
+- Protocolo evaluado (C3.5): se elige al empezar el Lab 3.3 (DEC-123). Si es MCP, spec propio para que el Coder sea cliente MCP antes de cerrar el Módulo 3.
 Versiones probadas: langchain 1.4.9, langgraph 1.2.20, langchain-openai 1.7.4, langchain-core 1.7.6.
 - `from langchain.agents import create_agent` (`create_react_agent` está deprecado). Middleware en `langchain.agents.middleware` (`after_model`, `wrap_model_call`, `wrap_tool_call`, `ModelCallLimitMiddleware`); `ToolStrategy` en `langchain.agents.structured_output`.
 - Los `after_model` se ejecutan en orden inverso de la lista; el límite cuenta en su `after_model`, por eso va el último (DEC-079). Al llegar al límite termina sin excepción, sin `structured_response`, y añade un `AIMessage` "Model call limits exceeded: run limit (10/10)".
