@@ -90,7 +90,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Spec activo: Lab 3.1 (servidor MCP), `docs/specs/lab_3_1_mcp_server.md` aprobado. Producto (DEC-122..DEC-127) y técnico (DEC-128..DEC-134) cerrados; siguiente: mapa de T1. Rama: `week-3`. Material en `Multi-Agent-lab-3-1/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
+Spec activo: Lab 3.1 (servidor MCP), `docs/specs/lab_3_1_mcp_server.md` aprobado. Producto (DEC-122..DEC-127) y técnico (DEC-128..DEC-134) cerrados; T1 hecha, siguiente: mapa de T2. Rama: `week-3`. Material en `Multi-Agent-lab-3-1/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
 
 Módulo 2: cerrado y subido (C2.1–C2.6), `master` = `week-2`. PM Agent (Lab 2.1, `docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096), Coder node (Lab 2.2, `docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109) y pipeline PM → Coder (Lab 2.3, `docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-121).
 
@@ -106,6 +106,7 @@ Tests aplazados por decisión del usuario (como tarde en C4.7; proponer y aproba
 - **Coder** (modelo falso): (a) **prioritario**, un modelo que solo da texto para en 10 con `max_iterations` (fija el orden de DEC-079); (b) uno que llama a tools sin terminar para en 10; (c) argumentos inválidos no ejecutan la tool (DEC-076); (d) `CoderResult` desde mensajes inventados (DEC-078).
 
 Otros:
+- README del Lab 3.1 (T4 de `docs/specs/lab_3_1_mcp_server.md`): aplazado por decisión del usuario hasta justo antes de la entrega del Módulo 3.
 - Mejoras de memoria IMP-001..IMP-005 en `idea`. "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
 - Protocolo evaluado (C3.5): se elige al empezar el Lab 3.3 (DEC-123). Si es MCP, spec propio para que el Coder sea cliente MCP antes de cerrar el Módulo 3.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?

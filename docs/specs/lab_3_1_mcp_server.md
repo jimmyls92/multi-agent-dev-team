@@ -257,8 +257,11 @@ so no earlier criterion regresses.
 - **Map:** to approve before writing code. `tools/mcp_client.py` with the
   lab's three functions, `connect_and_run` and the `__main__` demo.
 
-### T4 — README · todo
+### T4 — README · todo (deferred)
 
+- **Deferred:** written just before the Module 3 delivery, together with
+  the rest of the module's documentation; it does not block closing the
+  spec.
 - **Covers:** documentation of what Lab 3.1 adds — `manual`
 - **Map:** to approve before writing. MCP server section: what it exposes,
   safety rules, how to run the demo and the tests, where the server log
