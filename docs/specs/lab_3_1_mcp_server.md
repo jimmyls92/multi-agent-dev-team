@@ -251,7 +251,7 @@ so no earlier criterion regresses.
 - **Map:** to approve before writing code. `_is_exposed` shared by
   `read_file` and the listing, relative error messages, the resource.
 
-### T3 — Client, stdio test and demo · todo
+### T3 — Client, stdio test and demo · done
 
 - **Covers:** AC-3.1-15, AC-3.1-16, AC-3.1-17
 - **Map:** to approve before writing code. `tools/mcp_client.py` with the

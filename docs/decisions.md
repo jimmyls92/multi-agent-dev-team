@@ -2593,7 +2593,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: a new `protocols/` package (an extra folder the guide does
   not ask for); files at the root as in the lab (breaks the layout and
   needs `sys.path` hacks).
-- Code: `tools/mcp_server.py`
+- Code: `tools/mcp_server.py`, `tools/mcp_client.py`
 
 ### DEC-129 The MCP SDK is pinned to the 1.x line
 - Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
@@ -2667,7 +2667,7 @@ A decision can mix bases; then each part states its own.
   can point it at a temporary folder instead of the real `workspace/`.
 - Alternatives: let the server read `WORKSPACE_DIR` from `.env` (tests
   could not isolate it and would read the real `workspace/`).
-- Code: — (Lab 3.1)
+- Code: `tools/mcp_client.py` (`_server_parameters`, `connect_and_run`)
 
 ### DEC-133 MCP tests run the real server: in memory, plus one stdio test
 - Date: 2026-11-16 · Area: Tests (Lab 3.1) · Status: accepted
@@ -2688,7 +2688,8 @@ A decision can mix bases; then each part states its own.
 - Alternatives: mocks only, as in the lab (prove nothing about the
   server); no stdio test and a `manual` check of the PID (depends on
   someone looking).
-- Code: `tests/conftest.py` (`mcp_session`), `tests/test_mcp_server.py`
+- Code: `tests/conftest.py` (`mcp_session`), `tests/test_mcp_server.py`,
+  `tests/test_mcp_client.py`
 
 ### DEC-134 Async tests use pytest-asyncio in auto mode
 - Date: 2026-11-16 · Area: Tests (Lab 3.1) · Status: accepted
