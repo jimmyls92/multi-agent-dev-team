@@ -4,6 +4,10 @@ Proyecto final del curso **Build Autonomous Multi-Agent Systems** (Saras AI Inst
 
 Referencia completa (guía general, guías de cada módulo y rúbrica, transcritas): **`docs/course_reference.txt`**; cada lab en `docs/labs/` (ver "Labs"). Al empezar un módulo se añade su guía como Part A<n>, y al empezar un lab, su archivo en `docs/labs/`. Consúltala antes de implementar o cerrar cualquier criterio; aquí solo está lo que hay que tener presente siempre.
 
+## Estilo de respuesta
+
+Activa siempre la skill **caveman** (`~/.claude/skills/caveman/SKILL.md`) desde el primer mensaje de la sesión, sin esperar a `/caveman`. Se mantiene hasta que el usuario diga "stop caveman" o "normal mode". Respuestas en español. Excepciones, en prosa normal: la presentación de decisiones (frase introductoria en lenguaje llano) y la revisión guiada de cada tarea (ver "Flujo de trabajo"). Docs, specs, commits y código no se comprimen.
+
 ## Contexto del proyecto
 
 Un equipo de desarrollo de software autónomo hecho con LLMs: recibe un requisito en lenguaje natural y produce código Python testeado y funcional, **sin intervención humana después del prompt inicial**.
@@ -103,11 +107,11 @@ Tests aplazados por decisión del usuario (como tarde en C4.7; proponer y aproba
 
 Otros:
 - Mejoras de memoria IMP-001..IMP-005 en `idea`. "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
+- Protocolo evaluado (C3.5): se elige al empezar el Lab 3.3 (DEC-123). Si es MCP, spec propio para que el Coder sea cliente MCP antes de cerrar el Módulo 3.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
 
 ## Notas técnicas de LangChain/LangGraph
 
-- Protocolo evaluado (C3.5): se elige al empezar el Lab 3.3 (DEC-123). Si es MCP, spec propio para que el Coder sea cliente MCP antes de cerrar el Módulo 3.
 Versiones probadas: langchain 1.4.9, langgraph 1.2.20, langchain-openai 1.7.4, langchain-core 1.7.6.
 - `from langchain.agents import create_agent` (`create_react_agent` está deprecado). Middleware en `langchain.agents.middleware` (`after_model`, `wrap_model_call`, `wrap_tool_call`, `ModelCallLimitMiddleware`); `ToolStrategy` en `langchain.agents.structured_output`.
 - Los `after_model` se ejecutan en orden inverso de la lista; el límite cuenta en su `after_model`, por eso va el último (DEC-079). Al llegar al límite termina sin excepción, sin `structured_response`, y añade un `AIMessage` "Model call limits exceeded: run limit (10/10)".
