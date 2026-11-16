@@ -19,11 +19,13 @@ import argparse
 import asyncio
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, TextIO
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.shared.exceptions import McpError
 from pydantic import AnyUrl
 
 from . import handlers
@@ -86,6 +88,24 @@ async def read_listing(session: ClientSession) -> list[str]:
     return result.contents[0].text.splitlines()
 
 
+def _timeout() -> float:
+    """Returns how many seconds the client waits for each answer (DEC-135).
+
+    Read at call time from the ``MCP_TIMEOUT`` environment variable, so a
+    test or the evaluator can change it without reloading the module.
+
+    Returns:
+        The timeout in seconds; 30 when the variable is not set.
+
+    Raises:
+        ValueError: If the value is not a number or is not greater than 0.
+    """
+    timeout = float(os.getenv("MCP_TIMEOUT", "30"))
+    if timeout <= 0:
+        raise ValueError(f"MCP_TIMEOUT must be greater than 0, got {timeout}")
+    return timeout
+
+
 def _server_parameters(workspace: Path) -> StdioServerParameters:
     """Returns how to start the server as a child process (DEC-132).
 
@@ -104,6 +124,21 @@ def _server_parameters(workspace: Path) -> StdioServerParameters:
         env={"WORKSPACE_DIR": str(workspace)},
         cwd=_REPO_ROOT,
     )
+
+
+def _first_error(group: BaseExceptionGroup) -> BaseException:
+    """Returns the first error inside a (possibly nested) exception group.
+
+    Args:
+        group: The group raised by the SDK's task groups.
+
+    Returns:
+        The first exception that is not itself a group.
+    """
+    error: BaseException = group
+    while isinstance(error, BaseExceptionGroup):
+        error = error.exceptions[0]
+    return error
 
 
 async def connect_and_run(
@@ -126,17 +161,30 @@ async def connect_and_run(
         pairs), ``"listing"`` (workspace files), ``"filename"`` (the file
         read, or None if the workspace is empty) and ``"file_content"`` (its
         content or ``ERROR:`` text; None if no file was read).
+
+    Raises:
+        McpError: If the server does not answer within ``MCP_TIMEOUT``
+            seconds or closes the connection (DEC-135).
+        OSError: If the server process cannot be started.
+        ValueError: If ``MCP_TIMEOUT`` is invalid.
     """
     parameters = _server_parameters(workspace or handlers.WORKSPACE_DIR)
-    async with stdio_client(parameters, errlog=errlog) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            tools = await list_available_tools(session)
-            resources = await list_available_resources(session)
-            listing = await read_listing(session)
-            if filename is None and listing:
-                filename = listing[0]
-            content = await call_read_file(session, filename) if filename else None
+    try:
+        async with stdio_client(parameters, errlog=errlog) as (read, write):
+            # DEC-135: a dead or stalled server raises instead of hanging.
+            async with ClientSession(
+                read, write, read_timeout_seconds=timedelta(seconds=_timeout())
+            ) as session:
+                await session.initialize()
+                tools = await list_available_tools(session)
+                resources = await list_available_resources(session)
+                listing = await read_listing(session)
+                if filename is None and listing:
+                    filename = listing[0]
+                content = await call_read_file(session, filename) if filename else None
+    except ExceptionGroup as group:
+        # The SDK's task groups wrap the error; callers get the error itself.
+        raise _first_error(group) from group
     return {
         "tools": tools,
         "resources": resources,
@@ -153,7 +201,9 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments; None reads ``sys.argv``.
 
     Returns:
-        The exit code, 0 also when the file cannot be read.
+        The exit code: 0 when the server answered, also with an ``ERROR:``
+        text for the file; 1 when the client could not talk to the server
+        (DEC-135).
     """
     parser = argparse.ArgumentParser(
         prog="python -m tools.mcp_client",
@@ -166,7 +216,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # DEC-127: compare with the server's "pid=" lines on stderr.
     print(f"Client pid={os.getpid()} (the server logs its own pid on stderr)\n")
-    results = asyncio.run(connect_and_run(args.path))
+    try:
+        results = asyncio.run(connect_and_run(args.path))
+    except (McpError, OSError) as e:
+        # DEC-135: failing to reach the server is a system failure (exit 1);
+        # an ERROR: answer from the server is not.
+        print(f"ERROR: could not talk to the MCP server: {e}", file=sys.stderr)
+        return 1
 
     print("=== Tools ===")
     for name in results["tools"]:

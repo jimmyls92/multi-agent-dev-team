@@ -13,15 +13,17 @@ The tool reuses the local safety pieces: the lab's JSON Schema, the strict
 ``ReadFileArgs`` model with workspace confinement and ``file_io.read_file``
 with its ``READ_MAX_CHARS`` cap (DEC-126, DEC-131). Handlers never raise:
 every failure is a ``CallToolResult`` with ``isError=True`` and text that
-starts with ``ERROR:`` and uses paths relative to the workspace.
+starts with ``ERROR:`` and names the path as the client sent it, never the
+server's absolute path (DEC-131, DEC-136).
 
 An unknown resource URI is answered with an MCP error (``McpError`` on
 the client); the server keeps serving.
 
 Each request is logged once to the ``tools.mcp_server`` logger; rejected
-ones at WARNING. File contents are never logged. Run as a process, the log
-goes to stderr with the server's PID, because stdout carries the protocol
-(DEC-127).
+ones at WARNING. Client values are logged with ``%r`` so they cannot add
+lines, and file contents are never logged. Run as a process, the log goes
+to stderr with the server's PID, because stdout carries the protocol
+(DEC-127, DEC-136).
 
 Attributes:
     server: The MCP server instance.
@@ -77,20 +79,6 @@ LISTING_RESOURCE = types.Resource(
 _RESOURCE_NOT_FOUND = -32002
 
 
-def _requested(raw: str) -> Path:
-    """Returns the absolute path a client asked for, without following symlinks.
-
-    Args:
-        raw: Path sent by the client, already validated as a string.
-
-    Returns:
-        The path joined to ``handlers.WORKSPACE_DIR`` (an absolute ``raw``
-        stays as is) and normalised, so ``"pkg/../a.py"`` becomes
-        ``<workspace>/a.py``.
-    """
-    return Path(os.path.normpath(handlers.WORKSPACE_DIR / raw))
-
-
 def _relative(path: Path) -> str:
     """Returns a workspace path as a POSIX path relative to the workspace.
 
@@ -110,41 +98,65 @@ def _is_hidden(name: str) -> bool:
         name: One component of a path, such as ``".git"`` or ``"util.py"``.
 
     Returns:
-        True for hidden entries (starting with ``"."``) and ``__pycache__``.
+        True for hidden entries (starting with ``"."``) and ``__pycache__``
+        in any letter case (DEC-136: the workspace may be on a
+        case-insensitive file system).
     """
-    return name.startswith(".") or name == "__pycache__"
+    return name.startswith(".") or name.lower() == "__pycache__"
+
+
+def _is_servable_name(name: str) -> bool:
+    """Returns whether a file name can be sent to a client and asked back (DEC-136).
+
+    Args:
+        name: One component of a path, as returned by ``os.walk``.
+
+    Returns:
+        False for names that are not valid UTF-8 (they cannot be encoded in
+        the protocol's JSON) or that contain a line break (they would split
+        a line of the listing).
+    """
+    if "\n" in name or "\r" in name:
+        return False
+    try:
+        name.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _is_exposed(path: Path) -> bool:
-    """Returns whether the server may list or read a workspace path (DEC-131).
+    """Returns whether the server may list or read a workspace path (DEC-131, DEC-136).
 
-    Both the path as named and its symlink-resolved target are checked, so a
-    hidden name pointing to a visible file and a visible name pointing to a
-    hidden file are both refused.
+    Two paths are checked: the path as named (``.`` and ``..`` ignored),
+    and the file it really leads to once symlinks and ``..`` are resolved,
+    the same file a read opens. So a hidden name pointing to a visible file,
+    a visible name pointing to a hidden file and ``d/../config`` with
+    ``d -> .git/hooks`` are all refused.
 
     Args:
-        path: Absolute, normalised path inside ``handlers.WORKSPACE_DIR``,
-            symlinks not resolved.
+        path: Absolute path to check, as named: the workspace joined with
+            the client's path, or a path found by walking the workspace.
 
     Returns:
-        True if no component of either path is hidden and the resolved
-        target is inside the workspace.
+        True if the named path is lexically inside the workspace, the real
+        file is inside it too, and no component of either is hidden.
     """
     root = handlers.WORKSPACE_DIR
     target = path.resolve()
-    if not target.is_relative_to(root):
+    if not path.is_relative_to(root) or not target.is_relative_to(root):
         return False
-    for candidate in (path.relative_to(root), target.relative_to(root)):
-        if any(_is_hidden(part) for part in candidate.parts):
-            return False
-    return True
+    named = [part for part in path.relative_to(root).parts if part not in (".", "..")]
+    real = target.relative_to(root).parts
+    return not any(_is_hidden(part) for part in [*named, *real])
 
 
 def _list_files() -> list[str]:
     """Returns every exposed file in the workspace (DEC-125).
 
     Hidden folders and ``__pycache__`` are skipped without walking into
-    them. Symlinked folders are not followed.
+    them. Symlinked folders are not followed. Names that cannot be sent to
+    a client are skipped (DEC-136).
 
     Returns:
         Relative POSIX paths, sorted; empty if the workspace is empty or
@@ -153,10 +165,13 @@ def _list_files() -> list[str]:
     root = handlers.WORKSPACE_DIR
     files = []
     for folder, subfolders, names in os.walk(root):
-        subfolders[:] = [name for name in subfolders if not _is_hidden(name)]
+        subfolders[:] = [
+            name for name in subfolders
+            if not _is_hidden(name) and _is_servable_name(name)
+        ]
         for name in names:
             path = Path(folder) / name
-            if path.is_file() and _is_exposed(path):
+            if _is_servable_name(name) and path.is_file() and _is_exposed(path):
                 files.append(_relative(path))
     return sorted(files)
 
@@ -180,12 +195,13 @@ def _reject(message: str) -> types.CallToolResult:
     """Logs a rejected ``read_file`` call at WARNING and returns its error.
 
     Args:
-        message: Reason for the rejection; never holds file contents.
+        message: Reason for the rejection; never holds file contents. It may
+            hold client values, so it is logged with ``%r`` (DEC-136).
 
     Returns:
         The error result for the client.
     """
-    logger.warning("read_file rejected: %s", message)
+    logger.warning("read_file rejected: %r", message)
     return _error(message)
 
 
@@ -199,7 +215,8 @@ def _read_file(arguments: dict) -> types.CallToolResult:
         A result with the file content (cut at ``READ_MAX_CHARS``), or an
         error result for invalid arguments, paths outside the workspace,
         hidden or ``__pycache__`` paths, missing files, folders and files
-        that cannot be read; errors name the path relative to the workspace.
+        that cannot be read; errors name the path as the client sent it,
+        never the server's absolute path for a relative request.
     """
     try:
         # DEC-126, DEC-130: the strict model is the only validator.
@@ -208,28 +225,29 @@ def _read_file(arguments: dict) -> types.CallToolResult:
         except ValidationError as e:
             return _reject(f"invalid arguments for read_file: {_describe(e)}")
 
-        requested = _requested(arguments["path"])
-        relative = _relative(requested)
-        # DEC-126, DEC-131: what the listing hides cannot be read either.
-        if not _is_exposed(requested):
+        raw = arguments["path"]
+        # DEC-126, DEC-136: what the listing hides cannot be read either;
+        # the check looks at the name and at the file really read.
+        if not _is_exposed(handlers.WORKSPACE_DIR / raw):
             return _reject(
-                f"{relative}: not served (hidden entries and __pycache__ are excluded)"
+                f"{raw}: not served (hidden entries and __pycache__ are excluded)"
             )
-        # DEC-131: checked here so the error names the relative path, not the
-        # absolute one that file_io.read_file would report.
+        # DEC-131, DEC-136: checked here so the error names the path as the
+        # client sent it, not the absolute one file_io.read_file would report.
         target = Path(args.path)
         if not target.exists():
-            return _reject(f"{relative}: no such file")
+            return _reject(f"{raw}: no such file")
         if not target.is_file():
-            return _reject(f"{relative}: not a file")
+            return _reject(f"{raw}: not a file")
 
         content = file_io.read_file(args.path)
         # DEC-131: file_io reports residual errors (permissions, not UTF-8) as
-        # text with the absolute path; rewritten with the relative one.
+        # text with the absolute path; rewritten with the client's path.
         failure_prefix = f"Error reading file '{args.path}': "
         if content.startswith(failure_prefix):
-            return _reject(f"{relative}: {content.removeprefix(failure_prefix)}")
-        logger.info("read_file %s: %d chars", relative, len(content))
+            return _reject(f"{raw}: {content.removeprefix(failure_prefix)}")
+        # DEC-136: the success line names the file really read.
+        logger.info("read_file %r: %d chars", _relative(target), len(content))
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=content)],
             isError=False,
@@ -261,7 +279,7 @@ async def call_tool(name: str, arguments: dict) -> types.CallToolResult:
         The tool's result, or an error result for an unknown tool.
     """
     if name != READ_FILE_TOOL.name:
-        logger.warning("unknown tool rejected: %s", name)
+        logger.warning("unknown tool rejected: %r", name)
         return _error(f"unknown tool '{name}'; available tools: {READ_FILE_TOOL.name}")
     return _read_file(arguments)
 
@@ -291,7 +309,7 @@ async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
             receives an MCP error response and the server keeps serving.
     """
     if str(uri) != str(LISTING_RESOURCE.uri):
-        logger.warning("unknown resource rejected: %s", uri)
+        logger.warning("unknown resource rejected: %r", str(uri))
         raise McpError(
             types.ErrorData(code=_RESOURCE_NOT_FOUND, message=f"unknown resource: {uri}")
         )

@@ -111,16 +111,19 @@ async def test_ac_3_1_6_rejects_hidden_and_pycache(mcp_session, workspace):
         ".git/config": "SECRET-GIT-71a0",
         "__pycache__/m.pyc": "SECRET-PYC-71a0",
         "pkg/__pycache__/n.pyc": "SECRET-PKG-PYC-71a0",
+        "__PyCache__/z.txt": "SECRET-CASE-71a0",
     }
     for relative, content in files.items():
         (workspace / relative).parent.mkdir(parents=True, exist_ok=True)
         (workspace / relative).write_text(content)
+    (workspace / ".git" / "hooks").mkdir()
     paths = list(files)
     try:
         os.symlink(workspace / ".env", workspace / "notes.txt")
-        paths.append("notes.txt")
+        os.symlink(workspace / ".git" / "hooks", workspace / "d")
+        paths += ["notes.txt", "d/../config"]
     except OSError:
-        pass  # symlinks cannot be created here; that case is skipped
+        pass  # symlinks cannot be created here; those cases are skipped
 
     for path in paths:
         result = await mcp_session.call_tool("read_file", {"path": path})
@@ -216,6 +219,26 @@ async def test_ac_3_1_13_unknown_resource(mcp_session, workspace):
 
     assert result.isError is False
     assert _text(result) == "x = 1\n"
+
+
+async def test_ac_3_1_18_listing_skips_unservable_names(mcp_session, workspace):
+    (workspace / "a.py").write_text("x = 1\n")
+    (workspace / os.fsdecode(b"bad\xffname.py")).write_text("x = 2\n")
+    (workspace / "line\nbreak.py").write_text("x = 3\n")
+
+    assert await _listing(mcp_session) == "a.py"
+
+
+async def test_ac_3_1_20_log_lines_cannot_be_forged(mcp_session, workspace, caplog):
+    with caplog.at_level(logging.INFO, logger="tools.mcp_server"):
+        result = await mcp_session.call_tool(
+            "read_file", {"path": "a.py\n[mcp-server pid=1] INFO forged"}
+        )
+
+    records = [r for r in caplog.records if r.name == "tools.mcp_server"]
+    assert result.isError is True
+    assert records
+    assert all("\n" not in r.getMessage() for r in records)
 
 
 async def test_ac_3_1_14_logs_requests(mcp_session, workspace, caplog):

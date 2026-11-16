@@ -7,9 +7,13 @@ separate process, the only proof that a call crosses a process boundary.
 
 import os
 import re
+import sys
 
 import pytest
+from mcp import StdioServerParameters
+from mcp.shared.exceptions import McpError
 
+import tools.mcp_client
 from tools.mcp_client import (
     call_read_file,
     connect_and_run,
@@ -48,6 +52,7 @@ async def test_read_listing_of_empty_workspace(mcp_session, workspace):
 async def test_ac_3_1_16_stdio_process_boundary(workspace, tmp_path):
     marker = "STDIO-MARKER-5b8c"
     (workspace / "a.py").write_text(marker)
+    (workspace / os.fsdecode(b"bad\xffname.py")).write_text("x = 2\n")
     log_path = tmp_path / "server.log"
 
     with log_path.open("w") as errlog:
@@ -60,7 +65,7 @@ async def test_ac_3_1_16_stdio_process_boundary(workspace, tmp_path):
 
     lines = log_path.read_text().splitlines()
     start = [line for line in lines if "started" in line and str(workspace) in line]
-    reads = [line for line in lines if "read_file a.py" in line]
+    reads = [line for line in lines if "read_file 'a.py'" in line]
     assert len(start) == 1
     assert len(reads) == 1
     for line in start + reads:
@@ -68,3 +73,16 @@ async def test_ac_3_1_16_stdio_process_boundary(workspace, tmp_path):
         assert match, line
         assert int(match.group(1)) != os.getpid()
     assert marker not in log_path.read_text()
+
+
+@pytest.mark.timeout(30)
+async def test_ac_3_1_19_client_times_out(workspace, tmp_path, monkeypatch):
+    silent = StdioServerParameters(
+        command=sys.executable, args=["-c", "import time; time.sleep(60)"]
+    )
+    monkeypatch.setattr(tools.mcp_client, "_server_parameters", lambda workspace: silent)
+    monkeypatch.setenv("MCP_TIMEOUT", "1")
+
+    with (tmp_path / "server.log").open("w") as errlog:
+        with pytest.raises(McpError, match="Timed out"):
+            await connect_and_run("a.py", workspace=workspace, errlog=errlog)

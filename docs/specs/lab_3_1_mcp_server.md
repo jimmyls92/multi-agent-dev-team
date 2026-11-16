@@ -95,11 +95,13 @@ the network.
 
 #### AC-3.1-6 — Hidden entries and `__pycache__` are never readable
 
-- **Origin:** ours, DEC-126, DEC-131
+- **Origin:** ours, DEC-126, DEC-131, DEC-136
 - **Verify:** integration — `test_ac_3_1_6_rejects_hidden_and_pycache`
 - **Given** a workspace with `.env`, `.git/config`, `__pycache__/m.pyc`,
-  `pkg/__pycache__/n.pyc` and a symlink `notes.txt` pointing to `.env`
-  (the symlink case is skipped where symlinks cannot be created)
+  `pkg/__pycache__/n.pyc`, `__PyCache__/z.txt`, a symlink `notes.txt`
+  pointing to `.env` and a symlink `d` pointing to `.git/hooks`, requested
+  as `d/../config` (the symlink cases are skipped where symlinks cannot be
+  created)
 - **When** the client calls `read_file` with each of those paths
 - **Then** each result has `isError=True`, text starting with `ERROR:`, and
   none contains the content of the target file
@@ -179,7 +181,7 @@ the network.
 
 #### AC-3.1-14 — Each request is logged once, rejected ones at WARNING, never the contents
 
-- **Origin:** lab, DEC-127
+- **Origin:** lab, DEC-127, DEC-136
 - **Verify:** integration — `test_ac_3_1_14_logs_requests`
 - **Given** a session in memory, `caplog` capturing the server's logger and
   a workspace file `a.py` whose content is a unique marker string
@@ -187,7 +189,26 @@ the network.
 - **Then** there is one INFO record for the `a.py` call with the path and
   the character count, one WARNING record for `../x` with the reason, one
   INFO record for the listing with the number of files; no record contains
-  the marker string
+  the marker string. Client-controlled values appear quoted (`%r`, DEC-136)
+
+#### AC-3.1-18 — The listing skips names that cannot be served
+
+- **Origin:** ours, C4.6, DEC-136
+- **Verify:** integration — `test_ac_3_1_18_listing_skips_unservable_names`
+- **Given** a workspace with `a.py`, a file whose name is not valid UTF-8
+  and a file whose name contains a line break
+- **When** the client reads `file://project/listing`
+- **Then** the text is exactly `a.py`
+
+#### AC-3.1-20 — Client values cannot add lines to the log
+
+- **Origin:** ours, DEC-127, DEC-136
+- **Verify:** integration — `test_ac_3_1_20_log_lines_cannot_be_forged`
+- **Given** a session in memory and `caplog` capturing the server's logger
+- **When** the client calls `read_file` with
+  `"a.py\n[mcp-server pid=1] INFO forged"`
+- **Then** the result is an error and every record of the call is a single
+  line (no line break in its message)
 
 ### Client
 
@@ -208,12 +229,22 @@ the network.
 - **Origin:** lab, C3.5 (if MCP is chosen), DEC-127, DEC-132, DEC-133
 - **Verify:** integration — `tests/test_mcp_client.py::test_ac_3_1_16_stdio_process_boundary`
 - **Given** a temporary workspace with `a.py` whose content is a unique
-  marker string, and a file that captures the server's stderr
+  marker string and a file whose name is not valid UTF-8 (DEC-136), and a
+  file that captures the server's stderr
 - **When** `connect_and_run("a.py", workspace=..., errlog=...)` runs
 - **Then** it returns `tools == ["read_file"]`, the listing resource and
   the content of `a.py`; the captured stderr has a start line with the
   workspace path and a `read_file` line for `a.py`, both carrying a PID
-  different from `os.getpid()`; the marker string is not in the stderr
+  different from `os.getpid()`; the marker string is not in the stderr;
+  the listing is `["a.py"]`
+
+#### AC-3.1-19 — The client never waits forever
+
+- **Origin:** ours, C4.6, DEC-135
+- **Verify:** integration — `tests/test_mcp_client.py::test_ac_3_1_19_client_times_out`
+- **Given** `MCP_TIMEOUT=1` and a server process that never answers
+- **When** `connect_and_run("a.py", ...)` runs
+- **Then** it raises an error within a few seconds instead of hanging
 
 #### AC-3.1-17 — The demo runs from the command line
 
@@ -267,7 +298,43 @@ so no earlier criterion regresses.
   safety rules, how to run the demo and the tests, where the server log
   goes; note that the protocol route is chosen in Lab 3.3 (DEC-123).
 
+### R1 — Fixes from the independent review · done
+
+- **Covers:** AC-3.1-6 (extended), AC-3.1-14 (quoted values),
+  AC-3.1-16 (extended), AC-3.1-18, AC-3.1-19, AC-3.1-20; findings 1, 2,
+  3, 4, 5 and 7 of the review below (DEC-135, DEC-136)
+- **Map:** approved. Server: `_is_exposed` checks the requested name and
+  the file really read, `_is_hidden` case-insensitive, new
+  `_is_servable_name` for the listing, `%r` for client values in the log.
+  Client: `_timeout` from `MCP_TIMEOUT`, timeout in `connect_and_run`,
+  demo exits 1 when it cannot reach the server. `.env.example` gets
+  `MCP_TIMEOUT`.
+
 ## Independent review
 
-- **Date:**
+- **Date:** 2026-11-16
 - **Findings and triage:**
+  1. High — a symlinked folder followed by `..` bypasses the exposure
+     rule: with `d -> .git/hooks`, `read_file("d/../config")` returns
+     `.git/config` (the check normalises `..` lexically, the read follows
+     the symlink first); the log names the wrong file. **Fix (R1).**
+  2. Medium — a file name that is not valid UTF-8 goes into the listing
+     and kills the stdio server when the reply is serialised; the client
+     then hangs. **Fix (R1).**
+  3. Medium — the client has no timeout: a dead or stalled server makes
+     `connect_and_run` wait forever. **Fix (R1).**
+  4. Low — client-controlled strings are logged raw, so a path with a
+     newline forges extra `[mcp-server pid=...]` lines. **Fix (R1).**
+  5. Low — a file name with a newline appears as two unreadable lines in
+     the listing. **Fix (R1).**
+  6. Low — symlink loops and over-long names give `read_file failed
+     (<Type>)` without the path; no crash, no leak. **Discarded:** rare
+     cases, already safe.
+  7. Low (suspected) — `__pycache__` is matched case-sensitively; on a
+     case-insensitive file system (the repo lives on NTFS under WSL)
+     `__PYCACHE__/...` reaches the real folder. **Fix (R1).**
+  8. Low — time-of-check/time-of-use gap between the exposure check and
+     the read. **Discarded:** needs an attacker racing inside the
+     workspace, outside the threat model.
+  - Outside this spec: `Dockerfile` and `docker-compose.yml` are empty
+    (C4.8, Module 4).

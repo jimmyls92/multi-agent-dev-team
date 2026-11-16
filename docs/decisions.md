@@ -2702,3 +2702,52 @@ A decision can mix bases; then each part states its own.
 - Alternatives: the `anyio` plugin that ships with `mcp` (no new
   dependency, but a marker and an `anyio_backend` fixture on every test).
 - Code: `pytest.ini`, `requirements.txt`
+
+### DEC-135 The MCP client waits at most `MCP_TIMEOUT` seconds per request
+- Date: 2026-11-16 · Area: MCP client (Lab 3.1, review R1) · Status: accepted
+- Basis: Required (C4.6: no hang or crash on failure; the evaluator forces
+  failures)
+- Context: the independent review of Lab 3.1 found that a dead or stalled
+  server makes `connect_and_run` wait forever (the SDK's `ClientSession`
+  has no read timeout by default).
+- Decision: every request of the client waits at most `MCP_TIMEOUT`
+  seconds (environment variable, default 30, must be > 0), then raises an
+  error. The demo exits with 0 when the server answers, also with an
+  `ERROR:` text, and with 1 when it cannot talk to the server.
+- Why: a request to a live server takes milliseconds and starting the
+  server under WSL takes 1-2 s, so 30 s never cuts a healthy call and
+  still ends a hung one. A rejected read is a normal answer; failing to
+  reach the server is a system failure, so only that gives exit code 1.
+- Alternatives: no timeout (hangs); a fixed value in code (the evaluator
+  and Docker cannot tune it).
+- Code: `tools/mcp_client.py` (`_timeout`, `connect_and_run`, `main`)
+
+### DEC-136 The MCP server checks the file it really reads and escapes client values in its log
+- Date: 2026-11-16 · Area: MCP server (Lab 3.1, review R1) · Status: accepted
+- Basis: Required (C1.3, C4.6); complements DEC-126, DEC-127, DEC-131
+- Context: the independent review of Lab 3.1 found that `_is_exposed`
+  normalised `..` lexically while the read follows symlinks first, so
+  `d/../config` with `d -> .git/hooks` read `.git/config`; that a file name
+  that is not UTF-8 killed the stdio server when the listing was
+  serialised; that a name with a newline broke the listing; that client
+  strings with newlines forged log lines; and that `__pycache__` was
+  matched case-sensitively although the repo lives on NTFS.
+- Decision: the exposure rule checks the requested name (ignoring `.` and
+  `..`) and the symlink-resolved file that is actually read, and matches
+  `__pycache__` case-insensitively. A requested absolute path that is not
+  lexically inside the workspace is not served. The listing skips names
+  that are not valid UTF-8 or contain a line break. Rejection messages
+  name the path as the client sent it; success lines name the file read,
+  relative to the workspace. Client-controlled values are written to the
+  log with `%r`, so they cannot add lines.
+- Why: the check and the read must look at the same file, or a symlink
+  opens a gap; names that cannot be sent or asked back must not be listed;
+  the log is the evidence of each call (DEC-127), so a client must not be
+  able to write into it. Naming the path as sent never reveals where a
+  symlink points.
+- Alternatives: reject any `..` component (simpler, but refuses harmless
+  paths like `pkg/../a.py` and still needs the real-target check for
+  symlinked folders); strip control characters instead of `%r` (loses
+  what the client really sent).
+- Code: `tools/mcp_server.py` (`_is_exposed`, `_is_hidden`,
+  `_is_servable_name`, `_read_file`, `_reject`)
