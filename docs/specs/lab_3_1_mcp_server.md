@@ -244,7 +244,7 @@ so no earlier criterion regresses.
   in-memory session fixture, `tools/mcp_server.py` with the server, the
   tool registration and `read_file`, and its stderr logging.
 
-### T2 — Exposure rules and the listing resource · todo
+### T2 — Exposure rules and the listing resource · done
 
 - **Covers:** AC-3.1-6, AC-3.1-8, AC-3.1-9, AC-3.1-10, AC-3.1-11,
   AC-3.1-12, AC-3.1-13, AC-3.1-14 (the listing record)

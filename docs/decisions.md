@@ -2537,7 +2537,7 @@ A decision can mix bases; then each part states its own.
   MCP client exists, DEC-123).
 - Revisit when: the MCP route is chosen in Lab 3.3 (the Coder client
   needs `write_file`).
-- Code: — (Lab 3.1)
+- Code: `tools/mcp_server.py` (`_list_files`, `read_resource`)
 
 ### DEC-126 The MCP server reuses the tool safety rules and hides what the listing hides
 - Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
@@ -2558,7 +2558,7 @@ A decision can mix bases; then each part states its own.
   set of rules for local tools and the server.
 - Alternatives: confinement only, as the local `read_file` (a stray `.env`
   in the workspace would be readable).
-- Code: `tools/mcp_server.py` (`_read_file`)
+- Code: `tools/mcp_server.py` (`_is_exposed`, `_read_file`)
 
 ### DEC-127 The MCP server logs one line per request to stderr
 - Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
@@ -2650,7 +2650,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: a separate reader in the server (duplicates the truncation
   of DEC-041); make `file_io` raise exceptions (cleaner, but changes Module
   1 code for no graded gain).
-- Code: `tools/mcp_server.py` (`_read_file`)
+- Code: `tools/mcp_server.py` (`_is_exposed`, `_read_file`, `_list_files`)
 
 ### DEC-132 The client starts the server with an explicit workspace
 - Date: 2026-11-16 · Area: MCP client (Lab 3.1) · Status: accepted

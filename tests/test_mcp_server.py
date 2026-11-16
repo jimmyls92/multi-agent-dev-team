@@ -6,9 +6,17 @@ the full MCP protocol: tool listing, argument passing and result encoding.
 """
 
 import logging
+import os
 from pathlib import Path
 
 import pytest
+from mcp.shared.exceptions import McpError
+from pydantic import AnyUrl
+
+import tools.handlers
+from tools import file_io
+
+LISTING = AnyUrl("file://project/listing")
 
 
 def _text(result) -> str:
@@ -23,6 +31,20 @@ def _text(result) -> str:
     assert len(result.content) == 1
     assert result.content[0].type == "text"
     return result.content[0].text
+
+
+async def _listing(session) -> str:
+    """Returns the text of the ``file://project/listing`` resource.
+
+    Args:
+        session: Client session connected to the server.
+
+    Returns:
+        The listing text.
+    """
+    result = await session.read_resource(LISTING)
+    assert len(result.contents) == 1
+    return result.contents[0].text
 
 
 async def test_ac_3_1_1_lists_read_file(mcp_session):
@@ -83,6 +105,55 @@ async def test_ac_3_1_5_missing_or_folder(mcp_session, workspace):
         assert path in _text(result)
 
 
+async def test_ac_3_1_6_rejects_hidden_and_pycache(mcp_session, workspace):
+    files = {
+        ".env": "SECRET-ENV-71a0",
+        ".git/config": "SECRET-GIT-71a0",
+        "__pycache__/m.pyc": "SECRET-PYC-71a0",
+        "pkg/__pycache__/n.pyc": "SECRET-PKG-PYC-71a0",
+    }
+    for relative, content in files.items():
+        (workspace / relative).parent.mkdir(parents=True, exist_ok=True)
+        (workspace / relative).write_text(content)
+    paths = list(files)
+    try:
+        os.symlink(workspace / ".env", workspace / "notes.txt")
+        paths.append("notes.txt")
+    except OSError:
+        pass  # symlinks cannot be created here; that case is skipped
+
+    for path in paths:
+        result = await mcp_session.call_tool("read_file", {"path": path})
+
+        assert result.isError is True, path
+        assert _text(result).startswith("ERROR:"), path
+        assert all(secret not in _text(result) for secret in files.values()), path
+
+
+async def test_ac_3_1_8_truncates_long_files(mcp_session, workspace, monkeypatch):
+    monkeypatch.setattr(file_io, "READ_MAX_CHARS", 10)
+    (workspace / "long.txt").write_text("abcdefghijklmnopqrstuvwxy")
+
+    result = await mcp_session.call_tool("read_file", {"path": "long.txt"})
+
+    assert result.isError is False
+    assert _text(result).startswith("abcdefghij")
+    assert "k" not in _text(result).split("\n")[0]
+    assert _text(result).endswith("[truncated: file is longer than 10 characters]")
+
+
+async def test_ac_3_1_9_errors_use_relative_paths(mcp_session, workspace):
+    (workspace / "bin.dat").write_bytes(b"\xff\xfe\x00\x81 not utf-8")
+
+    for path in ("bin.dat", "nope.py"):
+        result = await mcp_session.call_tool("read_file", {"path": path})
+
+        assert result.isError is True, path
+        assert _text(result).startswith("ERROR:"), path
+        assert path in _text(result)
+        assert str(workspace) not in _text(result)
+
+
 @pytest.mark.parametrize(
     ("arguments", "problem"),
     [
@@ -105,6 +176,48 @@ async def test_ac_3_1_7_invalid_arguments(mcp_session, workspace, arguments, pro
     assert _text(accepted) == "x = 1\n"
 
 
+async def test_ac_3_1_10_lists_resource(mcp_session):
+    listing = await mcp_session.list_resources()
+
+    assert len(listing.resources) == 1
+    assert str(listing.resources[0].uri) == "file://project/listing"
+    assert listing.resources[0].mimeType == "text/plain"
+
+
+async def test_ac_3_1_11_listing_content(mcp_session, workspace):
+    for relative in ("b.py", "a.py", "pkg/c.py", ".env", ".git/config",
+                     "__pycache__/m.pyc", "pkg/__pycache__/n.pyc"):
+        (workspace / relative).parent.mkdir(parents=True, exist_ok=True)
+        (workspace / relative).write_text(f"# {relative}\n")
+
+    text = await _listing(mcp_session)
+
+    assert text == "a.py\nb.py\npkg/c.py"
+    for line in text.splitlines():
+        result = await mcp_session.call_tool("read_file", {"path": line})
+        assert result.isError is False, line
+
+
+@pytest.mark.parametrize("create", [True, False], ids=["empty", "missing"])
+async def test_ac_3_1_12_empty_listing(mcp_session, create):
+    if create:
+        tools.handlers.WORKSPACE_DIR.mkdir(parents=True)
+    assert tools.handlers.WORKSPACE_DIR.exists() is create
+
+    assert await _listing(mcp_session) == ""
+
+
+async def test_ac_3_1_13_unknown_resource(mcp_session, workspace):
+    (workspace / "a.py").write_text("x = 1\n")
+
+    with pytest.raises(McpError):
+        await mcp_session.read_resource(AnyUrl("file://project/other"))
+    result = await mcp_session.call_tool("read_file", {"path": "a.py"})
+
+    assert result.isError is False
+    assert _text(result) == "x = 1\n"
+
+
 async def test_ac_3_1_14_logs_requests(mcp_session, workspace, caplog):
     marker = "UNIQUE-MARKER-9d2e"
     (workspace / "a.py").write_text(marker)
@@ -112,12 +225,17 @@ async def test_ac_3_1_14_logs_requests(mcp_session, workspace, caplog):
     with caplog.at_level(logging.INFO, logger="tools.mcp_server"):
         await mcp_session.call_tool("read_file", {"path": "a.py"})
         await mcp_session.call_tool("read_file", {"path": "../x"})
+        await _listing(mcp_session)
 
     records = [r for r in caplog.records if r.name == "tools.mcp_server"]
+    assert len(records) == 3
     infos = [r for r in records if r.levelno == logging.INFO and "a.py" in r.getMessage()]
     warnings = [r for r in records if r.levelno == logging.WARNING and "../x" in r.getMessage()]
     assert len(infos) == 1
     assert str(len(marker)) in infos[0].getMessage()
     assert len(warnings) == 1
     assert "outside the workspace" in warnings[0].getMessage()
+    listing = [r for r in records if r.levelno == logging.INFO and "listing" in r.getMessage()]
+    assert len(listing) == 1
+    assert "1 file" in listing[0].getMessage()
     assert all(marker not in r.getMessage() for r in records)
