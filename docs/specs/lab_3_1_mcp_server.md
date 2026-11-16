@@ -1,6 +1,6 @@
 # Spec: Lab 3.1 — MCP file server
 
-- **Status:** approved
+- **Status:** done (T4, the README, deferred to the Module 3 delivery)
 - **Sources:** lab handout `docs/labs/lab_3_1_mcp_server.md`, project guide
   (Module 3, `docs/course_reference.txt`, instruction 18), rubric C3.5,
   C1.3, C4.6, C4.7
