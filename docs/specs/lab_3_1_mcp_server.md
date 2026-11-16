@@ -235,7 +235,7 @@ Task status: todo | map | in progress | review | done
 Every task ends with the whole suite green (`.venv/bin/python -m pytest`),
 so no earlier criterion regresses.
 
-### T1 — Server with `read_file` over MCP · todo
+### T1 — Server with `read_file` over MCP · done
 
 - **Covers:** AC-3.1-1, AC-3.1-2, AC-3.1-3, AC-3.1-4, AC-3.1-5, AC-3.1-7,
   AC-3.1-14 (the `read_file` records)

@@ -2516,7 +2516,7 @@ A decision can mix bases; then each part states its own.
   the Coder becomes its client.
 - Alternatives: a `project_files/` folder as in the lab (no other component
   uses it; the code would have to be copied there).
-- Code: — (Lab 3.1)
+- Code: `tools/mcp_server.py` (`_relative`, `main`)
 
 ### DEC-125 The MCP server exposes `read_file` and a recursive listing
 - Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
@@ -2558,7 +2558,7 @@ A decision can mix bases; then each part states its own.
   set of rules for local tools and the server.
 - Alternatives: confinement only, as the local `read_file` (a stray `.env`
   in the workspace would be readable).
-- Code: — (Lab 3.1)
+- Code: `tools/mcp_server.py` (`_read_file`)
 
 ### DEC-127 The MCP server logs one line per request to stderr
 - Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
@@ -2575,7 +2575,7 @@ A decision can mix bases; then each part states its own.
   Not logging contents keeps secrets out of logs and traces (DEC-126).
 - Alternatives: also log returned contents (noisy, leaks what DEC-126
   hides); no server log (fails the lab and, on the MCP route, C3.5).
-- Code: — (Lab 3.1)
+- Code: `tools/mcp_server.py` (`_reject`, `_configure_logging`)
 
 ### DEC-128 The MCP server and client live in `tools/` and run as modules
 - Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
@@ -2593,7 +2593,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: a new `protocols/` package (an extra folder the guide does
   not ask for); files at the root as in the lab (breaks the layout and
   needs `sys.path` hacks).
-- Code: — (Lab 3.1)
+- Code: `tools/mcp_server.py`
 
 ### DEC-129 The MCP SDK is pinned to the 1.x line
 - Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
@@ -2608,7 +2608,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: 2.x (newer, API not checked against the labs).
 - Revisit when: the Coder becomes an MCP client (DEC-123) or 1.x stops
   receiving fixes.
-- Code: — (Lab 3.1)
+- Code: `requirements.txt`
 
 ### DEC-130 The MCP server uses the low-level `Server` and its own validation
 - Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
@@ -2627,7 +2627,7 @@ A decision can mix bases; then each part states its own.
   content by `isError` or the prefix, never by guessing.
 - Alternatives: `FastMCP` (the SDK decides validation and error text);
   keep the SDK's schema validation (two validators, two error formats).
-- Code: — (Lab 3.1)
+- Code: `tools/mcp_server.py` (`call_tool`, `_error`)
 
 ### DEC-131 The server's `read_file` reuses the local pieces and reports relative paths
 - Date: 2026-11-16 · Area: MCP server (Lab 3.1) · Status: accepted
@@ -2650,7 +2650,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: a separate reader in the server (duplicates the truncation
   of DEC-041); make `file_io` raise exceptions (cleaner, but changes Module
   1 code for no graded gain).
-- Code: — (Lab 3.1)
+- Code: `tools/mcp_server.py` (`_read_file`)
 
 ### DEC-132 The client starts the server with an explicit workspace
 - Date: 2026-11-16 · Area: MCP client (Lab 3.1) · Status: accepted
@@ -2688,7 +2688,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: mocks only, as in the lab (prove nothing about the
   server); no stdio test and a `manual` check of the PID (depends on
   someone looking).
-- Code: — (Lab 3.1)
+- Code: `tests/conftest.py` (`mcp_session`), `tests/test_mcp_server.py`
 
 ### DEC-134 Async tests use pytest-asyncio in auto mode
 - Date: 2026-11-16 · Area: Tests (Lab 3.1) · Status: accepted
@@ -2700,4 +2700,4 @@ A decision can mix bases; then each part states its own.
   auto mode changes nothing for the existing synchronous tests.
 - Alternatives: the `anyio` plugin that ships with `mcp` (no new
   dependency, but a marker and an `anyio_backend` fixture on every test).
-- Code: — (Lab 3.1)
+- Code: `pytest.ini`, `requirements.txt`

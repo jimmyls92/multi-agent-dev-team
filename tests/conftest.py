@@ -9,12 +9,17 @@ The ``isolated_run`` fixture gives the Coder a temporary workspace and an
 in-memory Chroma collection with a fake embedding, so tests never touch
 ``workspace/`` or ``.chroma/`` and need no network.
 
+The ``workspace`` and ``mcp_session`` fixtures give the MCP tests a real
+client session connected in memory to ``tools.mcp_server.server`` over a
+temporary workspace (DEC-133).
+
 Two safety nets apply to every test: the workspace always points to a
 temporary folder, so ``run()`` never archives the real ``workspace/``
 (DEC-114); and outside ``llm`` tests the PM and Coder cannot build a real
 model, so a test that forgets its fake fails instead of spending tokens.
 """
 
+import asyncio
 import hashlib
 import os
 import uuid
@@ -23,11 +28,13 @@ import chromadb
 import pytest
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from dotenv import load_dotenv
+from mcp.shared.memory import create_connected_server_and_client_session
 
 import agents.coder_agent
 import agents.pm_agent
 import memory
 import tools.handlers
+from tools.mcp_server import server
 
 
 def pytest_addoption(parser):
@@ -197,3 +204,44 @@ def isolated_run(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(memory, "_collection", collection)
     return workspace
+
+
+@pytest.fixture
+def workspace():
+    """Creates the temporary workspace set by ``_temporary_workspace``.
+
+    Returns:
+        The workspace directory, resolved and existing.
+    """
+    tools.handlers.WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    return tools.handlers.WORKSPACE_DIR
+
+
+@pytest.fixture
+async def mcp_session():
+    """Connects a real MCP client session to the server in memory (DEC-133).
+
+    The SDK's session uses an anyio cancel scope, which must be entered and
+    exited in the same task. Pytest-asyncio runs fixture setup and teardown
+    in different tasks, so the session lives in a task of its own that stays
+    open until the test ends.
+
+    Yields:
+        An initialised ``ClientSession`` talking to ``tools.mcp_server.server``.
+    """
+    opened: asyncio.Future = asyncio.get_running_loop().create_future()
+    finished = asyncio.Event()
+
+    async def hold_session() -> None:
+        """Opens the session, hands it to the fixture and waits for the test to end."""
+        async with create_connected_server_and_client_session(server) as session:
+            opened.set_result(session)
+            await finished.wait()
+
+    holder = asyncio.create_task(hold_session())
+    await asyncio.wait({holder, opened}, return_when=asyncio.FIRST_COMPLETED)
+    if not opened.done():
+        await holder  # the session failed to open: re-raise its error
+    yield opened.result()
+    finished.set()
+    await holder

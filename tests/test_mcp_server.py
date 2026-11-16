@@ -1,0 +1,123 @@
+"""Tests of the MCP file server (Lab 3.1, DEC-124..DEC-133).
+
+Every test talks to the real server through a real ``ClientSession``
+connected in memory (the ``mcp_session`` fixture), so each call goes through
+the full MCP protocol: tool listing, argument passing and result encoding.
+"""
+
+import logging
+from pathlib import Path
+
+import pytest
+
+
+def _text(result) -> str:
+    """Returns the text of a tool result that holds exactly one text block.
+
+    Args:
+        result: The ``CallToolResult`` returned by the client.
+
+    Returns:
+        The text of its only content block.
+    """
+    assert len(result.content) == 1
+    assert result.content[0].type == "text"
+    return result.content[0].text
+
+
+async def test_ac_3_1_1_lists_read_file(mcp_session):
+    listing = await mcp_session.list_tools()
+
+    assert [tool.name for tool in listing.tools] == ["read_file"]
+    schema = listing.tools[0].inputSchema
+    assert schema["type"] == "object"
+    assert schema["properties"]["path"]["type"] == "string"
+    assert schema["required"] == ["path"]
+    assert schema["additionalProperties"] is False
+
+
+async def test_ac_3_1_2_unknown_tool(mcp_session, workspace):
+    result = await mcp_session.call_tool("write_file", {"path": "a.py"})
+
+    assert result.isError is True
+    assert _text(result).startswith("ERROR:")
+    assert "write_file" in _text(result)
+    assert not (workspace / "a.py").exists()
+
+
+async def test_ac_3_1_3_reads_file(mcp_session, workspace):
+    content = "def add(a, b):\r\n    return a + b\n"
+    (workspace / "pkg").mkdir()
+    (workspace / "pkg" / "util.py").write_bytes(content.encode())
+
+    result = await mcp_session.call_tool("read_file", {"path": "pkg/util.py"})
+
+    assert result.isError is False
+    assert _text(result) == content
+
+
+async def test_ac_3_1_4_rejects_outside_paths(mcp_session, workspace):
+    secret = workspace.parent / "secret.txt"
+    secret.write_text("TOP-SECRET-4f1c")
+    passwd = Path("/etc/passwd")
+    passwd_head = passwd.read_text().splitlines()[0] if passwd.is_file() else None
+
+    for path in ("../secret.txt", str(secret), "/etc/passwd"):
+        result = await mcp_session.call_tool("read_file", {"path": path})
+
+        assert result.isError is True, path
+        assert _text(result).startswith("ERROR:"), path
+        assert "TOP-SECRET-4f1c" not in _text(result)
+        if passwd_head:
+            assert passwd_head not in _text(result)
+
+
+async def test_ac_3_1_5_missing_or_folder(mcp_session, workspace):
+    (workspace / "pkg").mkdir()
+
+    for path in ("nope.py", "pkg"):
+        result = await mcp_session.call_tool("read_file", {"path": path})
+
+        assert result.isError is True, path
+        assert _text(result).startswith("ERROR:"), path
+        assert path in _text(result)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "problem"),
+    [
+        ({}, "path"),
+        ({"path": 1}, "path"),
+        ({"path": ""}, "empty"),
+        ({"path": "a.py", "mode": "w"}, "mode"),
+    ],
+)
+async def test_ac_3_1_7_invalid_arguments(mcp_session, workspace, arguments, problem):
+    (workspace / "a.py").write_text("x = 1\n")
+
+    rejected = await mcp_session.call_tool("read_file", arguments)
+    accepted = await mcp_session.call_tool("read_file", {"path": "a.py"})
+
+    assert rejected.isError is True
+    assert _text(rejected).startswith("ERROR:")
+    assert problem in _text(rejected)
+    assert accepted.isError is False
+    assert _text(accepted) == "x = 1\n"
+
+
+async def test_ac_3_1_14_logs_requests(mcp_session, workspace, caplog):
+    marker = "UNIQUE-MARKER-9d2e"
+    (workspace / "a.py").write_text(marker)
+
+    with caplog.at_level(logging.INFO, logger="tools.mcp_server"):
+        await mcp_session.call_tool("read_file", {"path": "a.py"})
+        await mcp_session.call_tool("read_file", {"path": "../x"})
+
+    records = [r for r in caplog.records if r.name == "tools.mcp_server"]
+    infos = [r for r in records if r.levelno == logging.INFO and "a.py" in r.getMessage()]
+    warnings = [r for r in records if r.levelno == logging.WARNING and "../x" in r.getMessage()]
+    assert len(infos) == 1
+    assert str(len(marker)) in infos[0].getMessage()
+    assert len(warnings) == 1
+    assert "outside the workspace" in warnings[0].getMessage()
+    assert all(marker not in r.getMessage() for r in records)

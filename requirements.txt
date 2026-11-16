@@ -6,4 +6,6 @@ langgraph>=1.2,<2  # DEC-068
 pytest
 pydantic>=2,<3
 pytest-timeout
+pytest-asyncio>=1,<2  # DEC-134
 flask>=3,<4  # DEC-108
+mcp>=1.30,<2  # DEC-129
