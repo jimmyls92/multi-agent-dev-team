@@ -203,6 +203,23 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   filter or label memories from earlier runs; revisit with IMP-011.
 - Notes: -
 
+## MCP (Lab 3.1)
+
+### IMP-015 Generic MCP client calls instead of one function per tool
+- Status: idea
+- Area: MCP (Lab 3.1)
+- Why: `tools/mcp_client.py` has one function per server tool
+  (`call_read_file`). If the server gains `write_file` and `exec_python`,
+  a single `call_tool(session, name, arguments)`, or `langchain-mcp-adapters`
+  turning every server tool into a LangChain tool, avoids one wrapper per
+  tool and lets an agent use whatever the server advertises.
+- Rubric: only needed on the MCP route of C3.5 (the Coder as an MCP client,
+  DEC-123, DEC-125); `call_read_file` stays, since AC-3.1-15 and the Lab 3.2
+  QA use it. Labs 3.2-3.4 never ask for it: they use MCP only for the QA's
+  `read_file` and A2A between Coder and QA.
+- Notes: decide in the spec of the Coder as an MCP client, if the MCP route
+  is chosen in Lab 3.3.
+
 ## General
 
 ### IMP-008 One module for the models shared between agents
