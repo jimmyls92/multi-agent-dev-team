@@ -2751,3 +2751,346 @@ A decision can mix bases; then each part states its own.
   what the client really sent).
 - Code: `tools/mcp_server.py` (`_is_exposed`, `_is_hidden`,
   `_is_servable_name`, `_read_file`, `_reject`)
+
+### DEC-137 Lab 3.2 builds a QA that writes and runs pytest tests
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Required (C3.1)
+- Context: the Lab 3.2 handout builds a QA that only sends the code to an
+  LLM for review and returns an `IssueList`. C3.1 marks "QA is only an LLM
+  review" as Not Yet: the QA must write real pytest tests for the
+  acceptance criteria, run them in a subprocess with a timeout, parse the
+  failures and return structured issues and fixes. Labs 3.3 and 3.4 reuse
+  the Lab 3.2 QA as it is, so no later lab adds the tests.
+- Decision: Lab 3.2 builds the executable QA. From the handout it keeps
+  the file read through the MCP server, the `Issue`/`IssueList` models and
+  the validator that refuses approval on blocking issues (DEC-139). The
+  LLM review stays as a second, advisory source of issues.
+- Why: building an LLM-only QA now would make Lab 3.3 build its loop on an
+  `approved` flag decided by an LLM; switching it to test results later
+  would redo the loop's meaning, its termination tests and the A2A
+  payload.
+- Alternatives: follow the handout now and add the tests in a separate
+  spec before Module 3 closes (touches the QA and the loop twice).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-138 The QA tests each task against that task's acceptance criteria
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred
+- Context: the QA could test each task once the Coder finishes it, or the
+  whole project once against the spec-level criteria.
+- Decision: the QA works per task: it receives one task of the PM's
+  handoff (with its Given/When/Then acceptance criteria) and writes and
+  runs the tests for those criteria.
+- Why: reuses the handoff that already exists (C2.3); each failure is
+  linked to a concrete criterion (C3.1 evidence) and its fix goes back to
+  the task that caused it (C3.2: failing assertion, fix and retest linked
+  to the same task).
+- Alternatives: one QA pass at the end against the spec (cheaper, but
+  failures are hard to attribute and the Coder would revise everything).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-139 Approval depends on a configurable blocking severity; only failing tests are High
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Required (C3.1, C3.2: the loop exits when all tests pass; lab:
+  `approved` enforced by a `model_validator`); the threshold — Preferred
+- Context: issues come from two sources: executed tests (evidence) and the
+  LLM review (opinion). The handout sets `approved=False` whenever a High
+  issue exists. An LLM that invents a High issue would block a working
+  task until the loop limit.
+- Decision: a failing test always produces a High issue. Issues from the
+  LLM review alone are Medium or Low, never High. `QA_BLOCKING_SEVERITY`
+  (`High` | `Medium` | `Low`, default `High`) sets the lowest severity
+  that blocks: `approved` is False whenever any issue is at or above it,
+  enforced by the model's validator whatever the LLM returned. A task is
+  never approved if no test ran. With the default, the task passes when
+  its tests pass.
+- Why: blocking needs executed evidence, not an opinion; the threshold
+  lets the user ask for stricter reviews. With `Low` the loop rarely
+  converges (an LLM almost always finds a style remark) and ends at the
+  limit with an unresolved-issue report, which C3.3 allows.
+- Alternatives: tests only, no threshold (no way to make the review
+  count); tests plus High issues from the review (an invented issue can
+  block until the limit); LLM review only (Not Yet in C3.1).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-140 Separate `workspace_coder/` and `workspace_qa/` folders, each agent confined to its own
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred; completes DEC-122 (where the QA's tests live)
+- Context: the QA writes pytest files. If the Coder could edit them, the
+  easy way to pass would be to change the test instead of the code; if it
+  could read them, it would tend to special-case the test inputs. The fix
+  instructions already carry the failing test, assertion and expected vs
+  actual values.
+- Decision: the Coder's folder `workspace/` is renamed `workspace_coder/`
+  and its variable `WORKSPACE_DIR` becomes `CODER_WORKSPACE_DIR`. The QA
+  gets `workspace_qa/`, set by `QA_WORKSPACE_DIR`, kept after the run as
+  evidence (C3.1 asks for the generated pytest files). The Coder has no
+  access to `workspace_qa/` (its tools stay confined to its own folder,
+  DEC-036). The QA reads the Coder's code only through the MCP server,
+  which is read-only (DEC-124, DEC-125), writes only in `workspace_qa/`,
+  and runs the tests in a subprocess with a timeout and without
+  credentials (DEC-039), since running them runs the Coder's code.
+- Why: one agent detects and one fixes (DEC-122), enforced by what each
+  agent can reach, not by a prompt; the names say whose folder each one
+  is.
+- Alternatives: tests inside the Coder's workspace (the Coder could edit
+  them); Coder with read-only access to the tests (needs a new tool and
+  invites overfitting); keep `WORKSPACE_DIR` for the Coder (fewer changes,
+  but the name no longer says whose folder it is).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-141 The QA retries its own broken output within one `QA_MAX_ATTEMPTS` budget
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred; same corrective-retry idea as DEC-088
+- Context: a test can fail because the code is wrong (an assertion fails)
+  or because the QA's own test is broken (it cannot be collected: syntax
+  error, bad import). The LLM can also return output that breaks the
+  schema. Sending the QA's own errors to the Coder would waste its
+  iterations on correct code.
+- Decision: an assertion failure goes to the Coder as a fix instruction;
+  the QA never retries it (the Coder↔QA loop and its limit come in Lab
+  3.3, C3.3). Invalid LLM output and tests that cannot be collected count
+  as one failed QA attempt; the next attempt gets the error to correct
+  it. Both share one budget, `QA_MAX_ATTEMPTS` (environment variable,
+  default 2). When it runs out, the result is not approved and carries an
+  issue saying the QA could not produce runnable tests, not attributed to
+  the Coder.
+- Why: for the QA both failures mean "no usable tests"; one number is
+  easier to understand and bounds the worst case (2 calls, not 2×2).
+- Alternatives: send every failure to the Coder (wastes its iterations);
+  separate budgets for invalid output and uncollectable tests (more
+  control, rarely useful).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-142 A QA that cannot do its job returns a structured, unapproved result
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Required (C3.3: never claim success; C4.6: no crash); transient
+  retries — Provisional
+- Context: the QA can fail outside its control: the MCP server is down,
+  the LLM call fails or times out, the test run times out, or the review
+  call gives invalid output after its attempts.
+- Decision: the QA never raises to the graph and never approves by
+  default: it returns `approved=False` with the cause. If only the LLM
+  review fails and the tests ran: with `QA_BLOCKING_SEVERITY=High` the
+  result is decided by the tests and notes "review unavailable"; with
+  `Medium` or `Low` it is not approved, since the absence of blocking
+  issues cannot be checked. Transient errors (network, LLM timeout, MCP
+  down) get no retry yet, as in the PM (DEC-087).
+- Why: what cannot be checked is never approved; per-call retries with
+  backoff and jitter are C4.2 and arrive for every agent at once in
+  Module 4.
+- Alternatives: raise and let the graph fail (crashes the run); retry
+  transient errors now in the QA only (early, and unlike the PM and
+  Coder).
+- Revisit when: Module 4 adds per-call retries and the circuit breaker
+  (C4.2, C4.3).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-143 Lab 3.2 builds the QA as a standalone component
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred
+- Context: the QA could be wired into the graph after the Coder now, or
+  built and tested alone, as the handout does.
+- Decision: Lab 3.2 delivers a QA function with a typed input (the task
+  and its files) and a typed output (the QA report), with mocked unit
+  tests and one live test. The graph node, the Coder↔QA loop and the
+  messages between agents come in Lab 3.3; the three-agent pipeline in
+  Lab 3.4.
+- Why: follows the labs' split and does not build work a later lab
+  covers; the typed boundary is what Lab 3.3 wires in.
+- Alternatives: add the QA node to the graph now (early, without the
+  loop).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-144 The QA is a fixed pipeline, not a ReACT or plan-execute agent
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred
+- Context: the QA always does the same steps: read the code, write tests,
+  run them, turn failures into issues, review, report. Its only branch is
+  known in advance (tests that cannot be collected are regenerated,
+  DEC-141).
+- Decision: the steps are fixed in code; the LLM is called only where
+  judgement is needed: writing the tests and reviewing the code.
+- Why: an LLM choosing the next step adds nothing when the steps never
+  change, and could skip the test run, which would turn the QA back into
+  an LLM-only review (Not Yet in C3.1). The attempt budget (DEC-141) holds
+  by construction. Same pattern as the PM (DEC-087).
+- Alternatives: ReACT with `write_test`/`run_tests` tools (flexible, but
+  the model may skip running or not stop); plan-execute (the plan would
+  always be the same).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-145 QA tests run in place against the Coder's folder
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred; refines DEC-140
+- Context: the tests could run against a copy of the Coder's files, read
+  through MCP into `workspace_qa/`, or directly against
+  `workspace_coder/`.
+- Decision: the QA reads the Coder's code through MCP to give it to the
+  LLM (test writing and review). pytest runs the test file from
+  `workspace_qa/<task_id>/` with `cwd` and `PYTHONPATH` set to
+  `workspace_coder/` (like the Coder's scripts, DEC-040), with
+  `-p no:cacheprovider` and `PYTHONDONTWRITEBYTECODE=1` so nothing is
+  left in the Coder's folder.
+- Why: a copy adds ways to fail (truncated reads, files the listing hides,
+  non-text files) and isolates nothing: test code can write anywhere the
+  user can, copy or not; the real isolation is the sandbox (no
+  credentials, timeout). The Coder and the QA never run at the same time,
+  so the code run is the code read.
+- Alternatives: a copy in `workspace_qa/` read through MCP (tests exactly
+  what was read, but fails on truncated or hidden files).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-146 `run_pytest` shares the sandbox of `run_python` and stays out of MCP
+- Date: 2026-11-17 · Area: Tools (Lab 3.2) · Status: accepted
+- Basis: Required (C3.1: subprocess with an enforced timeout; C1.3);
+  where it lives — Preferred
+- Context: the QA needs to run pytest with the same protections as the
+  Coder's scripts. It could also be exposed as an MCP tool.
+- Decision: the process handling of `run_python` (environment allowlist,
+  closed stdin, own process group killed at the end, timeout `EXEC_TIMEOUT`,
+  output truncation) moves to a shared function in
+  `tools/code_executor.py`; `run_python` keeps its behaviour and
+  `run_pytest` is a new local function on top of it. It is not exposed
+  through the MCP server.
+- Why: one sandbox, already tested for C1.3/C4.6. The MCP server is
+  read-only (DEC-125, DEC-126) and the MCP route of C3.5 asks for
+  file-system tools; adding execution changes its security model for no
+  criterion, and the protocol is still open (DEC-123).
+- Alternatives: a second subprocess wrapper for pytest (duplicates the
+  safety rules); `run_tests` as an MCP tool (see above).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-147 pytest results are read from its JUnit XML report and exit code
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred
+- Context: the QA must know which test failed and with which assertion,
+  and tell failing assertions from tests that could not be collected
+  (DEC-141).
+- Decision: pytest writes `--junitxml` into the task's QA folder; the QA
+  parses it with `xml.etree` (expat 2.9 guards against entity expansion).
+  The exit code classifies the run: 0 passed, 1 assertions failed, 2/4/5
+  the tests could not be collected or none ran.
+- Why: stable, structured and in the standard library.
+- Alternatives: parse pytest's text output (fragile); `pytest-json-report`
+  (a new dependency for the same data).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-148 Generated tests come as a schema, each test tied to one criterion
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Required (C1.3: LLM output validated before acting; C3.1: issues
+  linked to failing assertions); the shape — Preferred
+- Context: the LLM writes the tests. The QA must check them before running
+  anything and must be able to link a failed test to the criterion it
+  checks.
+- Decision: the LLM returns a `preamble` (imports) and a list of tests,
+  each with `criterion_index`, `name` and `code`. Before running, the QA
+  checks: the assembled file parses (`ast.parse`, which does not execute
+  it); each name starts with `test_`, is unique and is defined by its
+  `code`; every criterion of the task has at least one test. The schema is
+  built per task with that check, as the PM does for coverage (DEC-091),
+  so a failed check is fed back to the model as a validation error.
+- Why: invalid output never reaches execution, and a failed test maps to
+  its criterion without parsing names.
+- Alternatives: free-form test file (no link to criteria, checks only by
+  running it).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-149 Issues carry a fix, a source and a criterion; the report computes `approved`
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Required (C3.1: structured issue and fix instructions; lab:
+  `Issue` fields and the `model_validator`); the extra fields — Preferred
+- Context: the lab's `Issue` has `severity`, `location`, `description`. The
+  Coder needs an actionable instruction, the rules differ by where an
+  issue comes from (DEC-139, DEC-141), and the evidence of C3.1/C3.2 links
+  failures to acceptance criteria.
+- Decision: `Issue` keeps the lab's three fields and adds `fix` (what the
+  Coder must change), `source` (`test`: an executed test failed, always
+  High; `review`: LLM opinion, Medium or Low only; `qa`: the QA could not
+  do its job, High and not the Coder's fault) and `criterion` (the
+  Given/When/Then broken, empty when none). `QAReport` holds the task ID,
+  the issues, the test results, the blocking severity used and notes;
+  its validator computes `approved` from those, whatever value it was
+  given, and rejects a `review` issue marked High. The review call writes
+  the `fix` of each failing test; if the review is unavailable, a minimal
+  fix is built from the assertion ("Make test_X pass; it failed with:
+  ...").
+- Why: the Coder always gets an instruction; the report decides approval
+  from data it holds, not from environment variables read during
+  validation; it is the payload Lab 3.3 sends back to the Coder.
+- Alternatives: the lab's three fields only (no fix instruction, no link
+  to criteria).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-150 `run_qa` is async and uses `QA_MODEL`
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Required (C4.5: small model for the QA); async — Preferred
+- Context: the MCP client is async, the lab's `run_qa_agent` is async and
+  Lab 3.3 runs the agents over an asyncio broker; `structured_call` is
+  synchronous.
+- Decision: `run_qa` is a coroutine; LLM calls go through
+  `structured_call` in `asyncio.to_thread`. The model comes from `QA_MODEL`
+  (default `openai/gpt-4.1-mini`), read when the QA runs, as the PM does
+  (DEC-093).
+- Why: a sync wrapper with `asyncio.run` fails inside a running event
+  loop, which is where Lab 3.3 calls it; its own variable lets the QA
+  model change without touching the Coder's.
+- Alternatives: sync `run_qa` (breaks under Lab 3.3's broker); reuse
+  `LLM_MODEL` (couples QA and Coder).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-151 QA settings come from environment variables checked at startup
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred
+- Context: DEC-139..DEC-141 and DEC-150 add settings.
+- Decision: `CODER_WORKSPACE_DIR` (default `workspace_coder`, replaces
+  `WORKSPACE_DIR`), `QA_WORKSPACE_DIR` (default `workspace_qa`),
+  `QA_MODEL`, `QA_MAX_ATTEMPTS` (default 2, at least 1) and
+  `QA_BLOCKING_SEVERITY` (default `High`). Invalid values stop the program
+  at startup with a message naming the variable, like `EXEC_TIMEOUT`
+  (DEC-045). A `WORKSPACE_DIR` still set without `CODER_WORKSPACE_DIR`
+  is an error naming the new variable, so an old `.env` is never ignored
+  silently. All are documented in `.env.example`.
+- Why: a wrong setting fails at once and clearly, not halfway through a
+  run; the evaluator can tune each limit.
+- Alternatives: accept `WORKSPACE_DIR` as an alias (two names for one
+  setting).
+- Code: — (applies from the Lab 3.2 spec)
+
+### DEC-152 A failure is blamed on the file where it happens
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred; refines DEC-141 and DEC-146
+- Context: DEC-141 sends the Coder's failures to the Coder and makes the
+  QA retry its own. Import errors, collection errors and hangs can come
+  from either side: a missing module may be the Coder's (it never created
+  a task file) or the QA's (it invented a name); a hang may be an endless
+  loop in the Coder's code or a test that waits forever.
+- Decision: the owner is the file where the problem happens.
+  - Before running, the QA checks the draft's imports with `ast`: a module
+    that is neither a task file nor installed, or a name the Coder's file
+    does not define and the task never mentions, is the QA's (the draft is
+    rejected and regenerated within `QA_MAX_ATTEMPTS`); a missing task
+    file, or a missing name the task mentions, is the Coder's (a `test`
+    High issue, no regeneration).
+  - The preamble may hold only imports, functions and classes, and each
+    test's code only its function, so the test file runs nothing at
+    import time.
+  - A collection error is blamed by the deepest frame of its traceback
+    that lies in the Coder's or the QA's folder; when none does, it is the
+    QA's.
+  - Each test gets its own timeout through `pytest-timeout`
+    (`QA_TEST_TIMEOUT`, default 2 s, at least 1 and lower than
+    `EXEC_TIMEOUT`); a timed-out test is blamed by the frame where it was
+    stuck, and the other tests keep running. `EXEC_TIMEOUT` still bounds
+    the whole run; since the test file runs nothing at import, a run that
+    hits it is the Coder's.
+  - A failure inside a test that runs (a false assertion or any exception)
+    is the Coder's.
+- Why: the Coder gets every defect that is its own, and is never sent the
+  QA's mistakes; a hang in one test no longer hides the other results.
+  Blaming exceptions inside running tests more finely (e.g. a method the
+  task never named) adds much logic for little gain.
+- Alternatives: every collection error is the QA's (a missing task file
+  would never reach the Coder); every timeout is the Coder's (a test that
+  waits forever would cost the Coder iterations).
+- Code: — (applies from the Lab 3.2 spec)

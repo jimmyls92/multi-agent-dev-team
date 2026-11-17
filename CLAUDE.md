@@ -90,7 +90,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Lab 3.1 (servidor MCP) cerrado: `docs/specs/lab_3_1_mcp_server.md` hecho, revisión independiente y R1 incluidas (DEC-122..DEC-136); T4 (README) aplazada a la entrega del Módulo 3. Siguiente: Lab 3.2 (QA agent), fase de producto. Rama: `week-3`. Material de los labs del módulo en `Multi-Agent-lab-3-<n>/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
+Lab 3.2 (QA agent): spec `docs/specs/lab_3_2_qa_agent.md` aprobado (DEC-137..DEC-152), 7 tareas. Siguiente: mapa de T1 (renombrar `workspace/` a `workspace_coder/` y `WORKSPACE_DIR` a `CODER_WORKSPACE_DIR`, DEC-140, DEC-151); README aplazado a la entrega del Módulo 3. Rama: `week-3`. Lab 3.1 (servidor MCP) cerrado: `docs/specs/lab_3_1_mcp_server.md` (DEC-122..DEC-136); T4 (README) aplazada a la entrega del Módulo 3. Material de los labs del módulo en `Multi-Agent-lab-3-<n>/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
 
 Módulo 2: cerrado y subido (C2.1–C2.6), `master` = `week-2`. PM Agent (Lab 2.1, `docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096), Coder node (Lab 2.2, `docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109) y pipeline PM → Coder (Lab 2.3, `docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-121).
 
