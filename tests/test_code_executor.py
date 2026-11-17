@@ -1,6 +1,7 @@
 """Tests for tools/code_executor.py (Lab 1.2).
 
-These tests come from the lab and define the contract of exec_python.
+These tests come from the lab and define the contract of exec_python. The
+run_pytest tests cover spec `lab_3_2_qa_agent` AC-3.2-7 to AC-3.2-11.
 
 Run with:
     pytest tests/test_code_executor.py -v
@@ -9,9 +10,13 @@ The timeout test needs a few seconds to verify the kill signal. Run with
 --timeout=60 in slow environments if needed.
 """
 
+import os
+import time
+from pathlib import Path
+
 import pytest
 from tools.file_io import write_file
-from tools.code_executor import exec_python
+from tools.code_executor import exec_python, run_pytest
 
 
 @pytest.fixture
@@ -164,3 +169,142 @@ class TestWriteExecReadRoundtrip:
         file_result = read_file(output_path)
         assert "fox: 1" in file_result
         assert "the: 2" in file_result
+
+# ── run_pytest (Lab 3.2) ──────────────────────────────────────────────────────
+
+@pytest.fixture
+def folders(tmp_path):
+    """Creates a Coder folder and a QA task folder, with a writer for each.
+
+    Args:
+        tmp_path: Pytest's per-test temporary directory.
+
+    Returns:
+        A namespace-like dict with ``coder`` and ``qa`` (the folders) and
+        ``write``, a function taking a folder, a file name and its content.
+    """
+    coder = tmp_path / "coder"
+    qa = tmp_path / "qa" / "task_1"
+    coder.mkdir()
+    qa.mkdir(parents=True)
+
+    def write(folder: Path, name: str, content: str) -> Path:
+        """Writes a file into a folder.
+
+        Args:
+            folder: Where to write.
+            name: File name.
+            content: Text to write.
+
+        Returns:
+            The file's path.
+        """
+        path = folder / name
+        path.write_text(content)
+        return path
+
+    return {"coder": coder, "qa": qa, "write": write}
+
+
+def _run(folders, test_code: str, test_timeout: int = 2, timeout: int | None = None):
+    """Writes ``test_task_1.py`` in the QA folder and runs it.
+
+    Args:
+        folders: The ``folders`` fixture.
+        test_code: Content of the test file.
+        test_timeout: Seconds each test may run.
+        timeout: Seconds the whole run may take; None uses EXEC_TIMEOUT.
+
+    Returns:
+        The PytestResult of the run.
+    """
+    test_file = folders["write"](folders["qa"], "test_task_1.py", test_code)
+    return run_pytest(test_file, folders["coder"], test_timeout, timeout)
+
+
+def test_ac_3_2_7_pytest_passes(folders):
+    folders["write"](folders["coder"], "calc.py", "def add(a, b):\n    return a + b\n")
+    result = _run(
+        folders,
+        "from calc import add\n\n"
+        "def test_small():\n    assert add(2, 3) == 5\n\n"
+        "def test_negative():\n    assert add(-1, 1) == 0\n",
+    )
+    assert (result.status, result.passed, result.failed, result.failures) == ("passed", 2, 0, [])
+
+
+def test_ac_3_2_8_pytest_failure(folders):
+    folders["write"](folders["coder"], "calc.py", "def add(a, b):\n    return a - b\n")
+    result = _run(folders, "from calc import add\n\ndef test_add():\n    assert add(2, 3) == 5\n")
+    assert result.status == "failed"
+    assert [failure.name for failure in result.failures] == ["test_add"]
+    assert "assert" in result.failures[0].message
+    assert "-1" in result.failures[0].message
+    assert not result.failures[0].timed_out
+
+
+@pytest.mark.parametrize(
+    ("test_code", "error_text"),
+    [
+        ("undefined_name\n\ndef test_x():\n    assert True\n", "NameError"),
+        ("x = 1\n", "no tests ran"),
+    ],
+    ids=["name-error", "no-tests"],
+)
+def test_ac_3_2_9_pytest_collection_error(folders, test_code, error_text):
+    result = _run(folders, test_code)
+    assert result.status == "collection_error"
+    assert error_text in result.output
+
+
+def test_ac_3_2_10_pytest_timeout_one_test(folders):
+    folders["write"](
+        folders["coder"], "slow.py",
+        "def spin():\n    while True:\n        pass\n\ndef one():\n    return 1\n",
+    )
+    result = _run(
+        folders,
+        "from slow import one, spin\n\n"
+        "def test_spin():\n    spin()\n\n"
+        "def test_one():\n    assert one() == 1\n",
+        test_timeout=1,
+        timeout=5,
+    )
+    assert (result.status, result.passed, result.failed) == ("failed", 1, 1)
+    [failure] = result.failures
+    assert failure.name == "test_spin"
+    assert failure.timed_out
+    assert "slow.py" in failure.details
+
+
+def test_ac_3_2_10_pytest_timeout_whole_run(folders, tmp_path):
+    pid_file = tmp_path / "pid.txt"
+    folders["write"](
+        folders["coder"], "hang.py",
+        f"import os\nopen({str(pid_file)!r}, 'w').write(str(os.getpid()))\n"
+        "while True:\n    pass\n",
+    )
+    start = time.monotonic()
+    result = _run(folders, "import hang\n\ndef test_x():\n    assert True\n", timeout=2)
+    assert time.monotonic() - start < 5
+    assert result.status == "timed_out"
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_file.read_text()), 0)
+
+
+def test_ac_3_2_11_pytest_sandbox(folders, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "secret")
+    folders["write"](folders["coder"], "data.txt", "hello")
+    folders["write"](
+        folders["coder"], "reader.py",
+        "def read():\n    with open('data.txt') as f:\n        return f.read()\n",
+    )
+    result = _run(
+        folders,
+        "import os\n\nfrom reader import read\n\n"
+        "def test_no_key():\n    assert 'OPENROUTER_API_KEY' not in os.environ\n\n"
+        "def test_read():\n    assert read() == 'hello'\n",
+    )
+    assert (result.status, result.passed) == ("passed", 2)
+    assert sorted(os.listdir(folders["coder"])) == ["data.txt", "reader.py"]
+    assert (folders["qa"] / "junit.xml").is_file()

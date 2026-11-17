@@ -5,7 +5,8 @@ so an infinite loop is killed by the timeout, a crash in the script does not
 reach the agent, and the agent always gets a useful string back (DEC-038).
 run_python does the work and returns an ExecutionResult, so the Coder can tell
 a clean run from a failure without reading the text (DEC-063); exec_python
-returns only that text.
+returns only that text. run_pytest runs a pytest file in the same sandbox
+for the QA and returns a PytestResult (DEC-146).
 
 Attributes:
     MAX_OUTPUT_CHARS: Characters of output returned to the agent.
@@ -19,9 +20,12 @@ import signal
 import subprocess
 import sys
 import threading
+import xml.etree.ElementTree as ElementTree
+from pathlib import Path
+from typing import Literal, NamedTuple
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 load_dotenv()
 
@@ -134,6 +138,91 @@ def _combine(stdout: str, stderr: str) -> str:
     return "\n".join(parts)
 
 
+class _SandboxRun(NamedTuple):
+    """What one sandboxed process left behind.
+
+    Attributes:
+        stdout: Text written to stdout.
+        stderr: Text written to stderr.
+        returncode: Exit code, or None on timeout.
+        timed_out: Whether the timeout killed the process.
+        timeout: Timeout applied, in seconds.
+    """
+    stdout: str
+    stderr: str
+    returncode: int | None
+    timed_out: bool
+    timeout: int
+
+
+def _run_sandboxed(
+    command: list[str],
+    cwd: str,
+    timeout: int | None,
+    extra_env: dict[str, str] | None = None,
+) -> _SandboxRun:
+    """Runs a command in the agents' sandbox and waits for it (DEC-146).
+
+    The process gets stdin closed, an environment without credentials
+    (DEC-039, DEC-043) plus ``extra_env``, and its own process group, which
+    is killed when the process exits or the timeout expires (DEC-044).
+
+    Args:
+        command: Program and arguments.
+        cwd: Working directory.
+        timeout: Maximum seconds to allow. None uses EXEC_TIMEOUT; values
+            above MAX_TIMEOUT are clamped to it (DEC-037).
+        extra_env: Variables added to the allowlisted environment.
+
+    Returns:
+        The process's output, exit code and whether it timed out.
+
+    Raises:
+        OSError: If the process cannot be started.
+    """
+    # DEC-037: the LLM may ask for another value, never above the cap.
+    effective_timeout = min(EXEC_TIMEOUT if timeout is None else timeout, MAX_TIMEOUT)
+    proc = subprocess.Popen(
+        command,
+        cwd=cwd,
+        env={**_script_env(), **(extra_env or {})},  # DEC-039, DEC-043
+        stdin=subprocess.DEVNULL,  # DEC-038: input() fails at once
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        start_new_session=True,  # DEC-044: own process group
+    )
+    out_chunks: list[str] = []
+    err_chunks: list[str] = []
+    readers = [
+        threading.Thread(target=_drain, args=(proc.stdout, out_chunks)),
+        threading.Thread(target=_drain, args=(proc.stderr, err_chunks)),
+    ]
+    for reader in readers:
+        reader.start()
+    # DEC-044: wait for the process itself, not for its pipes to close,
+    # then kill everything it started (also what it left in background).
+    try:
+        proc.wait(timeout=effective_timeout)
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        timed_out = True
+    finally:
+        _kill_group(proc.pid)
+        proc.wait()  # reaps the killed process, so no zombie is left
+    for reader in readers:
+        reader.join()
+    return _SandboxRun(
+        stdout="".join(out_chunks),
+        stderr="".join(err_chunks),
+        returncode=None if timed_out else proc.returncode,
+        timed_out=timed_out,
+        timeout=effective_timeout,
+    )
+
+
 class ExecutionResult(BaseModel):
     """Structured outcome of one script execution (DEC-063).
 
@@ -179,6 +268,7 @@ def run_python(path: str, timeout: int | None = None) -> ExecutionResult:
     directory (DEC-040), stdin closed and an environment without credentials
     (DEC-039, DEC-043). exec_python waits for the script itself; when it exits
     or the timeout expires, its whole process group is killed (DEC-044).
+    The process handling is shared with run_pytest (DEC-146).
 
     Args:
         path: Path to the .py file to execute.
@@ -209,48 +299,17 @@ def run_python(path: str, timeout: int | None = None) -> ExecutionResult:
                 output=f"Error: script '{abs_path}' does not exist or is not a file."
             )
 
-        # DEC-037: the LLM may ask for another value, never above the cap.
-        effective_timeout = min(
-            EXEC_TIMEOUT if timeout is None else timeout, MAX_TIMEOUT
-        )
-
-        proc = subprocess.Popen(
+        run = _run_sandboxed(
             [sys.executable, abs_path],
             cwd=os.path.dirname(abs_path),  # DEC-040
-            env=_script_env(),  # DEC-039, DEC-043
-            stdin=subprocess.DEVNULL,  # DEC-038: input() fails at once
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            start_new_session=True,  # DEC-044: own process group
+            timeout=timeout,
         )
-        out_chunks: list[str] = []
-        err_chunks: list[str] = []
-        readers = [
-            threading.Thread(target=_drain, args=(proc.stdout, out_chunks)),
-            threading.Thread(target=_drain, args=(proc.stderr, err_chunks)),
-        ]
-        for reader in readers:
-            reader.start()
-        # DEC-044: wait for the script itself, not for its pipes to close,
-        # then kill everything it started (also what it left in background).
-        try:
-            proc.wait(timeout=effective_timeout)
-            timed_out = False
-        except subprocess.TimeoutExpired:
-            timed_out = True
-        finally:
-            _kill_group(proc.pid)
-        for reader in readers:
-            reader.join()
-        stdout, stderr = "".join(out_chunks), "".join(err_chunks)
+        stdout, stderr = run.stdout, run.stderr
 
-        if timed_out:
+        if run.timed_out:
             message = (
                 f"Error: script '{os.path.basename(abs_path)}' exceeded timeout "
-                f"of {effective_timeout}s and was killed."
+                f"of {run.timeout}s and was killed."
             )
             partial = _combine(stdout, stderr)
             return ExecutionResult(
@@ -258,12 +317,12 @@ def run_python(path: str, timeout: int | None = None) -> ExecutionResult:
                 timed_out=True,
             )
 
-        if proc.returncode != 0:
+        if run.returncode != 0:
             # DEC-038: exit code, stderr and any stdout printed before failing.
             details = _combine(stdout, stderr) or "(no output)"
             return ExecutionResult(
-                output=f"Error (exit code {proc.returncode}):\n{_keep_end(details)}",
-                exit_code=proc.returncode,
+                output=f"Error (exit code {run.returncode}):\n{_keep_end(details)}",
+                exit_code=run.returncode,
             )
 
         # DEC-038: stdout plus labeled stderr (e.g. warnings), never "".
@@ -274,3 +333,153 @@ def run_python(path: str, timeout: int | None = None) -> ExecutionResult:
         return ExecutionResult(output=_keep_start(output), exit_code=0)
     except Exception as e:
         return ExecutionResult(output=f"Error executing script '{abs_path}': {e}")
+
+
+class TestFailure(BaseModel):
+    """One test that failed in a pytest run (DEC-147).
+
+    Attributes:
+        name: Name of the test function, e.g. ``test_add``.
+        message: pytest's short message, e.g. ``assert -1 == 5``.
+        details: The failure's traceback; long text keeps its end.
+        timed_out: Whether pytest-timeout stopped the test (DEC-152).
+    """
+    __test__ = False  # not a test class for pytest
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    message: str
+    details: str
+    timed_out: bool = False
+
+
+class PytestResult(BaseModel):
+    """Outcome of one pytest run (DEC-147, DEC-156).
+
+    Attributes:
+        status: ``passed`` (every test passed), ``failed`` (some test
+            failed), ``collection_error`` (the tests could not be collected
+            or none ran), ``timed_out`` (the whole run was killed) or
+            ``error`` (pytest itself failed or its report is unreadable).
+        passed: Tests that passed.
+        failed: Tests that failed or errored.
+        failures: Each failed test, from the JUnit report.
+        output: pytest's output; long text keeps its end.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    status: Literal["passed", "failed", "collection_error", "timed_out", "error"]
+    passed: int = 0
+    failed: int = 0
+    failures: list[TestFailure] = Field(default_factory=list)
+    output: str = ""
+
+
+# DEC-147: pytest's exit codes for interrupted collection, usage error and
+# no tests collected.
+_COLLECTION_EXIT_CODES = (2, 4, 5)
+_TIMEOUT_MESSAGE = "Failed: Timeout"
+
+
+def _read_junit(path: Path) -> tuple[int, int, list[TestFailure]]:
+    """Reads the counts and failures from a pytest JUnit report (DEC-147).
+
+    Args:
+        path: The JUnit XML file.
+
+    Returns:
+        Tests passed, tests failed (failures plus errors) and one
+        TestFailure per failed test.
+
+    Raises:
+        OSError: If the file cannot be read.
+        ElementTree.ParseError: If the file is not valid XML.
+    """
+    passed = 0
+    failures: list[TestFailure] = []
+    for case in ElementTree.parse(path).getroot().iter("testcase"):
+        problem = case.find("failure")
+        if problem is None:
+            problem = case.find("error")
+        if problem is None:
+            if case.find("skipped") is None:
+                passed += 1
+            continue
+        message = problem.get("message", "")
+        failures.append(
+            TestFailure(
+                name=case.get("name", ""),
+                message=message,
+                details=_keep_end(problem.text or ""),
+                timed_out=message.startswith(_TIMEOUT_MESSAGE),
+            )
+        )
+    return passed, len(failures), failures
+
+
+def run_pytest(
+    test_file: Path, code_dir: Path, test_timeout: int, timeout: int | None = None
+) -> PytestResult:
+    """Runs one pytest file against the Coder's code, in the sandbox.
+
+    pytest runs with ``code_dir`` as working directory and on
+    ``PYTHONPATH``, so the tests import the Coder's modules in place
+    (DEC-145), without writing caches or bytecode there. It reads no
+    configuration file and loads only the pytest-timeout plugin
+    (DEC-155). The JUnit report is written next to the test file.
+
+    Args:
+        test_file: The pytest file, in the QA's folder.
+        code_dir: The Coder's folder.
+        test_timeout: Seconds each test function may run (DEC-152).
+        timeout: Seconds the whole run may take. None uses EXEC_TIMEOUT;
+            values above MAX_TIMEOUT are clamped to it.
+
+    Returns:
+        The run's PytestResult; nothing is raised.
+    """
+    test_file = Path(test_file).resolve()
+    junit = test_file.parent / "junit.xml"
+    try:
+        junit.unlink(missing_ok=True)  # never read a previous run's report
+        run = _run_sandboxed(
+            [
+                sys.executable, "-m", "pytest", str(test_file),
+                # DEC-155: no project config or plugins; the per-test
+                # timeout covers the test function only.
+                "-c", os.devnull, "--rootdir", str(test_file.parent),
+                "-p", "no:cacheprovider", "-p", "pytest_timeout",
+                f"--timeout={test_timeout}", "-o", "timeout_func_only=true",
+                f"--junitxml={junit}", "-q",
+            ],
+            cwd=str(code_dir),  # DEC-145
+            timeout=timeout,
+            extra_env={
+                "PYTHONPATH": str(code_dir),
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            },
+        )
+    except OSError as e:
+        return PytestResult(status="error", output=f"Error starting pytest: {e}")
+
+    output = _keep_end(_combine(run.stdout, run.stderr))
+    if run.timed_out:
+        return PytestResult(
+            status="timed_out",
+            output=f"Error: the test run exceeded timeout of {run.timeout}s "
+            f"and was killed.\n{output}",
+        )
+    if run.returncode in _COLLECTION_EXIT_CODES:
+        return PytestResult(status="collection_error", output=output)
+    if run.returncode not in (0, 1):
+        return PytestResult(status="error", output=output)
+    try:
+        passed, failed, failures = _read_junit(junit)
+    except (OSError, ElementTree.ParseError) as e:
+        return PytestResult(status="error", output=f"Unreadable JUnit report: {e}\n{output}")
+    status = "passed" if run.returncode == 0 else "failed"
+    return PytestResult(
+        status=status, passed=passed, failed=failed, failures=failures, output=output
+    )

@@ -2939,7 +2939,7 @@ A decision can mix bases; then each part states its own.
   so the code run is the code read.
 - Alternatives: a copy in `workspace_qa/` read through MCP (tests exactly
   what was read, but fails on truncated or hidden files).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `tools/code_executor.py` (`run_pytest`); the MCP read from Lab 3.2 T5
 
 ### DEC-146 `run_pytest` shares the sandbox of `run_python` and stays out of MCP
 - Date: 2026-11-17 · Area: Tools (Lab 3.2) · Status: accepted
@@ -2959,7 +2959,7 @@ A decision can mix bases; then each part states its own.
   criterion, and the protocol is still open (DEC-123).
 - Alternatives: a second subprocess wrapper for pytest (duplicates the
   safety rules); `run_tests` as an MCP tool (see above).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `tools/code_executor.py` (`_run_sandboxed`, `run_pytest`)
 
 ### DEC-147 pytest results are read from its JUnit XML report and exit code
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -2974,7 +2974,7 @@ A decision can mix bases; then each part states its own.
 - Why: stable, structured and in the standard library.
 - Alternatives: parse pytest's text output (fragile); `pytest-json-report`
   (a new dependency for the same data).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `tools/code_executor.py` (`_read_junit`, `run_pytest`)
 
 ### DEC-148 Generated tests come as a schema, each test tied to one criterion
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3129,3 +3129,42 @@ A decision can mix bases; then each part states its own.
 - Alternatives: trust the configuration (one wrong line breaks DEC-140
   without notice).
 - Code: `agents/qa_agent.py` (`load_qa_settings`)
+
+### DEC-155 The QA's pytest runs isolated from the project's configuration and plugins
+- Date: 2026-11-17 · Area: Tools (Lab 3.2) · Status: accepted
+- Basis: Preferred; makes DEC-152's timeouts usable
+- Context: the QA's tests live inside the repo, so pytest would read the
+  project's `pytest.ini` and load every installed plugin (LangSmith,
+  asyncio, anyio). Measured on the development machine: about 10 s to
+  start with all plugins, about 2 s without them, against a run timeout
+  of `EXEC_TIMEOUT` (10 s by default). Separately, pytest-timeout counts
+  the formatting of a failure's traceback; on the WSL `/mnt/c` disk that
+  took more than 1 s and turned a failing test into a pytest INTERNALERROR.
+- Decision: `run_pytest` starts pytest with no configuration file
+  (`-c /dev/null`, `--rootdir` = the test's folder), with plugin
+  autoloading disabled (`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`) and only
+  `pytest_timeout` loaded, and with `timeout_func_only=true`, so the
+  per-test timeout covers only the test function. The run timeout still
+  bounds everything else.
+- Why: the run fits well inside its timeout, behaves the same on any
+  machine, and a slow failure report never breaks the run.
+- Alternatives: inherit the project's configuration and plugins (most of
+  the timeout spent starting); a larger default timeout (hides the
+  cause).
+- Revisit when: the generated tests need a plugin, e.g. async tests.
+- Code: `tools/code_executor.py` (`run_pytest`)
+
+### DEC-156 `run_pytest` reports an unexpected failure as status `error`
+- Date: 2026-11-17 · Area: Tools (Lab 3.2) · Status: accepted
+- Basis: Preferred; follows DEC-142
+- Context: besides passing, failing, not collecting and timing out, pytest
+  can fail in ways that say nothing about the code or the tests: an
+  internal error, a JUnit report that is missing or unreadable, a process
+  that cannot start.
+- Decision: those cases return `status="error"` with the output; nothing
+  is raised. The QA turns it into a `qa` issue, never a Coder's one.
+- Why: the QA cannot claim anything from a run it cannot read, and the
+  Coder must not be blamed for it.
+- Alternatives: fold them into `collection_error` (the QA would retry a
+  draft that was fine); raise (crashes the QA, C4.6).
+- Code: `tools/code_executor.py` (`run_pytest`)
