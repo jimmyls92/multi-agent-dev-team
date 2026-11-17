@@ -137,7 +137,10 @@ Cada lab (o funcionalidad grande) se trabaja en este orden, sin saltarse fases:
    - **Aprobar el spec es aprobar los tests que fijan comportamiento** (no hace falta otra aprobación).
    - Tareas: cada una cubre al menos un AC, se revisa en ~15 min y acaba en un commit. El número sale de ahí, no es fijo.
 4. **Código, tarea a tarea** (no se empieza la siguiente hasta que el usuario acepte la actual):
-   1. **Mapa** antes de escribir código: archivos que se crean o tocan, funciones/clases con firma y tipos y una línea de qué hacen, y flujo de datos entre ellas. El usuario lo aprueba.
+   1. **Mapa** antes de escribir código, corto y en bullets; el usuario lo aprueba:
+      - **Para qué sirve:** 2 bullets en lenguaje llano.
+      - **Archivos:** cada archivo `[nuevo]`/`[mod]` con sus funciones/clases públicas, una línea cada una (firma solo donde importa). Sin helpers internos, líneas de comando ni flujo paso a paso.
+      - **Decisiones técnicas**, estas sí con detalle: frase introductoria con el problema, la propuesta, ventajas e inconvenientes (o coste) y la recomendación.
    2. **TDD ligero:** primero los tests de los AC de la tarea (en rojo, con modelo falso; nombre `test_ac_<n>_<m>_<k>_...`), luego el código hasta verde. Los AC `llm` se ejecutan al final de la tarea.
    3. **Cierre de la tarea** (corto, sin traza paso a paso ni preguntas; todo en bullets, una idea por bullet):
       - **Para qué sirve (negocio/funcional):** 2–3 bullets en lenguaje llano sobre qué aporta el cambio al sistema o al usuario y por qué se hace ahora.
