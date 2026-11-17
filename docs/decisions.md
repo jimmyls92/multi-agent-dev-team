@@ -2811,7 +2811,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: tests only, no threshold (no way to make the review
   count); tests plus High issues from the review (an invented issue can
   block until the limit); LLM review only (Not Yet in C3.1).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `orchestration/state.py` (`Issue`, `QAReport` validators)
 
 ### DEC-140 Separate `workspace_coder/` and `workspace_qa/` folders, each agent confined to its own
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3020,7 +3020,7 @@ A decision can mix bases; then each part states its own.
   validation; it is the payload Lab 3.3 sends back to the Coder.
 - Alternatives: the lab's three fields only (no fix instruction, no link
   to criteria).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `orchestration/state.py` (`Issue`, `QAReport`)
 
 ### DEC-150 `run_qa` is async and uses `QA_MODEL`
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3055,7 +3055,7 @@ A decision can mix bases; then each part states its own.
   run; the evaluator can tune each limit.
 - Alternatives: accept `WORKSPACE_DIR` as an alias (two names for one
   setting).
-- Code: `tools/handlers.py` (`_coder_workspace_dir`); the QA settings from Lab 3.2 T2
+- Code: `tools/handlers.py` (`_coder_workspace_dir`), `agents/qa_agent.py` (`load_qa_settings`)
 
 ### DEC-152 A failure is blamed on the file where it happens
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3094,3 +3094,38 @@ A decision can mix bases; then each part states its own.
   would never reach the Coder); every timeout is the Coder's (a test that
   waits forever would cost the Coder iterations).
 - Code: — (applies from the Lab 3.2 spec)
+
+### DEC-153 `Issue` and `QAReport` live in the shared state and count tests
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred
+- Context: the lab defines `Issue` in the QA's file. In Lab 3.3 the QA's
+  report travels in the graph's shared state and in the payload back to
+  the Coder. The report must hold enough of the test run to decide
+  `approved` (DEC-149).
+- Decision: `Severity`, `Issue` and `QAReport` are defined in
+  `orchestration/state.py`, next to `CoderResult`. The report holds the
+  test run as two counters, `tests_passed` and `tests_failed`; the detail
+  of each failing test lives in its `test` issue.
+- Why: the state never imports from `agents/`, as today; the counters are
+  all the approval rule needs, and a per-test list would repeat each
+  failing test already described by its issue.
+- Alternatives: models in `agents/qa_agent.py` (the state would import
+  from an agent); a list with every test, its criterion and its outcome
+  (richer, no AC needs it).
+- Revisit when: Lab 3.3 needs the passing tests or their criteria.
+- Code: `orchestration/state.py`
+
+### DEC-154 The QA's folder never overlaps the Coder's
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred; protects DEC-140
+- Context: `QA_WORKSPACE_DIR` and `CODER_WORKSPACE_DIR` are set
+  independently. If the QA's folder were the Coder's, or inside it, the
+  Coder's tools could read and edit the tests.
+- Decision: loading the QA settings raises `ValueError` naming
+  `QA_WORKSPACE_DIR` when the QA's folder is the Coder's, inside it, or
+  contains it.
+- Why: the separation of DEC-140 is enforced by configuration checks, not
+  by trusting the `.env`.
+- Alternatives: trust the configuration (one wrong line breaks DEC-140
+  without notice).
+- Code: `agents/qa_agent.py` (`load_qa_settings`)

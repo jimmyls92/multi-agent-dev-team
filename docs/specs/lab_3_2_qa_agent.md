@@ -4,7 +4,7 @@
 - **Sources:** lab handout `docs/labs/lab_3_2_qa_agent.md`, project guide
   (Module 3, `docs/course_reference.txt`, instructions 15 and 20), rubric
   C3.1, C3.3, C1.3, C4.5, C4.6
-- **Decisions:** DEC-137..DEC-152; also DEC-122, DEC-124, DEC-125, DEC-039,
+- **Decisions:** DEC-137..DEC-154; also DEC-122, DEC-124, DEC-125, DEC-039,
   DEC-040, DEC-044, DEC-088, DEC-091 (the why lives there; do not repeat it
   here)
 
@@ -77,11 +77,13 @@ Then `to_list()` is `[3, 2, 1]`.
 
 #### AC-3.2-4 — QA settings are checked at startup
 
-- **Origin:** ours, DEC-151, DEC-152
+- **Origin:** ours, DEC-151, DEC-152, DEC-154
 - **Verify:** unit — `tests/test_qa_report.py::test_ac_3_2_4_qa_settings`
 - **Given** the QA settings unset; then `QA_MAX_ATTEMPTS` set to `0` and to
   `x`; then `QA_BLOCKING_SEVERITY` set to `Critical`; then
-  `QA_TEST_TIMEOUT` set to `0` and to a value not lower than `EXEC_TIMEOUT`
+  `QA_TEST_TIMEOUT` set to `0` and to a value not lower than `EXEC_TIMEOUT`;
+  then `QA_WORKSPACE_DIR` set to the Coder's folder, to a folder inside it
+  and to the folder that contains it
 - **When** the QA settings are loaded
 - **Then** the defaults are `workspace_qa`, `openai/gpt-4.1-mini`, 2,
   `High` and a per-test timeout of 2 s; each invalid value raises
@@ -378,7 +380,7 @@ Task status: todo | map | in progress | review | done
 - Commit type `refactor`; `.env.example`, `.gitignore`, README and
   `CLAUDE.md` references updated; the local `workspace/` is moved by hand.
 
-### T2 — `Issue`, `QAReport` and QA settings · todo
+### T2 — `Issue`, `QAReport` and QA settings · done
 
 - **Covers:** AC-3.2-4, AC-3.2-5, AC-3.2-6
 
