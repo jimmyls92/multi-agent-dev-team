@@ -372,7 +372,7 @@ the linked-list task.
 
 Task status: todo | map | in progress | review | done
 
-### T1 — Rename the Coder's folder to `workspace_coder/` · todo
+### T1 — Rename the Coder's folder to `workspace_coder/` · done
 
 - **Covers:** AC-3.2-1, AC-3.2-2, AC-3.2-3
 - Commit type `refactor`; `.env.example`, `.gitignore`, README and

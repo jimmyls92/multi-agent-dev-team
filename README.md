@@ -60,7 +60,7 @@ cp .env.example .env    # then set OPENROUTER_API_KEY
 Credentials only come from environment variables (`.env`, never committed).
 Every setting in `.env.example` is documented there: Coder and PM models, log
 level, window size, memories per call, Chroma location, script timeout (10 s by default,
-30 s maximum) and the agent's workspace directory.
+30 s maximum) and the Coder's workspace directory.
 
 ## Running the team
 
@@ -71,7 +71,7 @@ python main.py --json           # the whole final ProjectState as JSON
 ```
 
 Each run goes from the requirement to the code with no human input
-(DEC-096). Before it starts, everything an earlier run left in `workspace/`
+(DEC-096). Before it starts, everything an earlier run left in `workspace_coder/`
 is **moved, never deleted**, to `workspace_history/<timestamp>/`, so each
 run starts with an empty workspace (DEC-114). The output lists:
 
@@ -113,7 +113,7 @@ DEC-116). The API file keeps an `if __name__ == "__main__":` block that
 starts the server, so you can run it yourself:
 
 ```bash
-python workspace/app.py   # the file name is the task's main file in the output
+python workspace_coder/app.py   # the file name is the task's main file in the output
 curl http://127.0.0.1:5000/health
 curl -X POST -H "Content-Type: application/json" -d '{"a": 1}' http://127.0.0.1:5000/echo
 ```
@@ -187,7 +187,7 @@ python -m agents.coder_agent
 python -m agents.coder_agent "Write is_palindrome(s) in palindrome.py and test it"
 ```
 
-The agent works inside `workspace/` (git-ignored, set by `WORKSPACE_DIR`): every path it uses is
+The Coder works inside `workspace_coder/` (git-ignored, set by `CODER_WORKSPACE_DIR`): every path it uses is
 confined there, and scripts run in a child process with a timeout and without
 the agent's credentials. `LOG_LEVEL=INFO` logs the plan, one line per
 iteration (tool called, or a text answer sent back) and one per LLM call
@@ -248,7 +248,7 @@ pytest tests/test_integration_pipeline.py --run-llm -k graded_demo   # only the 
 CHROMA_PATH=.chroma-test python -m tests.test_memory   # Lab 1.1 recall test, real LLM
 ```
 
-Every test runs in a temporary workspace, so your `workspace/` is never
+Every test runs in a temporary workspace, so your `workspace_coder/` is never
 touched. Without `--run-llm`, a test that would reach a real model fails
 instead of calling it; the tests marked `llm` are skipped, and with
 `--run-llm` and no API key they fail.
@@ -280,7 +280,7 @@ tests/           pytest tests, fakes, the API request fixture (api_fixture.py)
 docs/            decisions.md, improvements.md, specs/ (one per lab), labs/, course_reference.txt
 memory.py        two-tier memory
 llm_client.py    shared chat model (ChatOpenAI → OpenRouter)
-workspace/       the agents' working folder (git-ignored)
+workspace_coder/ the Coder's working folder (git-ignored)
 workspace_history/  files of earlier runs (git-ignored)
 ```
 
@@ -319,7 +319,7 @@ each `DEC-NNN` it applies. Ideas beyond the requirements are in
 - Every LLM call logs the window state and the memories retrieved — DEC-025
 
 **C1.3 Tools**
-- File tools work only inside `workspace/`; arguments are validated by strict
+- File tools work only inside `workspace_coder/`; arguments are validated by strict
   Pydantic models — DEC-036, DEC-042
 - Scripts run in a subprocess with a 10 s default timeout (env var, 30 s
   cap); on timeout the whole process group is killed — DEC-037, DEC-044,

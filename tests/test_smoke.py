@@ -50,7 +50,7 @@ def isolated(tmp_path, monkeypatch):
     """
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setattr(tools.handlers, "WORKSPACE_DIR", workspace.resolve())
+    monkeypatch.setattr(tools.handlers, "CODER_WORKSPACE_DIR", workspace.resolve())
     client = chromadb.PersistentClient(path=str(tmp_path / "chroma"))
     monkeypatch.setattr(memory, "_collection", client.get_or_create_collection("smoke_test"))
     return workspace.resolve()

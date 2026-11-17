@@ -6,7 +6,7 @@ the workspace, outside the tools' boundary (DEC-036).
 
 Typical usage example:
 
-    archive = archive_workspace(tools.handlers.WORKSPACE_DIR, REPO_ROOT)
+    archive = archive_workspace(tools.handlers.CODER_WORKSPACE_DIR, REPO_ROOT)
     if archive is not None:
         print(f"Previous files moved to {archive}")
 
@@ -62,10 +62,10 @@ def archive_workspace(workspace: Path, protected: Path) -> Path | None:
     """
     workspace = workspace.resolve()
     protected = protected.resolve()
-    # DEC-114: a misconfigured WORKSPACE_DIR (e.g. ".") must never move the repo.
+    # DEC-114: a misconfigured CODER_WORKSPACE_DIR (e.g. ".") must never move the repo.
     if protected.is_relative_to(workspace):
         raise ValueError(
-            f"workspace {workspace} is or contains {protected}; set WORKSPACE_DIR "
+            f"workspace {workspace} is or contains {protected}; set CODER_WORKSPACE_DIR "
             "to a dedicated folder"
         )
     workspace.mkdir(parents=True, exist_ok=True)

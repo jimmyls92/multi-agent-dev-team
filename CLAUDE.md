@@ -90,7 +90,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Lab 3.2 (QA agent): spec `docs/specs/lab_3_2_qa_agent.md` aprobado (DEC-137..DEC-152), 7 tareas. Siguiente: mapa de T1 (renombrar `workspace/` a `workspace_coder/` y `WORKSPACE_DIR` a `CODER_WORKSPACE_DIR`, DEC-140, DEC-151); README aplazado a la entrega del Módulo 3. Rama: `week-3`. Lab 3.1 (servidor MCP) cerrado: `docs/specs/lab_3_1_mcp_server.md` (DEC-122..DEC-136); T4 (README) aplazada a la entrega del Módulo 3. Material de los labs del módulo en `Multi-Agent-lab-3-<n>/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
+Lab 3.2 (QA agent): spec `docs/specs/lab_3_2_qa_agent.md` aprobado (DEC-137..DEC-152), 7 tareas. T1 (carpeta `workspace_coder/`, `CODER_WORKSPACE_DIR`) hecha. Siguiente: mapa de T2 (`Issue`, `QAReport` y configuración del QA); README aplazado a la entrega del Módulo 3. Rama: `week-3`. Lab 3.1 (servidor MCP) cerrado: `docs/specs/lab_3_1_mcp_server.md` (DEC-122..DEC-136); T4 (README) aplazada a la entrega del Módulo 3. Material de los labs del módulo en `Multi-Agent-lab-3-<n>/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
 
 Módulo 2: cerrado y subido (C2.1–C2.6), `master` = `week-2`. PM Agent (Lab 2.1, `docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096), Coder node (Lab 2.2, `docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109) y pipeline PM → Coder (Lab 2.3, `docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-121).
 
@@ -102,7 +102,7 @@ Actualiza esta sección al cambiar de spec o de tarea; el detalle de las tareas 
 
 Tests aplazados por decisión del usuario (como tarde en C4.7; proponer y aprobar antes de escribirlos):
 - **Memoria** (mockeados): el input actual nunca vuelve como recuerdo (DEC-031); un turno fallido o una respuesta vacía dejan la ventana intacta (DEC-028, DEC-029); los duplicados exactos se actualizan (DEC-011).
-- **Tools:** confinamiento a `workspace/` (DEC-036, DEC-042), entorno sin credenciales (DEC-039, DEC-043), `cwd` del script (DEC-040), stdin cerrado, mensaje sin salida y truncado por el final (DEC-038), tope de lectura (DEC-041), muerte del grupo de procesos (DEC-044).
+- **Tools:** confinamiento a `workspace_coder/` (DEC-036, DEC-042), entorno sin credenciales (DEC-039, DEC-043), `cwd` del script (DEC-040), stdin cerrado, mensaje sin salida y truncado por el final (DEC-038), tope de lectura (DEC-041), muerte del grupo de procesos (DEC-044).
 - **Coder** (modelo falso): (a) **prioritario**, un modelo que solo da texto para en 10 con `max_iterations` (fija el orden de DEC-079); (b) uno que llama a tools sin terminar para en 10; (c) argumentos inválidos no ejecutan la tool (DEC-076); (d) `CoderResult` desde mensajes inventados (DEC-078).
 
 Otros:

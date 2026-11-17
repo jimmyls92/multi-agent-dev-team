@@ -12,9 +12,9 @@ always returns a ToolOutcome, whose observation goes back to the LLM
 (DEC-063). It never runs a script that starts a web server (DEC-116).
 
 Attributes:
-    WORKSPACE_DIR: Absolute path of the agent's working directory, from the
-        WORKSPACE_DIR environment variable resolved against the repo root
-        (DEC-045).
+    CODER_WORKSPACE_DIR: Absolute path of the Coder's working directory,
+        from the CODER_WORKSPACE_DIR environment variable resolved against
+        the repo root (DEC-045, DEC-140, DEC-151).
     TOOL_HANDLERS: Tool name to validated handler.
 
 Typical usage example:
@@ -26,6 +26,7 @@ Typical usage example:
 
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Callable
 
@@ -40,17 +41,42 @@ load_dotenv()
 # DEC-045: resolved against the repo root, whatever directory the agent
 # is started from.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_workspace_setting = os.getenv("WORKSPACE_DIR", "workspace")
-if not _workspace_setting.strip():
-    raise ValueError("WORKSPACE_DIR must not be empty")
-WORKSPACE_DIR = (_REPO_ROOT / _workspace_setting).resolve()
+
+
+def _coder_workspace_dir(env: Mapping[str, str]) -> Path:
+    """Returns the Coder's working directory from the environment.
+
+    Args:
+        env: Environment variables, usually ``os.environ``.
+
+    Returns:
+        ``CODER_WORKSPACE_DIR`` (default ``workspace_coder``) resolved against
+        the repo root.
+
+    Raises:
+        ValueError: If ``CODER_WORKSPACE_DIR`` is empty, or if the old
+            ``WORKSPACE_DIR`` is set without ``CODER_WORKSPACE_DIR``.
+    """
+    # DEC-151: an old .env must stop the program, never be ignored silently.
+    if "WORKSPACE_DIR" in env and "CODER_WORKSPACE_DIR" not in env:
+        raise ValueError(
+            "WORKSPACE_DIR was renamed to CODER_WORKSPACE_DIR; "
+            "rename it in your .env"
+        )
+    setting = env.get("CODER_WORKSPACE_DIR", "workspace_coder")
+    if not setting.strip():
+        raise ValueError("CODER_WORKSPACE_DIR must not be empty")
+    return (_REPO_ROOT / setting).resolve()
+
+
+CODER_WORKSPACE_DIR = _coder_workspace_dir(os.environ)
 
 
 def resolve_in_workspace(path: str) -> str:
     """Resolves a path inside the workspace.
 
     Args:
-        path: Path sent by the LLM. Relative paths go under WORKSPACE_DIR.
+        path: Path sent by the LLM. Relative paths go under CODER_WORKSPACE_DIR.
 
     Returns:
         The resolved absolute path.
@@ -64,9 +90,9 @@ def resolve_in_workspace(path: str) -> str:
         raise ValueError("path must not be empty")
     candidate = Path(path)
     if not candidate.is_absolute():
-        candidate = WORKSPACE_DIR / candidate
+        candidate = CODER_WORKSPACE_DIR / candidate
     resolved = candidate.resolve()
-    if not resolved.is_relative_to(WORKSPACE_DIR):
+    if not resolved.is_relative_to(CODER_WORKSPACE_DIR):
         raise ValueError(
             f"path '{path}' is outside the workspace; "
             "use a path relative to the workspace"
@@ -80,7 +106,7 @@ class _PathArgs(BaseModel):
     Validation is strict: no type coercion and no extra arguments (DEC-042).
 
     Attributes:
-        path: Absolute path inside WORKSPACE_DIR, resolved by the validator.
+        path: Absolute path inside CODER_WORKSPACE_DIR, resolved by the validator.
     """
     # strict: "10" is not an int and 1 is not a path; extra arguments are errors.
     model_config = ConfigDict(extra="forbid", strict=True)

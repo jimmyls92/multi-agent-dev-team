@@ -137,7 +137,7 @@ def _temporary_workspace(tmp_path, monkeypatch):
         tmp_path: Pytest's per-test temporary directory.
         monkeypatch: Pytest's monkeypatch fixture.
     """
-    monkeypatch.setattr(tools.handlers, "WORKSPACE_DIR", (tmp_path / "workspace").resolve())
+    monkeypatch.setattr(tools.handlers, "CODER_WORKSPACE_DIR", (tmp_path / "workspace").resolve())
 
 
 @pytest.fixture(autouse=True)
@@ -197,7 +197,7 @@ def isolated_run(tmp_path, monkeypatch):
     """
     workspace = (tmp_path / "workspace").resolve()
     workspace.mkdir()
-    monkeypatch.setattr(tools.handlers, "WORKSPACE_DIR", workspace)
+    monkeypatch.setattr(tools.handlers, "CODER_WORKSPACE_DIR", workspace)
     # The in-memory client is shared in the process: one collection per test.
     collection = chromadb.EphemeralClient().get_or_create_collection(
         f"test-{uuid.uuid4().hex}", embedding_function=HashEmbedding()
@@ -213,8 +213,8 @@ def workspace():
     Returns:
         The workspace directory, resolved and existing.
     """
-    tools.handlers.WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
-    return tools.handlers.WORKSPACE_DIR
+    tools.handlers.CODER_WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    return tools.handlers.CODER_WORKSPACE_DIR
 
 
 @pytest.fixture

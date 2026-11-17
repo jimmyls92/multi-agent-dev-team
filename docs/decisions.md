@@ -2837,7 +2837,7 @@ A decision can mix bases; then each part states its own.
   them); Coder with read-only access to the tests (needs a new tool and
   invites overfitting); keep `WORKSPACE_DIR` for the Coder (fewer changes,
   but the name no longer says whose folder it is).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `tools/handlers.py` (`CODER_WORKSPACE_DIR`); the QA side from Lab 3.2 T2
 
 ### DEC-141 The QA retries its own broken output within one `QA_MAX_ATTEMPTS` budget
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3055,7 +3055,7 @@ A decision can mix bases; then each part states its own.
   run; the evaluator can tune each limit.
 - Alternatives: accept `WORKSPACE_DIR` as an alias (two names for one
   setting).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `tools/handlers.py` (`_coder_workspace_dir`); the QA settings from Lab 3.2 T2
 
 ### DEC-152 A failure is blamed on the file where it happens
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted

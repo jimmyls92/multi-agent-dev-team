@@ -3,7 +3,7 @@
 The lab's three functions work on an open ``ClientSession``, so they serve
 both the in-memory sessions of the tests and a real stdio connection.
 ``connect_and_run`` starts ``python -m tools.mcp_server`` as a child process
-over stdio, with ``WORKSPACE_DIR`` set explicitly, and reads one file
+over stdio, with ``CODER_WORKSPACE_DIR`` set explicitly, and reads one file
 through the protocol.
 
 Run as a module it is the lab's demo: it prints the server's tools, its
@@ -114,14 +114,14 @@ def _server_parameters(workspace: Path) -> StdioServerParameters:
 
     Returns:
         Parameters that run ``python -m tools.mcp_server`` from the repo root
-        with ``WORKSPACE_DIR`` set to ``workspace``.
+        with ``CODER_WORKSPACE_DIR`` set to ``workspace``.
     """
     return StdioServerParameters(
         command=sys.executable,
         args=["-m", "tools.mcp_server"],
         # DEC-132: the 1.x SDK passes the child only a few variables; the
         # workspace is given explicitly so the server serves the caller's one.
-        env={"WORKSPACE_DIR": str(workspace)},
+        env={"CODER_WORKSPACE_DIR": str(workspace)},
         cwd=_REPO_ROOT,
     )
 
@@ -152,7 +152,7 @@ async def connect_and_run(
         filename: File to read, relative to the workspace. None reads the
             first file of the listing, if any.
         workspace: Folder the server serves; defaults to
-            ``tools.handlers.WORKSPACE_DIR``.
+            ``tools.handlers.CODER_WORKSPACE_DIR``.
         errlog: Where the server's stderr goes; must be a real file, because
             the child process writes to it directly.
 
@@ -168,7 +168,7 @@ async def connect_and_run(
         OSError: If the server process cannot be started.
         ValueError: If ``MCP_TIMEOUT`` is invalid.
     """
-    parameters = _server_parameters(workspace or handlers.WORKSPACE_DIR)
+    parameters = _server_parameters(workspace or handlers.CODER_WORKSPACE_DIR)
     try:
         async with stdio_client(parameters, errlog=errlog) as (read, write):
             # DEC-135: a dead or stalled server raises instead of hanging.

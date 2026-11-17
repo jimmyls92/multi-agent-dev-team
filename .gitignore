@@ -13,8 +13,8 @@ config.yaml
 *.pdf
 docs/course_reference.txt
 
-# Agent working directory (Lab 1.2 tools, DEC-036)
-workspace/
+# Coder working directory (Lab 1.2 tools, DEC-036, DEC-140)
+workspace_coder/
 workspace_history/
 
 # Lab source material (local reference only, contains its own .env)

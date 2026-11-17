@@ -175,7 +175,7 @@ def run(
     state = ProjectState(requirement=requirement)
     try:
         # DEC-114: read at call time, so the configured (or test) folders apply.
-        archive = workspace.archive_workspace(tools.handlers.WORKSPACE_DIR, workspace.REPO_ROOT)
+        archive = workspace.archive_workspace(tools.handlers.CODER_WORKSPACE_DIR, workspace.REPO_ROOT)
     except (ValueError, OSError) as exc:
         return _failed(state, f"Workspace: cannot archive the previous files — {exc}")
     if archive is not None:

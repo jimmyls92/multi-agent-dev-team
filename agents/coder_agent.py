@@ -683,7 +683,7 @@ def _written_files(result: CoderResult) -> dict[str, str]:
         path = _resolved(step.action_input.get("path"))
         if path is None or not Path(path).is_file():
             continue
-        relative = Path(path).relative_to(tools.handlers.WORKSPACE_DIR).as_posix()
+        relative = Path(path).relative_to(tools.handlers.CODER_WORKSPACE_DIR).as_posix()
         try:
             files[relative] = Path(path).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:

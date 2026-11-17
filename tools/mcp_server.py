@@ -2,7 +2,7 @@
 
 Built with the low-level ``Server`` of the official Python SDK (DEC-129,
 DEC-130). It exposes one tool, ``read_file``, and one resource,
-``file://project/listing``, over ``tools.handlers.WORKSPACE_DIR``, read at
+``file://project/listing``, over ``tools.handlers.CODER_WORKSPACE_DIR``, read at
 call time so tests can point it to a temporary folder (DEC-125, DEC-131).
 
 Hidden entries (``.env``, ``.git/...``) and ``__pycache__`` are never listed
@@ -83,12 +83,12 @@ def _relative(path: Path) -> str:
     """Returns a workspace path as a POSIX path relative to the workspace.
 
     Args:
-        path: Absolute path inside ``handlers.WORKSPACE_DIR``.
+        path: Absolute path inside ``handlers.CODER_WORKSPACE_DIR``.
 
     Returns:
         The relative path, for example ``"pkg/util.py"``.
     """
-    return path.relative_to(handlers.WORKSPACE_DIR).as_posix()
+    return path.relative_to(handlers.CODER_WORKSPACE_DIR).as_posix()
 
 
 def _is_hidden(name: str) -> bool:
@@ -142,7 +142,7 @@ def _is_exposed(path: Path) -> bool:
         True if the named path is lexically inside the workspace, the real
         file is inside it too, and no component of either is hidden.
     """
-    root = handlers.WORKSPACE_DIR
+    root = handlers.CODER_WORKSPACE_DIR
     target = path.resolve()
     if not path.is_relative_to(root) or not target.is_relative_to(root):
         return False
@@ -162,7 +162,7 @@ def _list_files() -> list[str]:
         Relative POSIX paths, sorted; empty if the workspace is empty or
         does not exist.
     """
-    root = handlers.WORKSPACE_DIR
+    root = handlers.CODER_WORKSPACE_DIR
     files = []
     for folder, subfolders, names in os.walk(root):
         subfolders[:] = [
@@ -228,7 +228,7 @@ def _read_file(arguments: dict) -> types.CallToolResult:
         raw = arguments["path"]
         # DEC-126, DEC-136: what the listing hides cannot be read either;
         # the check looks at the name and at the file really read.
-        if not _is_exposed(handlers.WORKSPACE_DIR / raw):
+        if not _is_exposed(handlers.CODER_WORKSPACE_DIR / raw):
             return _reject(
                 f"{raw}: not served (hidden entries and __pycache__ are excluded)"
             )
@@ -331,7 +331,7 @@ def _configure_logging() -> None:
 async def main() -> None:
     """Serves the workspace over stdio until the client closes the connection."""
     _configure_logging()
-    logger.info("started, serving %s", handlers.WORKSPACE_DIR)
+    logger.info("started, serving %s", handlers.CODER_WORKSPACE_DIR)
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 

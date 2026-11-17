@@ -204,8 +204,8 @@ async def test_ac_3_1_11_listing_content(mcp_session, workspace):
 @pytest.mark.parametrize("create", [True, False], ids=["empty", "missing"])
 async def test_ac_3_1_12_empty_listing(mcp_session, create):
     if create:
-        tools.handlers.WORKSPACE_DIR.mkdir(parents=True)
-    assert tools.handlers.WORKSPACE_DIR.exists() is create
+        tools.handlers.CODER_WORKSPACE_DIR.mkdir(parents=True)
+    assert tools.handlers.CODER_WORKSPACE_DIR.exists() is create
 
     assert await _listing(mcp_session) == ""
 

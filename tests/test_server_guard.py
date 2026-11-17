@@ -51,7 +51,7 @@ def workspace():
     Returns:
         The workspace directory.
     """
-    root = tools.handlers.WORKSPACE_DIR
+    root = tools.handlers.CODER_WORKSPACE_DIR
     root.mkdir(parents=True, exist_ok=True)
     (root / "app.py").write_text(FLASK_SERVER.replace(MARKER, ""), encoding="utf-8")
     return root

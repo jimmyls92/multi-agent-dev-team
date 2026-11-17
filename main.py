@@ -96,7 +96,7 @@ def _print_state(state: ProjectState) -> None:
                 print(f"    - Given {c.given}, when {c.when}, then {c.then}")
             if task.result is not None:
                 print(_result_line(task))
-        print(f"\n[WORKSPACE] {tools.handlers.WORKSPACE_DIR}")
+        print(f"\n[WORKSPACE] {tools.handlers.CODER_WORKSPACE_DIR}")
         print(f"  files: {', '.join(state.code) or 'none'}")
     if state.error:
         print(f"\nERROR: {state.error}")
