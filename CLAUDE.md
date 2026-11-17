@@ -6,7 +6,7 @@ Referencia completa (guía general, guías de cada módulo y rúbrica, transcrit
 
 ## Estilo de respuesta
 
-Activa siempre la skill **caveman** (`~/.claude/skills/caveman/SKILL.md`) desde el primer mensaje de la sesión, sin esperar a `/caveman`. Se mantiene hasta que el usuario diga "stop caveman" o "normal mode". Respuestas en español. Excepciones, en prosa normal: la presentación de decisiones (frase introductoria en lenguaje llano) y la revisión guiada de cada tarea (ver "Flujo de trabajo"). Docs, specs, commits y código no se comprimen.
+Activa siempre la skill **caveman** (`~/.claude/skills/caveman/SKILL.md`) desde el primer mensaje de la sesión, sin esperar a `/caveman`. Se mantiene hasta que el usuario diga "stop caveman" o "normal mode". Respuestas en español. Excepciones, en prosa normal: la presentación de decisiones (frase introductoria en lenguaje llano) y el cierre de cada tarea (ver "Flujo de trabajo"). Docs, specs, commits y código no se comprimen.
 
 ## Contexto del proyecto
 
@@ -139,7 +139,12 @@ Cada lab (o funcionalidad grande) se trabaja en este orden, sin saltarse fases:
 4. **Código, tarea a tarea** (no se empieza la siguiente hasta que el usuario acepte la actual):
    1. **Mapa** antes de escribir código: archivos que se crean o tocan, funciones/clases con firma y tipos y una línea de qué hacen, y flujo de datos entre ellas. El usuario lo aprueba.
    2. **TDD ligero:** primero los tests de los AC de la tarea (en rojo, con modelo falso; nombre `test_ac_<n>_<m>_<k>_...`), luego el código hasta verde. Los AC `llm` se ejecutan al final de la tarea.
-   3. **Revisión guiada:** seguir un ejemplo concreto (input real → qué pasa en cada función → estado final con valores), con una referencia `archivo:línea` en cada paso para que el usuario lo siga en el código, las 2–3 decisiones no obvias, un **comando para que el usuario lo ejecute** y **2 preguntas "¿qué pasaría si...?"** que el usuario responde y tú corriges; cada pregunta se tiene que poder responder leyendo el código de la tarea actual o el que ya existe, nunca el de tareas futuras. No se añaden comentarios explicativos al código: docstrings Google (DEC-046) y comentarios solo para porqués no obvios con su `DEC-NNN`.
+   3. **Cierre de la tarea** (corto, sin traza paso a paso ni preguntas; todo en bullets, una idea por bullet):
+      - **Para qué sirve (negocio/funcional):** 2–3 bullets en lenguaje llano sobre qué aporta el cambio al sistema o al usuario y por qué se hace ahora.
+      - **Mapa del flujo:** esquema de pocas líneas de qué pieza llama a cuál, con cada archivo marcado como `[nuevo]` o `[mod]`. Debajo, en bullets, los archivos tocados que no salen en el esquema (tests, config, docs).
+      - **Ideas principales:** 3–5 bullets sobre qué se ha implementado y por qué, cada una con su `DEC-`.
+      - **Comprobación:** bullets con un comando para que el usuario lo vea funcionar y el resultado de los tests.
+      No se añaden comentarios explicativos al código: docstrings Google (DEC-046) y comentarios solo para porqués no obvios con su `DEC-NNN`.
    4. **Hecho cuando:** tests de sus AC en verde (o el AC marcado `llm`/`manual` con su comando ejecutado), docstrings y anclas DEC, estado de la tarea actualizado en el spec y commit propuesto.
    5. Opcional por spec: el usuario escribe él mismo una pieza pequeña con tu revisión.
 5. **Cierre del spec:** lanza un agente revisor independiente. Recibe el spec, `docs/course_reference.txt` y el diff del spec completo, **no tu resumen**. Comprueba que cada AC tiene un test que verifica comportamiento real, que no hay regresiones de criterios anteriores y que se respetan los límites que fuerza el evaluador. El usuario clasifica los hallazgos (arreglar, descartar o pasar a `IMP`); lo que se arregla va en una tarea `R1` con el mismo proceso.
