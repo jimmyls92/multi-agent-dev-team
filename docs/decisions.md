@@ -2860,7 +2860,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: send every failure to the Coder (wastes its iterations);
   separate budgets for invalid output and uncollectable tests (more
   control, rarely useful).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `agents/qa_agent.py` (`write_tests`); the shared budget from Lab 3.2 T6
 
 ### DEC-142 A QA that cannot do its job returns a structured, unapproved result
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -2994,7 +2994,7 @@ A decision can mix bases; then each part states its own.
   its criterion without parsing names.
 - Alternatives: free-form test file (no link to criteria, checks only by
   running it).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `agents/qa_agent.py` (`_pytest_draft_schema`, `write_tests`)
 
 ### DEC-149 Issues carry a fix, a source and a criterion; the report computes `approved`
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3168,3 +3168,21 @@ A decision can mix bases; then each part states its own.
 - Alternatives: fold them into `collection_error` (the QA would retry a
   draft that was fine); raise (crashes the QA, C4.6).
 - Code: `tools/code_executor.py` (`run_pytest`)
+
+### DEC-157 Each generated test is exactly one synchronous function with its own name
+- Date: 2026-11-18 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred; refines DEC-148 and DEC-152
+- Context: DEC-148 asks that each test's name is defined by its code, and
+  DEC-152 that a test's code holds only its function, so the test file
+  runs nothing at import time. The isolated pytest loads no asyncio plugin
+  (DEC-155).
+- Decision: the `code` of each generated test must parse to exactly one
+  top-level `def` (not `async def`) whose name is the test's `name`.
+  Helpers go in the `preamble`. One rule and one error message cover the
+  name, the single statement and the sync check.
+- Why: a clear error for the model to correct, and fewer cases to check;
+  an async test would never run under the isolated pytest.
+- Alternatives: separate checks for each condition (same effect, more
+  messages); allow helpers next to each test (code that may run at
+  import).
+- Code: `agents/qa_agent.py` (`_pytest_draft_schema`)

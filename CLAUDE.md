@@ -90,7 +90,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Lab 3.2 (QA agent): spec `docs/specs/lab_3_2_qa_agent.md` aprobado (DEC-137..DEC-156), 7 tareas. T1–T3 hechas. Siguiente: mapa de T4 (escritura de tests con validación); README aplazado a la entrega del Módulo 3. Rama: `week-3`. Lab 3.1 (servidor MCP) cerrado: `docs/specs/lab_3_1_mcp_server.md` (DEC-122..DEC-136); T4 (README) aplazada a la entrega del Módulo 3. Material de los labs del módulo en `Multi-Agent-lab-3-<n>/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
+Lab 3.2 (QA agent): spec `docs/specs/lab_3_2_qa_agent.md` aprobado (DEC-137..DEC-157), 7 tareas. T1–T4 hechas. Siguiente: mapa de T5 (`run_qa`: lectura MCP, ejecución de tests e informe); README aplazado a la entrega del Módulo 3. Rama: `week-3`. Lab 3.1 (servidor MCP) cerrado: `docs/specs/lab_3_1_mcp_server.md` (DEC-122..DEC-136); T4 (README) aplazada a la entrega del Módulo 3. Material de los labs del módulo en `Multi-Agent-lab-3-<n>/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
 
 Módulo 2: cerrado y subido (C2.1–C2.6), `master` = `week-2`. PM Agent (Lab 2.1, `docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096), Coder node (Lab 2.2, `docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109) y pipeline PM → Coder (Lab 2.3, `docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-121).
 

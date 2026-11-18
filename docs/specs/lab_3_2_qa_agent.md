@@ -4,7 +4,7 @@
 - **Sources:** lab handout `docs/labs/lab_3_2_qa_agent.md`, project guide
   (Module 3, `docs/course_reference.txt`, instructions 15 and 20), rubric
   C3.1, C3.3, C1.3, C4.5, C4.6
-- **Decisions:** DEC-137..DEC-156; also DEC-122, DEC-124, DEC-125, DEC-039,
+- **Decisions:** DEC-137..DEC-157; also DEC-122, DEC-124, DEC-125, DEC-039,
   DEC-040, DEC-044, DEC-088, DEC-091 (the why lives there; do not repeat it
   here)
 
@@ -388,9 +388,12 @@ Task status: todo | map | in progress | review | done
 
 - **Covers:** AC-3.2-7 .. AC-3.2-11
 
-### T4 — Test writing with validation · todo
+### T4 — Test writing with validation · done
 
-- **Covers:** AC-3.2-12, AC-3.2-13, AC-3.2-14 (invalid drafts)
+- **Covers:** AC-3.2-12, AC-3.2-13, AC-3.2-14 (invalid drafts: exactly
+  `QA_MAX_ATTEMPTS` test calls and no file written; the `qa` issue in the
+  report is checked in T5, once `run_qa` exists)
+- The call budget shared with collection errors (DEC-141) comes in T6.
 
 ### T5 — `run_qa`: MCP read, test run and report · todo
 
