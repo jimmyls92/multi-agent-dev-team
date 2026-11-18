@@ -220,6 +220,38 @@ each idea has a stable ID (`IMP-NNN`, never reused).
 - Notes: decide in the spec of the Coder as an MCP client, if the MCP route
   is chosen in Lab 3.3.
 
+## QA Agent (Lab 3.2)
+
+### IMP-016 Do not blame the QA for imports that are legitimate
+- Status: idea
+- Area: QA Agent (Lab 3.2)
+- Why: the import check of DEC-152 rejects, as the QA's mistake, a test
+  that imports a module created by an earlier task (task 2 may use task
+  1's code) or a name the PM's specification mentions but the task does
+  not. Both are legitimate, and each rejection spends one of the
+  `QA_MAX_ATTEMPTS` attempts. Allowing every module in the Coder's folder
+  (from the MCP listing resource) and looking names up in the whole
+  specification would avoid that.
+- Rubric: C3.1 (tests still run and check the task's criteria), C3.3 (the
+  attempt budget still bounds the QA). Only widens what the check accepts.
+- Notes: -
+
+### IMP-017 An LLM arbiter for failures whose owner is unclear
+- Status: idea
+- Area: QA Agent (Lab 3.2)
+- Why: DEC-152 blames the owner of the deepest frame of the traceback.
+  Some failures land in the Coder's code but are the test's fault, e.g. a
+  test calls `insert("5")` with the wrong type and the `TypeError` is
+  raised inside the Coder's `insert`. For those ambiguous cases only
+  (`TypeError`, `AttributeError` at the test/code boundary), one LLM call
+  could decide the owner, within the `QA_MAX_ATTEMPTS` budget.
+- Rubric: C3.1 (the verdict still comes from executed tests; the LLM only
+  routes the failure), C3.3 (bounded by the attempt budget), C1.3/C4.6 (its
+  output validated with a schema; any failure falls back to the fixed
+  rule).
+- Notes: deterministic rule kept for Lab 3.2; an arbiter adds cost and
+  non-reproducible verdicts, so only for the ambiguous cases.
+
 ## General
 
 ### IMP-008 One module for the models shared between agents
