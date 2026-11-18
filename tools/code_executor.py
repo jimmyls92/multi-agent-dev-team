@@ -446,9 +446,10 @@ def run_pytest(
         run = _run_sandboxed(
             [
                 sys.executable, "-m", "pytest", str(test_file),
-                # DEC-155: no project config or plugins; the per-test
-                # timeout covers the test function only.
+                # DEC-155: no project config, plugins or parent conftest.py;
+                # the per-test timeout covers the test function only.
                 "-c", os.devnull, "--rootdir", str(test_file.parent),
+                "--confcutdir", str(test_file.parent),
                 "-p", "no:cacheprovider", "-p", "pytest_timeout",
                 f"--timeout={test_timeout}", "-o", "timeout_func_only=true",
                 f"--junitxml={junit}", "-q",

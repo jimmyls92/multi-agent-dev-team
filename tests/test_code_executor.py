@@ -222,6 +222,15 @@ def _run(folders, test_code: str, test_timeout: int = 2, timeout: int | None = N
     return run_pytest(test_file, folders["coder"], test_timeout, timeout)
 
 
+def test_parent_conftest_is_not_loaded(folders):
+    folders["write"](folders["qa"].parent, "conftest.py", "raise RuntimeError('parent conftest')\n")
+    folders["write"](folders["coder"], "calc.py", "def add(a, b):\n    return a + b\n")
+
+    result = _run(folders, "from calc import add\n\ndef test_add():\n    assert add(2, 3) == 5\n")
+
+    assert (result.status, result.passed) == ("passed", 1), result.output
+
+
 def test_ac_3_2_7_pytest_passes(folders):
     folders["write"](folders["coder"], "calc.py", "def add(a, b):\n    return a + b\n")
     result = _run(

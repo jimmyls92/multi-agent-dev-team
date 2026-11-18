@@ -3143,7 +3143,10 @@ A decision can mix bases; then each part states its own.
   the formatting of a failure's traceback; on the WSL `/mnt/c` disk that
   took more than 1 s and turned a failing test into a pytest INTERNALERROR.
 - Decision: `run_pytest` starts pytest with no configuration file
-  (`-c /dev/null`, `--rootdir` = the test's folder), with plugin
+  (`-c /dev/null`, `--rootdir` = the test's folder), with no `conftest.py`
+  search above the test's folder (`--confcutdir` = the test's folder;
+  without it pytest walks every parent folder, loading any `conftest.py`
+  it finds and failing on unreadable entries such as `/mnt/c`), with plugin
   autoloading disabled (`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`) and only
   `pytest_timeout` loaded, and with `timeout_func_only=true`, so the
   per-test timeout covers only the test function. The run timeout still
