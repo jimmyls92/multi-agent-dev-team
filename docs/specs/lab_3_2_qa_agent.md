@@ -4,7 +4,7 @@
 - **Sources:** lab handout `docs/labs/lab_3_2_qa_agent.md`, project guide
   (Module 3, `docs/course_reference.txt`, instructions 15 and 20), rubric
   C3.1, C3.3, C1.3, C4.5, C4.6
-- **Decisions:** DEC-137..DEC-159; also DEC-122, DEC-124, DEC-125, DEC-039,
+- **Decisions:** DEC-137..DEC-160; also DEC-122, DEC-124, DEC-125, DEC-039,
   DEC-040, DEC-044, DEC-088, DEC-091 (the why lives there; do not repeat it
   here)
 
@@ -197,7 +197,9 @@ task; `QA_MAX_ATTEMPTS=2` unless stated.
   with `test_`; a name that the code does not define; criterion 1 without a
   test; a preamble with a statement other than an import, a function or a
   class, such as `ll = LinkedList()`; a test whose code has another
-  top-level statement besides its function) and a valid second draft
+  top-level statement besides its function; a name used but never imported
+  or defined, such as `LinkedList` without its import) and a valid second
+  draft
 - **When** `run_qa` runs the task
 - **Then** only the valid draft is written; the second model call contains
   the validation error of the first
@@ -413,7 +415,7 @@ Task status: todo | map | in progress | review | done
   AC-3.2-17, AC-3.2-22; AC-3.2-13 moves to `run_qa`, which now owns the
   retries (DEC-159)
 
-### T7 — LLM review, live test and demo · todo
+### T7 — LLM review, live test and demo · done
 
 - **Covers:** AC-3.2-19, AC-3.2-20 (review fix), AC-3.2-21, AC-3.2-26,
   AC-3.2-27

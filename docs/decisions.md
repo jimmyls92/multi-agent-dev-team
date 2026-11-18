@@ -2884,7 +2884,7 @@ A decision can mix bases; then each part states its own.
   Coder).
 - Revisit when: Module 4 adds per-call retries and the circuit breaker
   (C4.2, C4.3).
-- Code: `agents/qa_agent.py` (`run_qa`, `_qa_failure`)
+- Code: `agents/qa_agent.py` (`run_qa`, `_qa_failure`, `review_code`)
 
 ### DEC-143 Lab 3.2 builds the QA as a standalone component
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3022,7 +3022,7 @@ A decision can mix bases; then each part states its own.
   validation; it is the payload Lab 3.3 sends back to the Coder.
 - Alternatives: the lab's three fields only (no fix instruction, no link
   to criteria).
-- Code: `orchestration/state.py` (`Issue`, `QAReport`), `agents/qa_agent.py` (`_judge_run`)
+- Code: `orchestration/state.py` (`Issue`, `QAReport`), `agents/qa_agent.py` (`_judge_run`, `review_code`)
 
 ### DEC-150 `run_qa` is async and uses `QA_MODEL`
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3074,6 +3074,10 @@ A decision can mix bases; then each part states its own.
     rejected and regenerated within `QA_MAX_ATTEMPTS`); a missing task
     file, or a missing name the task mentions, is the Coder's (a `test`
     High issue, no regeneration).
+  - A name the test file uses but never imports or defines (e.g. the
+    class without its import) is the QA's: the draft is rejected before
+    running, since the `NameError` would otherwise happen inside a test
+    and be blamed on the Coder (found by the live test, AC-3.2-26).
   - The preamble may hold only imports, functions and classes, and each
     test's code only its function, so the test file runs nothing at
     import time.
@@ -3095,7 +3099,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: every collection error is the QA's (a missing task file
   would never reach the Coder); every timeout is the Coder's (a test that
   waits forever would cost the Coder iterations).
-- Code: `agents/qa_agent.py` (`_import_problems`, `_pytest_draft_schema`, `_blame`, `_judge_run`, `_test_task`)
+- Code: `agents/qa_agent.py` (`_import_problems`, `_undefined_names`, `_pytest_draft_schema`, `_blame`, `_judge_run`, `_test_task`)
 
 ### DEC-153 `Issue` and `QAReport` live in the shared state and count tests
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3237,3 +3241,29 @@ A decision can mix bases; then each part states its own.
   returning the count; two retry mechanisms); report the Coder's failures
   of the broken draft too (mixes results of an untrusted draft).
 - Code: `agents/qa_agent.py` (`write_tests`, `_test_task`)
+
+### DEC-160 The LLM review runs after the tests, sees the whole code and has its own budget
+- Date: 2026-11-18 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred; refines DEC-137, DEC-139 and DEC-149
+- Context: the test-writing call sees only the code's interface
+  (DEC-158), so the default fix of a failing test says what failed, not
+  where to change the code. DEC-149 gives that job to the LLM review.
+- Decision: after the tests, a second model call reviews the whole code
+  with the task, the test file and the failures. Its schema, built per
+  report, holds exactly one fix per `test` issue (matched by its number
+  in the request's list; the real model did not copy location strings)
+  and advisory issues that may only be Medium or Low; a missing,
+  unknown or repeated fix is a validation error sent back to the model.
+  The review's fixes replace the default ones and its issues are added
+  with source `review`. It runs only when the report comes from the
+  QA's work (tests or the Coder's import problems), not when the report
+  is already a `qa` failure. It has its own `QA_MAX_ATTEMPTS` budget
+  (worst case 2 test calls and 2 review calls). If it fails, DEC-142
+  applies.
+- Why: the review never decides approval, so a missing or failing review
+  only costs fix quality; its own budget keeps the test calls, which do
+  decide, untouched.
+- Alternatives: share the test budget (the review would never run after
+  a regeneration); review even after a `qa` failure (calls spent on a
+  report that cannot be approved).
+- Code: `agents/qa_agent.py` (`review_code`, `_code_review_schema`, `run_qa`)

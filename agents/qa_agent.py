@@ -14,27 +14,37 @@ model sees the criteria and only the interface of the code (DEC-158).
 becomes a ``qa`` issue in an unapproved report (DEC-142). Each failure is
 blamed on the file where it happens: the Coder's failures become issues,
 the QA's own make it write a new draft within ``QA_MAX_ATTEMPTS`` model
-calls (DEC-152, DEC-159).
+calls (DEC-152, DEC-159). A second model call, ``review_code``, reads the
+whole code and writes the fix of each failing test plus advisory issues;
+it never decides approval (DEC-160).
+
+Run as a module it is the demo: it reviews a bundled buggy linked list with
+the real model and prints the report.
 
 Attributes:
     DEFAULT_QA_MODEL: Small, fast model used when ``QA_MODEL`` is unset
         (C4.5, DEC-150).
     QA_SETTINGS: Settings read at import time from the environment.
     TESTS_SYSTEM_PROMPT: Instructions for writing the tests of a task.
+    REVIEW_SYSTEM_PROMPT: Instructions for reviewing a task's code.
 
 Typical usage example:
 
     report = await run_qa(task)
     print(report.approved, report.issues)
+
+    python -m agents.qa_agent
 """
 
 import ast
 import asyncio
+import builtins
 import importlib.machinery
 import logging
 import os
 import re
 import sys
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal, NamedTuple, TextIO, get_args
@@ -463,6 +473,45 @@ def _import_problems(tree: ast.Module, imports: _ImportContext) -> list[_ImportP
     return list(dict.fromkeys(problems))
 
 
+_MODULE_GLOBALS = frozenset({"__name__", "__file__", "__doc__"})
+
+
+def _undefined_names(tree: ast.Module) -> list[str]:
+    """Returns the names a test file uses but never imports or defines (DEC-152).
+
+    Scopes are not tracked: a name assigned or imported anywhere counts as
+    defined. That still catches the usual mistake, a class used without its
+    import, which would fail inside the test and be blamed on the Coder.
+
+    Args:
+        tree: The parsed test file.
+
+    Returns:
+        The undefined names, sorted; empty when the file uses ``import *``.
+    """
+    defined = set(dir(builtins)) | _MODULE_GLOBALS
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            defined.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defined.add(node.name)
+        elif isinstance(node, ast.arg):
+            defined.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            defined.add(node.name)
+        elif isinstance(node, ast.Import):
+            defined.update(a.asname or a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if any(a.name == "*" for a in node.names):
+                return []
+            defined.update(a.asname or a.name for a in node.names)
+    used = {
+        node.id for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+    return sorted(used - defined)
+
+
 def _pytest_draft_schema(
     criteria_count: int, imports: _ImportContext
 ) -> type[PytestDraftBase]:
@@ -495,7 +544,8 @@ def _pytest_draft_schema(
                 ValueError: If the preamble runs code, a test is not exactly
                     one function named like it, a name repeats or lacks the
                     ``test_`` prefix, a criterion index is unknown, a
-                    criterion has no test or an import is the QA's mistake.
+                    criterion has no test, an import is the QA's mistake or
+                    a name is used without being imported or defined.
             """
             for node in _parse(self.preamble, "the preamble").body:
                 if not isinstance(node, _PREAMBLE_NODES):
@@ -534,6 +584,12 @@ def _pytest_draft_schema(
             mistakes = [p.message for p in _import_problems(tree, imports) if p.owner == "qa"]
             if mistakes:
                 raise ValueError("bad imports: " + "; ".join(mistakes))
+            undefined = _undefined_names(tree)
+            if undefined:
+                raise ValueError(
+                    f"names used but never imported or defined: {', '.join(undefined)}; "
+                    f"import them in the preamble"
+                )
             return self
 
     return PytestDraft
@@ -904,7 +960,7 @@ def _judge_run(
                 severity="High",
                 location=f"{written.path.name}::{failure.name}",
                 description=description,
-                fix=f"Make {failure.name} pass; it failed with: {description}",
+                fix=f"Make {failure.name} pass; it failed with: {description.splitlines()[0]}",
                 source="test",
                 criterion=_criterion_text(task.acceptance_criteria[index]) if index is not None else "",
             )
@@ -918,7 +974,7 @@ def _test_task(
     model: BaseChatModel,
     settings: QASettings,
     coder_dir: Path,
-) -> QAReport:
+) -> tuple[QAReport, str]:
     """Writes and runs the task's tests, drafting again on the QA's own failures.
 
     Each draft is one model call, and at most ``settings.max_attempts``
@@ -934,8 +990,9 @@ def _test_task(
         coder_dir: The Coder's folder.
 
     Returns:
-        The report of the first usable draft, or an unapproved report with
-        a ``qa`` issue when no draft was usable.
+        The report of the first usable draft and that draft's source; or an
+        unapproved report with a ``qa`` issue and an empty source when no
+        draft was usable.
     """
     imports = _import_context(task, sources)
     feedback = ""
@@ -959,7 +1016,7 @@ def _test_task(
                 Issue(severity="High", location=p.file, description=p.message, fix=p.fix, source="test")
                 for p in missing
             ]
-            return _coder_report(task, issues, settings.blocking_severity)
+            return _coder_report(task, issues, settings.blocking_severity), source
 
         logger.info(
             "%s: running pytest on %s (test timeout %ds, run timeout %ds)",
@@ -972,7 +1029,7 @@ def _test_task(
         )
         judged = _judge_run(task, written, result, settings, coder_dir)
         if isinstance(judged, QAReport):
-            return judged
+            return judged, source
         logger.warning("%s: draft %d broke by the QA's fault: %s", task.task_id, attempt, judged)
         feedback = f"```python\n{source}```\n{judged}"
     return _qa_failure(
@@ -981,7 +1038,216 @@ def _test_task(
         f"no runnable tests could be produced in {settings.max_attempts} attempts; "
         f"last error: {_tail(feedback, 500)}",
         settings.blocking_severity,
+    ), ""
+
+
+REVIEW_SYSTEM_PROMPT = """You are a senior code reviewer in a software team. You get one task, its
+acceptance criteria, the whole code, the pytest tests the QA ran and the
+failures they found.
+
+Rules:
+- In fixes, give one entry per failure listed, with failure set to the
+  failure's number in the list. The fix tells the developer what to change
+  in which function so the test passes, based on the criterion and the
+  code. No fix for anything not listed.
+- In issues, list other real problems the tests did not catch: bugs in edge
+  cases, behaviour of the criteria that is missing, risky code. Use Medium
+  for likely bugs and Low for minor or style remarks; never High, since the
+  tests decide approval. Do not repeat a listed failure as an issue.
+- Location of an issue: the file and the function or class.
+- If the code is fine, leave issues empty."""
+
+
+class FailureFix(BaseModel):
+    """The review's fix for one failure of the report (DEC-160).
+
+    Attributes:
+        failure: Number of the failure in the request's list, starting at 0.
+        fix: What the Coder must change.
+    """
+    failure: int = Field(ge=0)
+    fix: NonEmptyStr
+
+
+class ReviewIssue(BaseModel):
+    """A problem the review found that the tests did not (DEC-139).
+
+    Attributes:
+        severity: Medium or Low; the review never blocks by itself.
+        location: File and function or class.
+        description: What is wrong.
+        fix: What the Coder should change.
+    """
+    severity: Literal["Medium", "Low"]
+    location: NonEmptyStr
+    description: NonEmptyStr
+    fix: NonEmptyStr
+
+
+class CodeReviewBase(BaseModel):
+    """A code review as written by the LLM, before the per-report checks.
+
+    Attributes:
+        fixes: One fix per failure of the report.
+        issues: Advisory issues.
+    """
+    fixes: list[FailureFix] = Field(default_factory=list)
+    issues: list[ReviewIssue] = Field(default_factory=list)
+
+
+def _code_review_schema(failure_count: int) -> type[CodeReviewBase]:
+    """Returns a CodeReview schema that needs one fix per failure (DEC-160).
+
+    Failures are numbered, like the criteria of the tests (DEC-148): models
+    copy a number more reliably than a location string.
+
+    Args:
+        failure_count: Number of the report's ``test`` issues.
+
+    Returns:
+        A subclass of ``CodeReviewBase`` named ``CodeReview``, the tool name
+        the LLM sees.
+    """
+
+    class CodeReview(CodeReviewBase):
+        """Review with exactly one fix per listed failure."""
+
+        @model_validator(mode="after")
+        def _check_fixes(self) -> "CodeReview":
+            """Returns the review if its fixes match the failures.
+
+            Returns:
+                This review.
+
+            Raises:
+                ValueError: If a fix is repeated, names an unknown failure
+                    or a failure has no fix.
+            """
+            given = [fix.failure for fix in self.fixes]
+            for index in given:
+                if given.count(index) > 1:
+                    raise ValueError(f"more than one fix for failure {index}")
+                if index >= failure_count:
+                    known = f"0 to {failure_count - 1}" if failure_count else "none; leave fixes empty"
+                    raise ValueError(f"failure {index} does not exist; failures: {known}")
+            for index in range(failure_count):
+                if index not in given:
+                    raise ValueError(f"no fix for failure {index}")
+            return self
+
+    return CodeReview
+
+
+def _render_review(
+    task: TaskSpec, sources: Mapping[str, str], tests: str, failures: list[Issue]
+) -> str:
+    """Returns the request of the review call.
+
+    Args:
+        task: The task reviewed.
+        sources: File name to content; the review sees the whole code.
+        tests: Source of the test file run.
+        failures: The report's ``test`` issues.
+
+    Returns:
+        Task, criteria, code, tests and failures, in Markdown.
+    """
+    criteria = "\n".join(
+        f"{k}. {_criterion_text(c)}" for k, c in enumerate(task.acceptance_criteria)
     )
+    files = "\n\n".join(
+        f"### {name}\n```python\n{content}\n```" for name, content in sources.items()
+    ) or "(no file of the task could be read)"
+    listed = "\n".join(
+        f"{k}. {issue.location}: {issue.description}" for k, issue in enumerate(failures)
+    ) or "None: every test passed."
+    return (
+        f"# Task {task.task_id}: {task.title}\n\n{task.description}\n\n"
+        f"## Acceptance criteria\n{criteria}\n\n## Code\n{files}\n\n"
+        f"## Tests run\n```python\n{tests}\n```\n\n## Failures\n{listed}"
+    )
+
+
+def _rebuilt(report: QAReport, issues: list[Issue], notes: list[str]) -> QAReport:
+    """Returns the report with new issues and notes, approval recomputed.
+
+    Args:
+        report: The report to change.
+        issues: The new issues.
+        notes: The new notes.
+
+    Returns:
+        A new validated report.
+    """
+    data = report.model_dump(exclude={"approved", "issues", "notes"})
+    return QAReport(**data, issues=issues, notes=notes)
+
+
+def review_code(
+    task: TaskSpec,
+    sources: Mapping[str, str],
+    tests: str,
+    report: QAReport,
+    model: BaseChatModel,
+    settings: QASettings,
+) -> QAReport:
+    """Adds the LLM review to a report: better fixes and advisory issues (DEC-160).
+
+    The review sees the whole code. Its fix for each ``test`` issue
+    replaces the default one, and its issues are added with source
+    ``review``. Approval stays with the tests (DEC-139).
+
+    Args:
+        task: The task reviewed.
+        sources: File name to content, for the task files read.
+        tests: Source of the test file run.
+        report: The report from the tests.
+        model: Chat model for the QA.
+        settings: QA settings; gives the review's attempts.
+
+    Returns:
+        The report with the review. If the review fails, the report with
+        the note "review unavailable"; below the default threshold it also
+        gets a ``qa`` High issue, since lower issues cannot be checked
+        (DEC-142). Nothing is raised.
+    """
+    failures = [issue for issue in report.issues if issue.source == "test"]
+    schema = _code_review_schema(len(failures))
+    try:
+        review = structured_call(
+            model,
+            schema,
+            REVIEW_SYSTEM_PROMPT,
+            _render_review(task, sources, tests, failures),
+            max_attempts=settings.max_attempts,
+        )
+    except Exception as e:
+        logger.warning("%s: review unavailable: %s: %s", task.task_id, type(e).__name__, e)
+        issues = list(report.issues)
+        # DEC-142: a stricter threshold cannot be checked without the review.
+        if report.blocking_severity != "High":
+            issues.append(Issue(
+                severity="High",
+                location="review",
+                description=f"review unavailable ({type(e).__name__}: {e}); issues below "
+                f"High could not be checked",
+                fix="Nothing for the Coder: the QA could not review this task; run the QA again.",
+                source="qa",
+            ))
+        return _rebuilt(report, issues, report.notes + ["review unavailable"])
+
+    fixes = {failures[fix.failure].location: fix.fix for fix in review.fixes}
+    issues = [
+        issue.model_copy(update={"fix": fixes[issue.location]}) if issue.source == "test" else issue
+        for issue in report.issues
+    ]
+    issues += [
+        Issue(**found.model_dump(), source="review") for found in review.issues
+    ]
+    logger.info(
+        "%s: review gave %d fixes and %d issues", task.task_id, len(review.fixes), len(review.issues)
+    )
+    return _rebuilt(report, issues, report.notes)
 
 
 async def run_qa(
@@ -1032,7 +1298,16 @@ async def run_qa(
 
         step = "test writing"
         model = model or get_chat_model(settings.model)
-        report = await asyncio.to_thread(_test_task, task, sources, model, settings, coder_dir)
+        report, tests = await asyncio.to_thread(
+            _test_task, task, sources, model, settings, coder_dir
+        )
+
+        # DEC-160: a qa failure cannot be approved, so it is not reviewed.
+        if not any(issue.source == "qa" for issue in report.issues):
+            step = "review"
+            report = await asyncio.to_thread(
+                review_code, task, sources, tests, report, model, settings
+            )
     except Exception as e:
         logger.exception("%s: QA step %r failed", task.task_id, step)
         report = _qa_failure(task, step, f"{type(e).__name__}: {e}", severity)
@@ -1044,3 +1319,133 @@ async def run_qa(
         len(report.blocking_issues()),
     )
     return report
+
+
+# The demo: the Module 3 linked list, with a bug in reverse (it empties the
+# list instead of reversing it).
+_DEMO_CODE = """class Node:
+    def __init__(self, value):
+        self.value = value
+        self.next = None
+
+
+class LinkedList:
+    def __init__(self):
+        self.head = None
+
+    def insert(self, value):
+        node = Node(value)
+        node.next = self.head
+        self.head = node
+
+    def delete(self, value):
+        previous, current = None, self.head
+        while current:
+            if current.value == value:
+                if previous:
+                    previous.next = current.next
+                else:
+                    self.head = current.next
+                return True
+            previous, current = current, current.next
+        return False
+
+    def search(self, value):
+        current = self.head
+        while current:
+            if current.value == value:
+                return True
+            current = current.next
+        return False
+
+    def reverse(self):
+        previous, current = None, self.head
+        while current:
+            following = current.next
+            current.next = previous
+            previous = current
+            current = following
+        self.head = current
+
+    def to_list(self):
+        values, current = [], self.head
+        while current:
+            values.append(current.value)
+            current = current.next
+        return values
+"""
+
+_DEMO_TASK = TaskSpec(
+    task_id="task_1",
+    title="Implement a linked list",
+    description=(
+        "Create linked_list.py with a LinkedList class: insert(value) adds at the "
+        "head, delete(value) removes the first occurrence and returns whether it was "
+        "found, search(value) returns whether the value is present, reverse() reverses "
+        "the list in place and to_list() returns the values from head to tail."
+    ),
+    acceptance_criteria=[
+        TaskCriterion(given="an empty list", when="insert(1) then insert(2)", then="to_list() is [2, 1]"),
+        TaskCriterion(
+            given="a list built with insert(1), insert(2), insert(3)",
+            when="delete(2)",
+            then="it returns True and to_list() is [3, 1]",
+        ),
+        TaskCriterion(
+            given="a list built with insert(5)",
+            when="search(5) and search(7)",
+            then="they return True and False",
+        ),
+        TaskCriterion(
+            given="a list built with insert(1), insert(2), insert(3)",
+            when="reverse()",
+            then="to_list() is [1, 2, 3]",
+        ),
+    ],
+    covers=["REQ-1"],
+    files=["linked_list.py"],
+    priority=1,
+)
+
+
+def _print_report(report: QAReport) -> None:
+    """Prints a QA report for people.
+
+    Args:
+        report: The report.
+    """
+    verdict = "APPROVED" if report.approved else "NOT APPROVED"
+    print(f"\nQA verdict for {report.task_id}: {verdict}")
+    print(f"Tests: {report.tests_passed} passed, {report.tests_failed} failed")
+    print(f"Blocking severity: {report.blocking_severity}")
+    print(f"Issues ({len(report.issues)}):")
+    for issue in report.issues:
+        print(f"  [{issue.severity}] {issue.source}: {issue.location}")
+        if issue.criterion:
+            print(f"      criterion: {issue.criterion}")
+        print(f"      problem:   {issue.description}")
+        print(f"      fix:       {issue.fix}")
+    for note in report.notes:
+        print(f"Note: {note}")
+
+
+def main() -> int:
+    """Runs the demo: the QA reviews a buggy linked list with the real model.
+
+    The code goes to a temporary Coder folder; the tests go to the QA's
+    folder (``QA_WORKSPACE_DIR``). The QA's steps are logged to stderr.
+
+    Returns:
+        The exit code: 0 once the report is printed.
+    """
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    with tempfile.TemporaryDirectory() as folder:
+        coder_dir = Path(folder).resolve()
+        (coder_dir / "linked_list.py").write_text(_DEMO_CODE, encoding="utf-8")
+        report = asyncio.run(run_qa(_DEMO_TASK, coder_dir=coder_dir))
+    _print_report(report)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

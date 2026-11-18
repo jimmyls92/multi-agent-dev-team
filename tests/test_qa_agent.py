@@ -1,10 +1,12 @@
 """Tests of the QA agent (Lab 3.2).
 
-Covers spec `lab_3_2_qa_agent` AC-3.2-12 .. AC-3.2-18, AC-3.2-20 (fallback
-fix) and AC-3.2-22 .. AC-3.2-25 (DEC-141, DEC-142, DEC-145, DEC-148,
-DEC-149, DEC-152, DEC-157, DEC-158, DEC-159), with a fake model, the
-linked-list task and, for ``run_qa``, the real MCP server over stdio and the
-real pytest sandbox.
+Covers spec `lab_3_2_qa_agent` AC-3.2-12 .. AC-3.2-26 (DEC-139, DEC-141,
+DEC-142, DEC-145, DEC-148, DEC-149, DEC-152, DEC-157 .. DEC-160), with a
+fake model, the linked-list task and, for ``run_qa``, the real MCP server
+over stdio and the real pytest sandbox. AC-3.2-26 uses the real model.
+
+Tests that script no review reply leave the review without answers, so it
+is unavailable; they count only the test-writing calls.
 """
 
 import ast
@@ -20,7 +22,7 @@ from mcp import StdioServerParameters
 import tools.code_executor
 import tools.mcp_client
 from agents.llm_helpers import StructuredOutputError
-from agents.qa_agent import QASettings, run_qa, write_tests
+from agents.qa_agent import DEFAULT_QA_MODEL, TESTS_SYSTEM_PROMPT, QASettings, run_qa, write_tests
 from orchestration.state import QAReport, TaskCriterion, TaskSpec
 from tests.fakes import ScriptedChatModel, tool_call_reply
 
@@ -141,6 +143,31 @@ def _text(messages: list) -> str:
     return " ".join(str(m.content) for m in messages)
 
 
+def _review_reply(review: dict, call_id: str = "review_1") -> AIMessage:
+    """Returns a scripted reply holding a code review.
+
+    Args:
+        review: Arguments of the ``CodeReview`` call.
+        call_id: ID of the tool call.
+
+    Returns:
+        The AI message calling the ``CodeReview`` tool.
+    """
+    return tool_call_reply("CodeReview", review, call_id)
+
+
+def _test_calls(model: ScriptedChatModel) -> list[list]:
+    """Returns the model calls that asked for a test draft.
+
+    Args:
+        model: The fake model after the run.
+
+    Returns:
+        The calls whose system prompt is the test-writing one.
+    """
+    return [call for call in model.calls if call[0].content == TESTS_SYSTEM_PROMPT]
+
+
 def _invalid(change: str) -> dict:
     """Returns the valid draft broken in one way.
 
@@ -168,6 +195,8 @@ def _invalid(change: str) -> dict:
         draft["preamble"] += "ll = LinkedList()\n"
     elif change == "extra-statement":
         first["code"] = "ll = LinkedList()\n" + first["code"]
+    elif change == "missing-import":
+        draft["preamble"] = ""
     return draft
 
 
@@ -327,7 +356,7 @@ async def test_ac_3_2_14_attempt_budget_report(task, settings, coder_dir, tmp_pa
 
     report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
 
-    assert len(model.calls) == 2
+    assert len(_test_calls(model)) == 2
     assert report.approved is False
     [issue] = report.issues
     assert (issue.source, issue.severity) == ("qa", "High")
@@ -441,6 +470,7 @@ def _report_files(settings: QASettings) -> list[Path]:
         ("criterion-missing", "criterion 1 has no test"),
         ("preamble-statement", "preamble"),
         ("extra-statement", "exactly one function named"),
+        ("missing-import", "never imported or defined: LinkedList"),
     ],
 )
 async def test_ac_3_2_13_invalid_draft_rejected(task, settings, coder_dir, tmp_path, change, error_text):
@@ -450,8 +480,8 @@ async def test_ac_3_2_13_invalid_draft_rejected(task, settings, coder_dir, tmp_p
 
     report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
 
-    assert len(model.calls) == 2
-    assert error_text in _text(model.calls[1])
+    assert len(_test_calls(model)) == 2
+    assert error_text in _text(_test_calls(model)[1])
     assert report.approved is True
     assert report.tests_passed == 2
     body = ast.parse((settings.workspace_dir / "task_1" / "test_task_1.py").read_text()).body
@@ -467,7 +497,7 @@ async def test_ac_3_2_14_attempt_budget(task, settings, coder_dir, tmp_path, bro
 
     report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
 
-    assert len(model.calls) == 2
+    assert len(_test_calls(model)) == 2
     assert report.approved is False
     [issue] = report.issues
     assert (issue.source, issue.severity) == ("qa", "High")
@@ -480,8 +510,8 @@ async def test_ac_3_2_15_test_collection_error_regenerates(task, settings, coder
 
     report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
 
-    assert len(model.calls) == 2
-    assert "function uses no argument 'x'" in _text(model.calls[1])
+    assert len(_test_calls(model)) == 2
+    assert "function uses no argument 'x'" in _text(_test_calls(model)[1])
     assert report.approved is True
     assert report.tests_passed == 2
 
@@ -512,12 +542,12 @@ async def test_ac_3_2_16_import_check(
     report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
 
     if regenerated:
-        assert len(model.calls) == 2
-        assert named in _text(model.calls[1])
+        assert len(_test_calls(model)) == 2
+        assert named in _text(_test_calls(model)[1])
         assert report.approved is True
         assert report.tests_passed == 2
     else:
-        assert len(model.calls) == 1
+        assert len(_test_calls(model)) == 1
         assert _report_files(settings) == []
         assert report.approved is False
         [issue] = report.issues
@@ -532,7 +562,7 @@ async def test_ac_3_2_17_coder_collection_error(task, settings, coder_dir, tmp_p
 
     report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
 
-    assert len(model.calls) == 1
+    assert len(_test_calls(model)) == 1
     assert report.approved is False
     [issue] = report.issues
     assert (issue.source, issue.severity) == ("test", "High")
@@ -562,12 +592,12 @@ async def test_ac_3_2_22_timeouts(task, settings, coder_dir, tmp_path, monkeypat
     assert time.monotonic() - started < 15
 
     if case == "b-test-hangs":
-        assert len(model.calls) == 2
-        assert "timed out" in _text(model.calls[1])
+        assert len(_test_calls(model)) == 2
+        assert "timed out" in _text(_test_calls(model)[1])
         assert report.approved is True
         assert report.tests_passed == 2
         return
-    assert len(model.calls) == 1
+    assert len(_test_calls(model)) == 1
     assert report.approved is False
     [issue] = report.issues
     assert (issue.source, issue.severity) == ("test", "High")
@@ -578,3 +608,117 @@ async def test_ac_3_2_22_timeouts(task, settings, coder_dir, tmp_path, monkeypat
         assert report.tests_passed == 1
     else:
         assert "whole test run timed out" in issue.description
+
+
+INSERT_ORDER = "test_task_1.py::test_insert_order"
+
+
+@pytest.mark.timeout(60)
+async def test_ac_3_2_19_correct_code_approved(task, settings, coder_dir, tmp_path):
+    low = {
+        "severity": "Low",
+        "location": "linked_list.py: LinkedList",
+        "description": "The class has no docstrings.",
+        "fix": "Add docstrings to LinkedList and its methods.",
+    }
+    model = ScriptedChatModel([_draft_reply(VALID_DRAFT), _review_reply({"fixes": [], "issues": [low]})])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert report.approved is True
+    assert report.tests_passed == 2
+    [issue] = report.issues
+    assert (issue.source, issue.severity, issue.fix) == ("review", "Low", low["fix"])
+    review_request = _text(model.calls[1])
+    assert "self.items.insert(0, value)" in review_request
+
+
+@pytest.mark.timeout(60)
+async def test_ac_3_2_20_failure_gets_review_fix(task, settings, coder_dir, tmp_path):
+    (coder_dir / "linked_list.py").write_text(TAIL_APPEND)
+    fix = "In insert, use self.items.insert(0, value) so new values go to the head."
+    model = ScriptedChatModel([
+        _draft_reply(VALID_DRAFT),
+        _review_reply({"fixes": [{"failure": 0, "fix": fix}], "issues": []}),
+    ])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert report.approved is False
+    [issue] = report.issues
+    assert (issue.source, issue.severity, issue.location) == ("test", "High", INSERT_ORDER)
+    assert issue.criterion == CRITERION_1
+    assert "[1, 2, 3]" in issue.description
+    assert issue.fix == fix
+    review_request = _text(model.calls[1])
+    assert INSERT_ORDER in review_request
+    assert "self.items.append(value)" in review_request
+
+
+@pytest.mark.timeout(60)
+async def test_review_missing_fix_is_corrected(task, settings, coder_dir, tmp_path):
+    (coder_dir / "linked_list.py").write_text(TAIL_APPEND)
+    fix = "In insert, add at the head."
+    model = ScriptedChatModel([
+        _draft_reply(VALID_DRAFT),
+        _review_reply({"fixes": [], "issues": []}, "review_1"),
+        _review_reply({"fixes": [{"failure": 0, "fix": fix}], "issues": []}, "review_2"),
+    ])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert "no fix for failure 0" in _text(model.calls[2])
+    assert report.issues[0].fix == fix
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize(
+    ("case", "code", "threshold", "approved"),
+    [
+        ("a-correct-high", LINKED_LIST, "High", True),
+        ("b-bug-high", TAIL_APPEND, "High", False),
+        ("c-correct-medium", LINKED_LIST, "Medium", False),
+    ],
+    ids=["a", "b", "c"],
+)
+async def test_ac_3_2_21_review_unavailable(task, settings, coder_dir, tmp_path, case, code, threshold, approved):
+    (coder_dir / "linked_list.py").write_text(code)
+    settings = settings.model_copy(update={"blocking_severity": threshold})
+    high = {"severity": "High", "location": "x", "description": "y", "fix": "z"}
+    model = ScriptedChatModel([
+        _draft_reply(VALID_DRAFT),
+        _review_reply({"fixes": [], "issues": [high]}, "review_1"),
+        _review_reply({"fixes": [], "issues": [high]}, "review_2"),
+    ])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert len(model.calls) == 3
+    assert report.approved is approved
+    assert "review unavailable" in report.notes
+    assert all(issue.source != "review" for issue in report.issues)
+    if case == "b-bug-high":
+        [issue] = report.issues
+        assert issue.fix.startswith("Make test_insert_order pass; it failed with: ")
+    if case == "c-correct-medium":
+        [issue] = report.issues
+        assert (issue.source, issue.severity) == ("qa", "High")
+        assert "review unavailable" in issue.description
+
+
+@pytest.mark.llm
+@pytest.mark.timeout(300)
+async def test_ac_3_2_26_live_qa(task, settings, coder_dir, tmp_path):
+    settings = settings.model_copy(update={"model": DEFAULT_QA_MODEL})
+
+    (coder_dir / "linked_list.py").write_text(TAIL_APPEND)
+    buggy = await run_qa(task, settings=settings, coder_dir=coder_dir)
+    (coder_dir / "linked_list.py").write_text(LINKED_LIST)
+    correct = await run_qa(task, settings=settings, coder_dir=coder_dir)
+
+    assert buggy.approved is False
+    assert any(
+        issue.source == "test" and issue.severity == "High" and issue.criterion == CRITERION_1
+        for issue in buggy.issues
+    ), buggy.issues
+    assert correct.approved is True, correct.issues
