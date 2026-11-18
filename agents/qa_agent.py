@@ -281,10 +281,13 @@ class _ImportContext(NamedTuple):
             file does not parse or uses ``import *``).
         task_text: Title, description and criteria, to tell the names the
             task asks for.
+        rejected: Task file to the MCP server's reason, for the files it
+            refused to read.
     """
     modules: dict[str, str]
     defined: dict[str, frozenset[str] | None]
     task_text: str
+    rejected: Mapping[str, str]
 
 
 class _ImportProblem(NamedTuple):
@@ -354,12 +357,16 @@ def _defined_names(source: str) -> frozenset[str] | None:
     return frozenset(names) if visit(tree.body) else None
 
 
-def _import_context(task: TaskSpec, sources: Mapping[str, str]) -> _ImportContext:
+def _import_context(
+    task: TaskSpec, sources: Mapping[str, str], rejected: Mapping[str, str]
+) -> _ImportContext:
     """Returns what a draft for the task may import.
 
     Args:
         task: The task to test.
         sources: File name to content, for the task files the QA read.
+        rejected: File name to the server's reason, for the files it
+            refused.
 
     Returns:
         The task's modules, the names each read file defines and the
@@ -376,7 +383,7 @@ def _import_context(task: TaskSpec, sources: Mapping[str, str]) -> _ImportContex
     text = " ".join(
         [task.title, task.description] + [_criterion_text(c) for c in task.acceptance_criteria]
     )
-    return _ImportContext(modules, defined, text)
+    return _ImportContext(modules, defined, text, rejected)
 
 
 def _is_installed(top_module: str) -> bool:
@@ -405,14 +412,19 @@ def _module_problems(module: str, imports: _ImportContext) -> list[_ImportProble
         imports: What the draft may import.
 
     Returns:
-        A ``coder`` problem for a task file the Coder never created, a
-        ``qa`` problem for a module that is neither a task module nor
-        installed, or nothing.
+        A ``coder`` problem for a task file the Coder never created or the
+        server could not read (with its reason), a ``qa`` problem for a
+        module that is neither a task module nor installed, or nothing.
     """
     if module in imports.modules:
         if module in imports.defined:
             return []
         file = imports.modules[module]
+        if file in imports.rejected and imports.rejected[file] != "no such file":
+            return [_ImportProblem(
+                "coder", file, f"{file} could not be read: {imports.rejected[file]}",
+                f"Make {file} a readable UTF-8 Python file as the task describes.",
+            )]
         return [_ImportProblem(
             "coder", file, f"{file} was not found in the Coder's folder",
             f"Create {file} as the task describes.",
@@ -474,6 +486,30 @@ def _import_problems(tree: ast.Module, imports: _ImportContext) -> list[_ImportP
 
 
 _MODULE_GLOBALS = frozenset({"__name__", "__file__", "__doc__"})
+
+# DEC-141: a skipped or xfailed test counts as neither passed nor failed,
+# so it could let a criterion through unverified.
+_SKIP_NAMES = frozenset({"skip", "skipif", "xfail", "importorskip"})
+
+
+def _skip_uses(tree: ast.Module) -> list[str]:
+    """Returns the ways a test file skips or xfails tests.
+
+    Args:
+        tree: The parsed test file.
+
+    Returns:
+        The names found, e.g. ``["xfail"]``, sorted and without repeats.
+    """
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in _SKIP_NAMES:
+            found.add(node.attr)
+        elif isinstance(node, ast.Name) and node.id in _SKIP_NAMES:
+            found.add(node.id)
+        elif isinstance(node, ast.alias) and node.name.split(".")[-1] in _SKIP_NAMES:
+            found.add(node.name.split(".")[-1])
+    return sorted(found)
 
 
 def _undefined_names(tree: ast.Module) -> list[str]:
@@ -544,8 +580,9 @@ def _pytest_draft_schema(
                 ValueError: If the preamble runs code, a test is not exactly
                     one function named like it, a name repeats or lacks the
                     ``test_`` prefix, a criterion index is unknown, a
-                    criterion has no test, an import is the QA's mistake or
-                    a name is used without being imported or defined.
+                    criterion has no test, an import is the QA's mistake, a
+                    name is used without being imported or defined, or a
+                    test is skipped or xfailed.
             """
             for node in _parse(self.preamble, "the preamble").body:
                 if not isinstance(node, _PREAMBLE_NODES):
@@ -584,6 +621,12 @@ def _pytest_draft_schema(
             mistakes = [p.message for p in _import_problems(tree, imports) if p.owner == "qa"]
             if mistakes:
                 raise ValueError("bad imports: " + "; ".join(mistakes))
+            skips = _skip_uses(tree)
+            if skips:
+                raise ValueError(
+                    f"tests must not skip or xfail (found {', '.join(skips)}); every "
+                    f"test must run and assert"
+                )
             undefined = _undefined_names(tree)
             if undefined:
                 raise ValueError(
@@ -698,12 +741,16 @@ def _interface(name: str, source: str) -> str:
     return ast.unparse(tree)
 
 
-def _render_task(task: TaskSpec, sources: Mapping[str, str]) -> str:
+def _render_task(
+    task: TaskSpec, sources: Mapping[str, str], rejected: Mapping[str, str]
+) -> str:
     """Returns the task and its code's interface as the request for the test call.
 
     Args:
         task: The task to test.
         sources: File name to content, for the task's files.
+        rejected: File name to the server's reason, for the files it
+            refused.
 
     Returns:
         Title, description, numbered criteria and each file's interface
@@ -712,14 +759,15 @@ def _render_task(task: TaskSpec, sources: Mapping[str, str]) -> str:
     criteria = "\n".join(
         f"{k}. {_criterion_text(c)}" for k, c in enumerate(task.acceptance_criteria)
     )
-    files = "\n\n".join(
+    files = [
         f"### {name}\n```python\n{_interface(name, content)}\n```"
         for name, content in sources.items()
-    ) or "(no file of the task could be read)"
+    ] + [f"### {name}\n(could not be read: {reason})" for name, reason in rejected.items()]
     return (
         f"# Task {task.task_id}: {task.title}\n\n{task.description}\n\n"
         f"## Acceptance criteria\n{criteria}\n\n"
-        f"## Code interface (bodies omitted)\n{files}"
+        f"## Code interface (bodies omitted)\n"
+        + ("\n\n".join(files) or "(no file of the task could be read)")
     )
 
 
@@ -729,6 +777,7 @@ def write_tests(
     model: BaseChatModel,
     settings: QASettings,
     feedback: str = "",
+    rejected: Mapping[str, str] | None = None,
 ) -> WrittenTests:
     """Writes the pytest file of a task from one validated model draft.
 
@@ -743,6 +792,8 @@ def write_tests(
         settings: The QA's settings; gives the folder.
         feedback: Why the previous draft could not be used, with its file
             when there is one; empty for the first draft.
+        rejected: File name to the server's reason, for the task files it
+            refused; None when none.
 
     Returns:
         The written file and the criterion each test checks.
@@ -751,10 +802,11 @@ def write_tests(
         StructuredOutputError: If the draft is invalid; nothing is written.
         Exception: Errors of the model call propagate.
     """
+    rejected = rejected or {}
     schema = _pytest_draft_schema(
-        len(task.acceptance_criteria), _import_context(task, sources)
+        len(task.acceptance_criteria), _import_context(task, sources, rejected)
     )
-    request = _render_task(task, sources)
+    request = _render_task(task, sources, rejected)
     if feedback:
         request += f"\n\n## Your previous draft could not be used\n{feedback}"
     draft = structured_call(model, schema, TESTS_SYSTEM_PROMPT, request, max_attempts=1)
@@ -914,12 +966,15 @@ def _judge_run(
         )
     if result.status == "timed_out":
         files = ", ".join(task.files)
+        # DEC-152, DEC-161: every test has its own timeout inside this bound,
+        # so the run's own limit is hit by an import that hangs.
         issue = Issue(
             severity="High",
             location=files,
             description=f"the whole test run timed out: {result.output.splitlines()[0]} "
-            f"The task's code hangs when it is imported.",
-            fix=f"Make sure importing {files} runs no endless loop or blocking call.",
+            f"Importing the task's code or a test hangs; no test result is available.",
+            fix=f"Make sure importing {files} runs no endless loop or blocking call, "
+            f"and that no function waits forever.",
             source="test",
         )
         return _coder_report(task, [issue], severity)
@@ -937,6 +992,11 @@ def _judge_run(
         )
         return _coder_report(task, [issue], severity)
 
+    if result.skipped:
+        return (
+            f"tests {', '.join(result.skipped)} were skipped; tests must not skip or "
+            f"xfail: every test must run and assert"
+        )
     issues = []
     for failure in result.failures:
         if failure.timed_out:
@@ -954,7 +1014,8 @@ def _judge_run(
         else:
             details = failure.details.strip().splitlines()
             description = failure.message.strip() or (details[-1] if details else "the test failed")
-        index = written.criteria.get(failure.name)
+        # A parametrized test is reported as name[case].
+        index = written.criteria.get(failure.name.split("[")[0])
         issues.append(
             Issue(
                 severity="High",
@@ -971,6 +1032,7 @@ def _judge_run(
 def _test_task(
     task: TaskSpec,
     sources: Mapping[str, str],
+    rejected: Mapping[str, str],
     model: BaseChatModel,
     settings: QASettings,
     coder_dir: Path,
@@ -985,6 +1047,8 @@ def _test_task(
     Args:
         task: The task to test.
         sources: File name to content, for the task files read.
+        rejected: File name to the server's reason, for the files it
+            refused.
         model: Chat model for the QA.
         settings: QA settings.
         coder_dir: The Coder's folder.
@@ -994,11 +1058,11 @@ def _test_task(
         unapproved report with a ``qa`` issue and an empty source when no
         draft was usable.
     """
-    imports = _import_context(task, sources)
+    imports = _import_context(task, sources, rejected)
     feedback = ""
     for attempt in range(1, settings.max_attempts + 1):
         try:
-            written = write_tests(task, sources, model, settings, feedback)
+            written = write_tests(task, sources, model, settings, feedback, rejected)
         except StructuredOutputError as e:
             logger.warning("%s: draft %d rejected: %s", task.task_id, attempt, e)
             feedback = f"It was rejected: {e}"
@@ -1018,11 +1082,15 @@ def _test_task(
             ]
             return _coder_report(task, issues, settings.blocking_severity), source
 
+        # DEC-161: room for every test's own timeout, so one hang per test
+        # never kills the run; the sandbox caps it at MAX_TIMEOUT.
+        run_timeout = code_executor.EXEC_TIMEOUT + len(written.criteria) * settings.test_timeout
+        result = run_pytest(written.path, coder_dir, settings.test_timeout, run_timeout)
         logger.info(
-            "%s: running pytest on %s (test timeout %ds, run timeout %ds)",
-            task.task_id, written.path.name, settings.test_timeout, code_executor.EXEC_TIMEOUT,
+            "%s: pytest command (test timeout %ds, run timeout %ds, at most %ds): %s",
+            task.task_id, settings.test_timeout, run_timeout, code_executor.MAX_TIMEOUT,
+            " ".join(result.command),
         )
-        result = run_pytest(written.path, coder_dir, settings.test_timeout)
         logger.info(
             "%s: pytest %s: %d passed, %d failed",
             task.task_id, result.status, result.passed, result.failed,
@@ -1236,11 +1304,14 @@ def review_code(
             ))
         return _rebuilt(report, issues, report.notes + ["review unavailable"])
 
-    fixes = {failures[fix.failure].location: fix.fix for fix in review.fixes}
-    issues = [
-        issue.model_copy(update={"fix": fixes[issue.location]}) if issue.source == "test" else issue
-        for issue in report.issues
-    ]
+    fixes = {fix.failure: fix.fix for fix in review.fixes}
+    issues = []
+    number = 0
+    for issue in report.issues:
+        if issue.source == "test":
+            issue = issue.model_copy(update={"fix": fixes[number]})
+            number += 1
+        issues.append(issue)
     issues += [
         Issue(**found.model_dump(), source="review") for found in review.issues
     ]
@@ -1255,7 +1326,7 @@ async def run_qa(
     model: BaseChatModel | None = None,
     settings: QASettings | None = None,
     coder_dir: Path | None = None,
-    errlog: TextIO = sys.stderr,
+    errlog: TextIO | None = None,
 ) -> QAReport:
     """Reviews one task: reads its code, writes and runs its tests, reports.
 
@@ -1271,6 +1342,7 @@ async def run_qa(
         coder_dir: The Coder's folder; None uses
             ``tools.handlers.CODER_WORKSPACE_DIR``.
         errlog: Where the MCP server's stderr goes; must be a real file.
+            None uses ``sys.stderr`` as it is when the QA runs.
 
     Returns:
         The report. Nothing is raised: a step that fails gives an
@@ -1287,19 +1359,19 @@ async def run_qa(
         severity = settings.blocking_severity
 
         step = "MCP read"
-        sources = await read_multiple_files(task.files, coder_dir, errlog)
+        files = await read_multiple_files(task.files, coder_dir, errlog or sys.stderr)
+        sources = files.contents
         logger.info(
             "%s: read %d of %d task files through MCP: %s",
             task.task_id, len(sources), len(task.files), ", ".join(sources) or "none",
         )
-        missing = [name for name in task.files if name not in sources]
-        if missing:
-            logger.warning("%s: files not readable: %s", task.task_id, ", ".join(missing))
+        for name, reason in files.rejected.items():
+            logger.warning("%s: %s not readable: %s", task.task_id, name, reason)
 
         step = "test writing"
         model = model or get_chat_model(settings.model)
         report, tests = await asyncio.to_thread(
-            _test_task, task, sources, model, settings, coder_dir
+            _test_task, task, sources, files.rejected, model, settings, coder_dir
         )
 
         # DEC-160: a qa failure cannot be approved, so it is not reviewed.

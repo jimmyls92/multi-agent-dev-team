@@ -24,7 +24,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, NamedTuple, TextIO
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -219,11 +219,23 @@ async def connect_and_run(
     }
 
 
+class FilesRead(NamedTuple):
+    """Result of reading several workspace files (DEC-145).
+
+    Attributes:
+        contents: File name to content, for the files the server read.
+        rejected: File name to the server's reason, for the files it
+            refused (missing, hidden, not UTF-8...).
+    """
+    contents: dict[str, str]
+    rejected: dict[str, str]
+
+
 async def read_multiple_files(
     filenames: list[str],
     workspace: Path | None = None,
     errlog: TextIO = sys.stderr,
-) -> dict[str, str]:
+) -> FilesRead:
     """Reads several workspace files through one stdio session (DEC-145).
 
     Args:
@@ -233,9 +245,9 @@ async def read_multiple_files(
         errlog: Where the server's stderr goes; must be a real file.
 
     Returns:
-        File name to content, for the files the server read; a file it
-        rejects (missing, hidden, too large...) is left out. Rejections are
-        told apart by the result's error flag, not by its text.
+        The contents of the files the server read and the reasons of the
+        ones it rejected. Rejections are told apart by the result's error
+        flag, not by its text.
 
     Raises:
         McpError: If the server does not answer within ``MCP_TIMEOUT``
@@ -244,12 +256,16 @@ async def read_multiple_files(
         ValueError: If ``MCP_TIMEOUT`` is invalid.
     """
     contents: dict[str, str] = {}
+    rejected: dict[str, str] = {}
     async with _open_session(workspace, errlog) as session:
         for filename in filenames:
             result = await session.call_tool("read_file", {"path": filename})
-            if not result.isError:
-                contents[filename] = result.content[0].text
-    return contents
+            text = result.content[0].text
+            if result.isError:
+                rejected[filename] = text.removeprefix("ERROR: ").removeprefix(f"{filename}: ")
+            else:
+                contents[filename] = text
+    return FilesRead(contents, rejected)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -82,11 +82,12 @@ async def test_read_multiple_files_skips_rejected(workspace, tmp_path):
     (workspace / "b.py").write_text("ERROR: not an error\n")
 
     with (tmp_path / "server.log").open("w") as errlog:
-        contents = await read_multiple_files(
+        files = await read_multiple_files(
             ["a.py", "missing.py", "b.py"], workspace=workspace, errlog=errlog
         )
 
-    assert contents == {"a.py": "x = 1\n", "b.py": "ERROR: not an error\n"}
+    assert files.contents == {"a.py": "x = 1\n", "b.py": "ERROR: not an error\n"}
+    assert files.rejected == {"missing.py": "no such file"}
 
 
 @pytest.mark.timeout(30)

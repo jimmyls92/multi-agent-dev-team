@@ -1,7 +1,8 @@
 """Tests of the QA agent (Lab 3.2).
 
-Covers spec `lab_3_2_qa_agent` AC-3.2-12 .. AC-3.2-26 (DEC-139, DEC-141,
-DEC-142, DEC-145, DEC-148, DEC-149, DEC-152, DEC-157 .. DEC-160), with a
+Covers spec `lab_3_2_qa_agent` AC-3.2-12 .. AC-3.2-26 and AC-3.2-28 ..
+AC-3.2-31 (DEC-139, DEC-141, DEC-142, DEC-145, DEC-148, DEC-149, DEC-152,
+DEC-157 .. DEC-161), with a
 fake model, the linked-list task and, for ``run_qa``, the real MCP server
 over stdio and the real pytest sandbox. AC-3.2-26 uses the real model.
 
@@ -22,8 +23,17 @@ from mcp import StdioServerParameters
 import tools.code_executor
 import tools.mcp_client
 from agents.llm_helpers import StructuredOutputError
-from agents.qa_agent import DEFAULT_QA_MODEL, TESTS_SYSTEM_PROMPT, QASettings, run_qa, write_tests
+from agents.qa_agent import (
+    DEFAULT_QA_MODEL,
+    TESTS_SYSTEM_PROMPT,
+    QASettings,
+    WrittenTests,
+    _judge_run,
+    run_qa,
+    write_tests,
+)
 from orchestration.state import QAReport, TaskCriterion, TaskSpec
+from tools.code_executor import PytestResult
 from tests.fakes import ScriptedChatModel, tool_call_reply
 
 LINKED_LIST = '''class LinkedList:
@@ -375,7 +385,8 @@ async def test_ac_3_2_23_mcp_server_cannot_start(task, settings, coder_dir, tmp_
     assert report.approved is False
     [issue] = report.issues
     assert (issue.source, issue.severity, issue.location) == ("qa", "High", "MCP read")
-    assert "Error" in issue.description
+    assert "FileNotFoundError" in issue.description
+    assert "no-such-python" in issue.description
 
 
 @pytest.mark.timeout(60)
@@ -428,7 +439,7 @@ async def test_ac_3_2_25_steps_logged(task, settings, coder_dir, tmp_path, caplo
 
     assert logged("read", "linked_list.py"), messages
     assert logged("wrote", "test_task_1.py", "2 tests"), messages
-    assert logged("pytest", "test timeout 2s"), messages
+    assert logged("pytest command", "-m pytest", "--timeout=2"), messages
     assert logged("pytest", "1 passed", "1 failed"), messages
     assert logged("verdict", "not approved", "1 blocking"), messages
 
@@ -722,3 +733,144 @@ async def test_ac_3_2_26_live_qa(task, settings, coder_dir, tmp_path):
         for issue in buggy.issues
     ), buggy.issues
     assert correct.approved is True, correct.issues
+
+
+
+def _with_order_test(code: str, preamble: str = "import pytest\nfrom linked_list import LinkedList\n") -> dict:
+    """Returns the valid draft with another code for the criterion-1 test.
+
+    Args:
+        code: The new code of ``test_insert_order``.
+        preamble: The draft's preamble.
+
+    Returns:
+        The changed draft.
+    """
+    draft = copy.deepcopy(VALID_DRAFT)
+    draft["preamble"] = preamble
+    draft["tests"][1]["code"] = code
+    return draft
+
+
+ORDER_BODY = (
+    "    ll = LinkedList()\n"
+    "    ll.insert(1)\n"
+    "    ll.insert(2)\n"
+    "    ll.insert(3)\n"
+    "    assert ll.to_list() == [3, 2, 1]\n"
+)
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize(
+    "code",
+    [
+        "@pytest.mark.xfail\ndef test_insert_order():\n" + ORDER_BODY,
+        "def test_insert_order():\n    pytest.skip('later')\n",
+        "@pytest.mark.skipif(True, reason='later')\ndef test_insert_order():\n" + ORDER_BODY,
+    ],
+    ids=["xfail", "skip-call", "skipif"],
+)
+async def test_ac_3_2_28_skips_never_approve(task, settings, coder_dir, tmp_path, code):
+    (coder_dir / "linked_list.py").write_text(TAIL_APPEND)
+    model = ScriptedChatModel([_draft_reply(_with_order_test(code), "d1"), _draft_reply(VALID_DRAFT, "d2")])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert len(_test_calls(model)) == 2
+    assert "must not skip" in _text(_test_calls(model)[1])
+    assert report.approved is False
+    assert (report.tests_passed, report.tests_failed) == (1, 1)
+
+
+def test_skipped_test_at_run_is_the_qa_fault(task, settings, tmp_path):
+    written = WrittenTests(
+        path=tmp_path / "qa" / "test_task_1.py",
+        criteria={"test_insert_search": 0, "test_insert_order": 1},
+    )
+    result = PytestResult(status="passed", passed=1, skipped=["test_insert_order"])
+
+    judged = _judge_run(task, written, result, settings, tmp_path / "coder")
+
+    assert isinstance(judged, str)
+    assert "test_insert_order" in judged
+    assert "skipped" in judged
+
+
+@pytest.mark.timeout(120)
+async def test_ac_3_2_29_run_timeout_scales(task, settings, coder_dir, tmp_path, monkeypatch):
+    settings = settings.model_copy(update={"test_timeout": 1})
+    monkeypatch.setattr(tools.code_executor, "EXEC_TIMEOUT", 3)
+    (coder_dir / "linked_list.py").write_text(
+        LINKED_LIST.replace("self.items.insert(0, value)", "while True:\n            pass")
+    )
+    draft = copy.deepcopy(VALID_DRAFT)
+    for k, test in enumerate(copy.deepcopy(VALID_DRAFT["tests"])):
+        test["name"] = f"{test['name']}_again"
+        test["code"] = test["code"].replace(f"def {VALID_DRAFT['tests'][k]['name']}", f"def {test['name']}")
+        draft["tests"].append(test)
+    model = ScriptedChatModel([_draft_reply(draft)])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert report.approved is False
+    assert report.tests_failed == 4
+    assert len(report.issues) == 4
+    for issue in report.issues:
+        assert (issue.source, issue.severity) == ("test", "High")
+        assert "timed out" in issue.description
+        assert "linked_list.py" in issue.description
+
+
+@pytest.mark.timeout(60)
+async def test_ac_3_2_30_parametrized_failure_criterion(task, settings, coder_dir, tmp_path):
+    (coder_dir / "linked_list.py").write_text(TAIL_APPEND)
+    code = (
+        '@pytest.mark.parametrize("n", [3])\n'
+        "def test_insert_order(n):\n"
+        "    ll = LinkedList()\n"
+        "    ll.insert(1)\n"
+        "    ll.insert(2)\n"
+        "    ll.insert(n)\n"
+        "    assert ll.to_list() == [3, 2, 1]\n"
+    )
+    model = ScriptedChatModel([_draft_reply(_with_order_test(code))])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    [issue] = report.issues
+    assert issue.location == "test_task_1.py::test_insert_order[3]"
+    assert issue.criterion == CRITERION_1
+
+
+@pytest.mark.timeout(60)
+async def test_ac_3_2_31_unreadable_task_file(task, settings, coder_dir, tmp_path):
+    (coder_dir / "linked_list.py").write_bytes(LINKED_LIST.encode() + b"# \xff\xfe\n")
+    model = ScriptedChatModel([_draft_reply(VALID_DRAFT, "d1"), _draft_reply(VALID_DRAFT, "d2")])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert len(_test_calls(model)) == 1
+    assert _report_files(settings) == []
+    assert report.approved is False
+    [issue] = report.issues
+    assert (issue.source, issue.severity, issue.location) == ("test", "High", "linked_list.py")
+    assert "could not be read" in issue.description
+    assert "utf-8" in issue.description.lower()
+    assert "not found" not in issue.description
+
+
+@pytest.mark.timeout(60)
+async def test_review_fixes_match_by_failure_number(task, settings, coder_dir, tmp_path):
+    task = task.model_copy(update={"description": task.description + " Nodes are Node objects."})
+    (coder_dir / "linked_list.py").write_text("class Other:\n    pass\n")
+    draft = copy.deepcopy(VALID_DRAFT)
+    draft["preamble"] = "from linked_list import LinkedList, Node\n"
+    model = ScriptedChatModel([
+        _draft_reply(draft),
+        _review_reply({"fixes": [{"failure": 0, "fix": "Add LinkedList."}, {"failure": 1, "fix": "Add Node."}]}),
+    ])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert [issue.fix for issue in report.issues] == ["Add LinkedList.", "Add Node."]

@@ -1,10 +1,10 @@
 # Spec: Lab 3.2 — QA agent
 
-- **Status:** approved
+- **Status:** done
 - **Sources:** lab handout `docs/labs/lab_3_2_qa_agent.md`, project guide
   (Module 3, `docs/course_reference.txt`, instructions 15 and 20), rubric
   C3.1, C3.3, C1.3, C4.5, C4.6
-- **Decisions:** DEC-137..DEC-160; also DEC-122, DEC-124, DEC-125, DEC-039,
+- **Decisions:** DEC-137..DEC-161; also DEC-122, DEC-124, DEC-125, DEC-039,
   DEC-040, DEC-044, DEC-088, DEC-091 (the why lives there; do not repeat it
   here)
 
@@ -375,6 +375,52 @@ the linked-list task.
   Coder folder and prints the verdict, the tests run and each issue with
   severity, location, criterion and fix
 
+### Review fixes (R1)
+
+All in `tests/test_qa_agent.py`, with the fake model, the real server and
+the linked-list task.
+
+#### AC-3.2-28 — A skipped test never counts towards approval
+
+- **Origin:** C3.3, DEC-141
+- **Verify:** integration — `test_ac_3_2_28_skips_never_approve`
+- **Given** the tail-append `linked_list.py` and a first draft whose
+  criterion-1 test, in three variants, is decorated with
+  `pytest.mark.xfail`, calls `pytest.skip`, or is decorated with
+  `pytest.mark.skipif(True, ...)`, then a valid second draft
+- **When** `run_qa` runs the task
+- **Then** the second test call contains the rejection of the skip; the
+  report comes from the second draft and is not approved
+
+#### AC-3.2-29 — The run timeout grows with the number of tests
+
+- **Origin:** C3.1, DEC-161
+- **Verify:** integration — `test_ac_3_2_29_run_timeout_scales`
+- **Given** `QA_TEST_TIMEOUT=1`, `EXEC_TIMEOUT=3`, a `linked_list.py` whose
+  `insert` loops forever and a draft with 4 tests that all call `insert`
+- **When** `run_qa` runs the task
+- **Then** the run is not stopped as a whole: the report holds 4 `test`
+  High issues, each saying its test timed out in `linked_list.py`
+
+#### AC-3.2-30 — A failing parametrized test keeps its criterion
+
+- **Origin:** C3.1, DEC-149
+- **Verify:** integration — `test_ac_3_2_30_parametrized_failure_criterion`
+- **Given** the tail-append `linked_list.py` and a draft whose criterion-1
+  test is parametrized with one case
+- **When** `run_qa` runs the task
+- **Then** its `test` issue's `criterion` is criterion 1's text
+
+#### AC-3.2-31 — A task file the server cannot read is reported with the reason
+
+- **Origin:** C4.6, DEC-152
+- **Verify:** integration — `test_ac_3_2_31_unreadable_task_file`
+- **Given** a `linked_list.py` that is not valid UTF-8 and a valid draft
+- **When** `run_qa` runs the task
+- **Then** pytest does not run; the report is not approved and holds a
+  `test` High issue saying `linked_list.py` could not be read, with the
+  server's reason, not that it was not found
+
 ## Tasks
 
 Task status: todo | map | in progress | review | done
@@ -420,9 +466,33 @@ Task status: todo | map | in progress | review | done
 - **Covers:** AC-3.2-19, AC-3.2-20 (review fix), AC-3.2-21, AC-3.2-26,
   AC-3.2-27
 
+### R1 — Fixes from the independent review · done
+
+- **Covers:** AC-3.2-28 .. AC-3.2-31; also review fixes matched by failure
+  number, `run_qa`'s `errlog` resolved at call time, the pytest command in
+  the log (AC-3.2-25), the cause checked in AC-3.2-23(a), DEC-140's code
+  field
+
 README: deferred to the Module 3 delivery, with Lab 3.1's T4.
 
 ## Independent review
 
-- **Date:**
-- **Findings and triage:** fix (→ task R1) | discard (reason) | backlog (IMP-NNN)
+- **Date:** 2026-11-18
+- **Findings and triage:**
+  1. High — skipped or xfail tests let a criterion pass unverified → fix
+     (R1, AC-3.2-28).
+  2. Medium — a whole-run timeout hides per-test results and is always
+     worded as an import hang → fix (R1, AC-3.2-29, DEC-161; DEC-152
+     corrected).
+  3. Low-Medium — a parametrized test loses its criterion → fix (R1,
+     AC-3.2-30).
+  4. Low — review fixes keyed by location reach the wrong issue when two
+     issues share it → fix (R1).
+  5. Low — a task file the server rejects is reported as missing → fix
+     (R1, AC-3.2-31).
+  6. Low — `run_qa`'s `errlog` default bound at import → fix (R1).
+  7. Low — weak assertions: AC-23(a) cause and AC-25 command → fix (R1);
+     AC-24 checking only the QA folder → discard (the AC asks for the
+     Coder folder intact, which the test checks).
+  8. Low — stale docs: DEC-140's code field → fix (R1); `CLAUDE.md`
+     status → discard (already up to date).

@@ -365,7 +365,10 @@ class PytestResult(BaseModel):
         passed: Tests that passed.
         failed: Tests that failed or errored.
         failures: Each failed test, from the JUnit report.
+        skipped: Names of the tests that were skipped or xfailed; they
+            count as neither passed nor failed.
         output: pytest's output; long text keeps its end.
+        command: The command that ran pytest; empty if it did not start.
     """
     model_config = ConfigDict(frozen=True)
 
@@ -373,7 +376,9 @@ class PytestResult(BaseModel):
     passed: int = 0
     failed: int = 0
     failures: list[TestFailure] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
     output: str = ""
+    command: list[str] = Field(default_factory=list)
 
 
 # DEC-147: pytest's exit codes for interrupted collection, usage error and
@@ -382,15 +387,15 @@ _COLLECTION_EXIT_CODES = (2, 4, 5)
 _TIMEOUT_MESSAGE = "Failed: Timeout"
 
 
-def _read_junit(path: Path) -> tuple[int, int, list[TestFailure]]:
+def _read_junit(path: Path) -> tuple[int, list[TestFailure], list[str]]:
     """Reads the counts and failures from a pytest JUnit report (DEC-147).
 
     Args:
         path: The JUnit XML file.
 
     Returns:
-        Tests passed, tests failed (failures plus errors) and one
-        TestFailure per failed test.
+        Tests passed, one TestFailure per failed test (failures plus
+        errors) and the names of the skipped tests.
 
     Raises:
         OSError: If the file cannot be read.
@@ -398,6 +403,7 @@ def _read_junit(path: Path) -> tuple[int, int, list[TestFailure]]:
     """
     passed = 0
     failures: list[TestFailure] = []
+    skipped: list[str] = []
     for case in ElementTree.parse(path).getroot().iter("testcase"):
         problem = case.find("failure")
         if problem is None:
@@ -405,6 +411,8 @@ def _read_junit(path: Path) -> tuple[int, int, list[TestFailure]]:
         if problem is None:
             if case.find("skipped") is None:
                 passed += 1
+            else:
+                skipped.append(case.get("name", ""))
             continue
         message = problem.get("message", "")
         failures.append(
@@ -415,7 +423,7 @@ def _read_junit(path: Path) -> tuple[int, int, list[TestFailure]]:
                 timed_out=message.startswith(_TIMEOUT_MESSAGE),
             )
         )
-    return passed, len(failures), failures
+    return passed, failures, skipped
 
 
 def run_pytest(
@@ -441,19 +449,20 @@ def run_pytest(
     """
     test_file = Path(test_file).resolve()
     junit = test_file.parent / "junit.xml"
+    command = [
+        sys.executable, "-m", "pytest", str(test_file),
+        # DEC-155: no project config, plugins or parent conftest.py;
+        # the per-test timeout covers the test function only.
+        "-c", os.devnull, "--rootdir", str(test_file.parent),
+        "--confcutdir", str(test_file.parent),
+        "-p", "no:cacheprovider", "-p", "pytest_timeout",
+        f"--timeout={test_timeout}", "-o", "timeout_func_only=true",
+        f"--junitxml={junit}", "-q",
+    ]
     try:
         junit.unlink(missing_ok=True)  # never read a previous run's report
         run = _run_sandboxed(
-            [
-                sys.executable, "-m", "pytest", str(test_file),
-                # DEC-155: no project config, plugins or parent conftest.py;
-                # the per-test timeout covers the test function only.
-                "-c", os.devnull, "--rootdir", str(test_file.parent),
-                "--confcutdir", str(test_file.parent),
-                "-p", "no:cacheprovider", "-p", "pytest_timeout",
-                f"--timeout={test_timeout}", "-o", "timeout_func_only=true",
-                f"--junitxml={junit}", "-q",
-            ],
+            command,
             cwd=str(code_dir),  # DEC-145
             timeout=timeout,
             extra_env={
@@ -463,7 +472,7 @@ def run_pytest(
             },
         )
     except OSError as e:
-        return PytestResult(status="error", output=f"Error starting pytest: {e}")
+        return PytestResult(status="error", output=f"Error starting pytest: {e}", command=command)
 
     output = _keep_end(_combine(run.stdout, run.stderr))
     if run.timed_out:
@@ -471,16 +480,25 @@ def run_pytest(
             status="timed_out",
             output=f"Error: the test run exceeded timeout of {run.timeout}s "
             f"and was killed.\n{output}",
+            command=command,
         )
     if run.returncode in _COLLECTION_EXIT_CODES:
-        return PytestResult(status="collection_error", output=output)
+        return PytestResult(status="collection_error", output=output, command=command)
     if run.returncode not in (0, 1):
-        return PytestResult(status="error", output=output)
+        return PytestResult(status="error", output=output, command=command)
     try:
-        passed, failed, failures = _read_junit(junit)
+        passed, failures, skipped = _read_junit(junit)
     except (OSError, ElementTree.ParseError) as e:
-        return PytestResult(status="error", output=f"Unreadable JUnit report: {e}\n{output}")
+        return PytestResult(
+            status="error", output=f"Unreadable JUnit report: {e}\n{output}", command=command
+        )
     status = "passed" if run.returncode == 0 else "failed"
     return PytestResult(
-        status=status, passed=passed, failed=failed, failures=failures, output=output
+        status=status,
+        passed=passed,
+        failed=len(failures),
+        failures=failures,
+        skipped=skipped,
+        output=output,
+        command=command,
     )

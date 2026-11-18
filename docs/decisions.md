@@ -2837,7 +2837,8 @@ A decision can mix bases; then each part states its own.
   them); Coder with read-only access to the tests (needs a new tool and
   invites overfitting); keep `WORKSPACE_DIR` for the Coder (fewer changes,
   but the name no longer says whose folder it is).
-- Code: `tools/handlers.py` (`CODER_WORKSPACE_DIR`); the QA side from Lab 3.2 T2
+- Code: `tools/handlers.py` (`CODER_WORKSPACE_DIR`), `agents/qa_agent.py`
+  (`load_qa_settings`, `write_tests`), `tools/code_executor.py` (`run_pytest`)
 
 ### DEC-141 The QA retries its own broken output within one `QA_MAX_ATTEMPTS` budget
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -2860,7 +2861,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: send every failure to the Coder (wastes its iterations);
   separate budgets for invalid output and uncollectable tests (more
   control, rarely useful).
-- Code: `agents/qa_agent.py` (`write_tests`, `_test_task`, `run_qa`)
+- Code: `agents/qa_agent.py` (`write_tests`, `_test_task`, `_skip_uses`, `_judge_run`, `run_qa`)
 
 ### DEC-142 A QA that cannot do its job returns a structured, unapproved result
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3087,9 +3088,11 @@ A decision can mix bases; then each part states its own.
   - Each test gets its own timeout through `pytest-timeout`
     (`QA_TEST_TIMEOUT`, default 2 s, at least 1 and lower than
     `EXEC_TIMEOUT`); a timed-out test is blamed by the frame where it was
-    stuck, and the other tests keep running. `EXEC_TIMEOUT` still bounds
-    the whole run; since the test file runs nothing at import, a run that
-    hits it is the Coder's.
+    stuck, and the other tests keep running. The whole run has its own
+    bound (DEC-161); a run that hits it is the Coder's, since the test
+    file runs almost nothing at import: only decorator arguments and
+    default values, a rare way for the QA to hang that is accepted (the
+    issue is worded neutrally). Corrected after the Lab 3.2 review.
   - A failure inside a test that runs (a false assertion or any exception)
     is the Coder's.
 - Why: the Coder gets every defect that is its own, and is never sent the
@@ -3267,3 +3270,27 @@ A decision can mix bases; then each part states its own.
   a regeneration); review even after a `qa` failure (calls spent on a
   report that cannot be approved).
 - Code: `agents/qa_agent.py` (`review_code`, `_code_review_schema`, `run_qa`)
+
+### DEC-161 The QA's pytest run timeout grows with the number of tests
+- Date: 2026-11-18 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred; refines DEC-152
+- Context: each test has its own timeout (`QA_TEST_TIMEOUT`, 2 s) and the
+  run had `EXEC_TIMEOUT` (10 s). When the Coder's `insert` hangs and six
+  tests call it, six 2 s timeouts pass 10 s: the run is killed before
+  pytest writes its report, every per-test result is lost and the issue
+  said the code hangs at import (found by the Lab 3.2 review).
+- Decision: `run_qa` gives pytest `EXEC_TIMEOUT + tests × QA_TEST_TIMEOUT`
+  seconds, clamped by the sandbox to `MAX_TIMEOUT` (30 s). The total is a
+  ceiling: a run that finishes earlier ends earlier. A run that still
+  hits it is a `test` High issue worded neutrally ("importing the task's
+  code or a test hangs").
+- Why: every hanging test is stopped by its own timeout and reported
+  with the file and line where it hung, so the Coder gets a precise fix.
+  The run is still bounded (C3.1). The Coder's `exec_python` keeps its
+  10 s default (C1.3); this only sizes the QA's test run, from
+  configurable values, and is documented in the README so it is not
+  mistaken for a missing timeout.
+- Alternatives: keep `EXEC_TIMEOUT` for the whole run (loses results
+  when several tests hang); forbid every expression at import in the
+  test file (breaks `parametrize` for a rare case).
+- Code: `agents/qa_agent.py` (`_test_task`, `_judge_run`)
