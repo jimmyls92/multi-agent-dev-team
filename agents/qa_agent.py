@@ -11,7 +11,10 @@ module is imported, so a wrong value stops the program at startup
 with a per-task schema and writes it to the QA's folder (DEC-148); the
 model sees the criteria and only the interface of the code (DEC-158).
 ``run_qa`` chains the steps and never raises: anything that stops it
-becomes a ``qa`` issue in an unapproved report (DEC-142).
+becomes a ``qa`` issue in an unapproved report (DEC-142). Each failure is
+blamed on the file where it happens: the Coder's failures become issues,
+the QA's own make it write a new draft within ``QA_MAX_ATTEMPTS`` model
+calls (DEC-152, DEC-159).
 
 Attributes:
     DEFAULT_QA_MODEL: Small, fast model used when ``QA_MODEL`` is unset
@@ -27,12 +30,14 @@ Typical usage example:
 
 import ast
 import asyncio
+import importlib.machinery
 import logging
 import os
+import re
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TextIO, get_args
+from typing import Literal, NamedTuple, TextIO, get_args
 
 from dotenv import load_dotenv
 from langchain_core.language_models import BaseChatModel
@@ -48,7 +53,7 @@ from orchestration.state import (
     TaskCriterion,
     TaskSpec,
 )
-from tools import handlers
+from tools import code_executor, handlers
 from tools.code_executor import EXEC_TIMEOUT, PytestResult, run_pytest
 from tools.mcp_client import read_multiple_files
 
@@ -253,14 +258,223 @@ def _parse(source: str, what: str) -> ast.Module:
         raise ValueError(f"{what} is invalid Python: {e.msg} (line {e.lineno})") from None
 
 
-def _pytest_draft_schema(criteria_count: int) -> type[PytestDraftBase]:
+Owner = Literal["coder", "qa"]
+
+
+class _ImportContext(NamedTuple):
+    """What a test draft may import for one task (DEC-152).
+
+    Attributes:
+        modules: Module name to task file, for the task's Python files.
+        defined: Module name to the names its file defines at top level,
+            for the files the QA read; None when they cannot be known (the
+            file does not parse or uses ``import *``).
+        task_text: Title, description and criteria, to tell the names the
+            task asks for.
+    """
+    modules: dict[str, str]
+    defined: dict[str, frozenset[str] | None]
+    task_text: str
+
+
+class _ImportProblem(NamedTuple):
+    """One import of a draft that would fail, with its owner (DEC-152).
+
+    Attributes:
+        owner: ``coder`` when the Coder did not provide what the task asks
+            for; ``qa`` when the draft asks for something that does not
+            exist.
+        file: The task file concerned; empty when none.
+        message: What is wrong.
+        fix: What the Coder must do; empty for the QA's problems.
+    """
+    owner: Owner
+    file: str
+    message: str
+    fix: str = ""
+
+
+def _defined_names(source: str) -> frozenset[str] | None:
+    """Returns the names a module defines at top level.
+
+    Looks into ``if``, ``try``, ``with`` and loop blocks, never into
+    functions or classes.
+
+    Args:
+        source: The module's source.
+
+    Returns:
+        Functions, classes, assigned variables and imported names; None if
+        the source does not parse or uses ``import *``.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    names: set[str] = set()
+
+    def visit(body: list[ast.stmt]) -> bool:
+        """Adds the names of a block; returns False on ``import *``.
+
+        Args:
+            body: Statements of the block.
+
+        Returns:
+            Whether every name could be known.
+        """
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(node.name)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                names.update(n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name))
+            elif isinstance(node, ast.Import):
+                names.update(a.asname or a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if any(a.name == "*" for a in node.names):
+                    return False
+                names.update(a.asname or a.name for a in node.names)
+            else:
+                blocks = [getattr(node, f, []) for f in ("body", "orelse", "finalbody")]
+                blocks += [h.body for h in getattr(node, "handlers", [])]
+                if not all(visit(b) for b in blocks if isinstance(b, list)):
+                    return False
+        return True
+
+    return frozenset(names) if visit(tree.body) else None
+
+
+def _import_context(task: TaskSpec, sources: Mapping[str, str]) -> _ImportContext:
+    """Returns what a draft for the task may import.
+
+    Args:
+        task: The task to test.
+        sources: File name to content, for the task files the QA read.
+
+    Returns:
+        The task's modules, the names each read file defines and the
+        task's text.
+    """
+    modules = {
+        name.removesuffix(".py").replace("/", "."): name
+        for name in task.files
+        if name.endswith(".py")
+    }
+    defined = {
+        module: _defined_names(sources[name]) for module, name in modules.items() if name in sources
+    }
+    text = " ".join(
+        [task.title, task.description] + [_criterion_text(c) for c in task.acceptance_criteria]
+    )
+    return _ImportContext(modules, defined, text)
+
+
+def _is_installed(top_module: str) -> bool:
+    """Returns whether a top-level module can be imported by the tests.
+
+    The tests run with only the Coder's folder on the path, so this
+    project's own folder does not count.
+
+    Args:
+        top_module: First part of a module name, e.g. ``pytest``.
+
+    Returns:
+        True for standard-library and installed modules.
+    """
+    if top_module in sys.stdlib_module_names or top_module in sys.builtin_module_names:
+        return True
+    paths = [entry for entry in sys.path if entry and Path(entry).resolve() != _REPO_ROOT]
+    return importlib.machinery.PathFinder.find_spec(top_module, paths) is not None
+
+
+def _module_problems(module: str, imports: _ImportContext) -> list[_ImportProblem]:
+    """Returns the problem of importing one module, if any (DEC-152).
+
+    Args:
+        module: Full module name.
+        imports: What the draft may import.
+
+    Returns:
+        A ``coder`` problem for a task file the Coder never created, a
+        ``qa`` problem for a module that is neither a task module nor
+        installed, or nothing.
+    """
+    if module in imports.modules:
+        if module in imports.defined:
+            return []
+        file = imports.modules[module]
+        return [_ImportProblem(
+            "coder", file, f"{file} was not found in the Coder's folder",
+            f"Create {file} as the task describes.",
+        )]
+    if any(task_module.startswith(module + ".") for task_module in imports.modules):
+        return []
+    if _is_installed(module.split(".")[0]):
+        return []
+    known = ", ".join(imports.modules) or "none"
+    return [_ImportProblem(
+        "qa", "", f"{module} is neither a task module ({known}) nor an installed package"
+    )]
+
+
+def _import_problems(tree: ast.Module, imports: _ImportContext) -> list[_ImportProblem]:
+    """Returns the imports of a draft that would fail, each with its owner (DEC-152).
+
+    A missing task file, or a missing name the task mentions, is the
+    Coder's; anything else that does not exist is the QA's.
+
+    Args:
+        tree: The parsed test file.
+        imports: What the draft may import.
+
+    Returns:
+        The problems, without repeats, in source order.
+    """
+    problems: list[_ImportProblem] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                problems += _module_problems(alias.name, imports)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                problems.append(_ImportProblem(
+                    "qa", "", "relative imports are not allowed; import task modules by name"
+                ))
+                continue
+            found = _module_problems(node.module, imports)
+            problems += found
+            names = imports.defined.get(node.module)
+            if found or names is None:
+                continue
+            file = imports.modules[node.module]
+            for alias in node.names:
+                if alias.name in names:
+                    continue
+                if re.search(rf"\b{re.escape(alias.name)}\b", imports.task_text):
+                    problems.append(_ImportProblem(
+                        "coder", file, f"{file} does not define {alias.name}, which the task names",
+                        f"Define {alias.name} in {file} as the task describes.",
+                    ))
+                else:
+                    available = ", ".join(sorted(names)) or "nothing"
+                    problems.append(_ImportProblem(
+                        "qa", "", f"{file} does not define {alias.name}; it defines: {available}"
+                    ))
+    return list(dict.fromkeys(problems))
+
+
+def _pytest_draft_schema(
+    criteria_count: int, imports: _ImportContext
+) -> type[PytestDraftBase]:
     """Returns a PytestDraft schema with the checks of one task (DEC-148).
 
-    A failed check is a validation error, so the structured call sends it
-    back to the model, as the PM does for coverage (DEC-091).
+    A failed check is a validation error, so the model is told what to
+    correct (DEC-091, DEC-159).
 
     Args:
         criteria_count: Number of acceptance criteria of the task.
+        imports: What the draft may import; the QA's import mistakes are
+            rejected here, the Coder's are left for ``run_qa`` (DEC-152).
 
     Returns:
         A subclass of ``PytestDraftBase`` with the checks, named ``PytestDraft``
@@ -280,8 +494,8 @@ def _pytest_draft_schema(criteria_count: int) -> type[PytestDraftBase]:
             Raises:
                 ValueError: If the preamble runs code, a test is not exactly
                     one function named like it, a name repeats or lacks the
-                    ``test_`` prefix, a criterion index is unknown or a
-                    criterion has no test.
+                    ``test_`` prefix, a criterion index is unknown, a
+                    criterion has no test or an import is the QA's mistake.
             """
             for node in _parse(self.preamble, "the preamble").body:
                 if not isinstance(node, _PREAMBLE_NODES):
@@ -316,11 +530,13 @@ def _pytest_draft_schema(criteria_count: int) -> type[PytestDraftBase]:
             for index in range(criteria_count):
                 if index not in covered:
                     raise ValueError(f"criterion {index} has no test")
-            _parse(self.render(), "the assembled test file")
+            tree = _parse(self.render(), "the assembled test file")
+            mistakes = [p.message for p in _import_problems(tree, imports) if p.owner == "qa"]
+            if mistakes:
+                raise ValueError("bad imports: " + "; ".join(mistakes))
             return self
 
     return PytestDraft
-
 
 
 class WrittenTests(BaseModel):
@@ -456,33 +672,36 @@ def write_tests(
     sources: Mapping[str, str],
     model: BaseChatModel,
     settings: QASettings,
+    feedback: str = "",
 ) -> WrittenTests:
-    """Writes the pytest file of a task from a validated model draft.
+    """Writes the pytest file of a task from one validated model draft.
+
+    Makes exactly one model call; ``run_qa`` decides whether to try again
+    (DEC-159).
 
     Args:
         task: The task to test.
         sources: File name to content, for the task's files; the model
             sees only their interface (DEC-158).
         model: Chat model for the QA.
-        settings: The QA's settings; gives the folder and the attempts.
+        settings: The QA's settings; gives the folder.
+        feedback: Why the previous draft could not be used, with its file
+            when there is one; empty for the first draft.
 
     Returns:
         The written file and the criterion each test checks.
 
     Raises:
-        StructuredOutputError: If no draft is valid within
-            ``settings.max_attempts`` model calls; nothing is written
-            (DEC-141).
+        StructuredOutputError: If the draft is invalid; nothing is written.
         Exception: Errors of the model call propagate.
     """
-    schema = _pytest_draft_schema(len(task.acceptance_criteria))
-    draft = structured_call(
-        model,
-        schema,
-        TESTS_SYSTEM_PROMPT,
-        _render_task(task, sources),
-        max_attempts=settings.max_attempts,
+    schema = _pytest_draft_schema(
+        len(task.acceptance_criteria), _import_context(task, sources)
     )
+    request = _render_task(task, sources)
+    if feedback:
+        request += f"\n\n## Your previous draft could not be used\n{feedback}"
+    draft = structured_call(model, schema, TESTS_SYSTEM_PROMPT, request, max_attempts=1)
     folder = settings.workspace_dir / task.task_id
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"test_{task.task_id}.py"
@@ -527,39 +746,159 @@ def _qa_failure(task: TaskSpec, step: str, description: str, severity: Severity)
     return QAReport(task_id=task.task_id, issues=[issue], blocking_severity=severity)
 
 
-def _report_from_run(
-    task: TaskSpec, written: WrittenTests, result: PytestResult, severity: Severity
-) -> QAReport:
-    """Returns the report of a test run (DEC-149).
+_FRAME = re.compile(r"^\s*(?P<path>\S+?\.py):(?P<line>\d+):", re.MULTILINE)
 
-    Each failed test is a ``test`` High issue tied to its criterion. A run
-    that did not give test results is a ``qa`` High issue until the blame of
-    DEC-152 arrives (Lab 3.2 T6).
+
+class _Blame(NamedTuple):
+    """Where a failure happened (DEC-152).
+
+    Attributes:
+        owner: ``coder`` for a file in the Coder's folder, ``qa`` otherwise.
+        file: The file, relative to its folder; empty when no frame was in
+            either folder.
+        line: Line in that file; 0 when unknown.
+    """
+    owner: Owner
+    file: str
+    line: int
+
+
+def _blame(traceback: str, coder_dir: Path, qa_dir: Path) -> _Blame:
+    """Returns the owner of the deepest traceback frame in either folder (DEC-152).
+
+    pytest prints each frame as ``path.py:line: ...``, relative to its
+    working directory, which is the Coder's folder.
+
+    Args:
+        traceback: pytest's text for the failure.
+        coder_dir: The Coder's folder.
+        qa_dir: The folder of the task's test file.
+
+    Returns:
+        The blame; the QA's, with no file, when no frame is in either
+        folder.
+    """
+    blame = _Blame("qa", "", 0)
+    for match in _FRAME.finditer(traceback):
+        path = (coder_dir / match["path"]).resolve()
+        line = int(match["line"])
+        if path.is_relative_to(coder_dir):
+            blame = _Blame("coder", path.relative_to(coder_dir).as_posix(), line)
+        elif path.is_relative_to(qa_dir):
+            blame = _Blame("qa", path.name, line)
+    return blame
+
+
+def _error_line(output: str) -> str:
+    """Returns the last ``E`` line of pytest's output: the error itself.
+
+    Args:
+        output: pytest's output.
+
+    Returns:
+        The line without its ``E`` marker, e.g. ``RuntimeError: boom``;
+        empty when there is none.
+    """
+    lines = [line[1:].strip() for line in output.splitlines() if line.startswith("E ")]
+    return lines[-1] if lines else ""
+
+
+def _coder_report(task: TaskSpec, issues: list[Issue], severity: Severity, result: PytestResult | None = None) -> QAReport:
+    """Returns the report of a run whose failures are the Coder's.
+
+    Args:
+        task: The task reviewed.
+        issues: The Coder's issues.
+        severity: The blocking threshold of the report.
+        result: The pytest run, for its counts; None when pytest did not run.
+
+    Returns:
+        The report; ``approved`` is computed by ``QAReport``.
+    """
+    return QAReport(
+        task_id=task.task_id,
+        issues=issues,
+        tests_passed=result.passed if result else 0,
+        tests_failed=result.failed if result else 0,
+        blocking_severity=severity,
+    )
+
+
+def _judge_run(
+    task: TaskSpec,
+    written: WrittenTests,
+    result: PytestResult,
+    settings: QASettings,
+    coder_dir: Path,
+) -> QAReport | str:
+    """Returns the report of a test run, or why the draft is the QA's fault.
+
+    Each failure is blamed on the file where it happened (DEC-152). The
+    Coder's failures are ``test`` High issues tied to their criterion
+    (DEC-149). A whole run that times out is the Coder's, since the test
+    file runs nothing at import (DEC-157). An unusable run is a ``qa``
+    issue (DEC-156).
 
     Args:
         task: The task reviewed.
         written: The test file and the criterion of each test.
         result: The pytest run.
-        severity: The blocking threshold of the report.
+        settings: QA settings; gives the threshold and the test timeout.
+        coder_dir: The Coder's folder.
 
     Returns:
-        The report; ``approved`` is computed by ``QAReport``.
+        The report, or the error to send back to the model when the QA's
+        own tests broke (a collection error or a timeout in its code).
     """
-    if result.status not in ("passed", "failed"):
+    severity = settings.blocking_severity
+    qa_dir = written.path.parent
+    if result.status == "error":
         return _qa_failure(
-            task,
-            "test run",
-            f"pytest could not run the tests ({result.status}): {_tail(result.output)}",
-            severity,
+            task, "test run", f"pytest could not run the tests: {_tail(result.output)}", severity
         )
+    if result.status == "timed_out":
+        files = ", ".join(task.files)
+        issue = Issue(
+            severity="High",
+            location=files,
+            description=f"the whole test run timed out: {result.output.splitlines()[0]} "
+            f"The task's code hangs when it is imported.",
+            fix=f"Make sure importing {files} runs no endless loop or blocking call.",
+            source="test",
+        )
+        return _coder_report(task, [issue], severity)
+    if result.status == "collection_error":
+        blame = _blame(result.output, coder_dir, qa_dir)
+        if blame.owner == "qa":
+            return f"pytest could not collect your tests:\n{_tail(result.output)}"
+        error = _error_line(result.output) or _tail(result.output, 300)
+        issue = Issue(
+            severity="High",
+            location=f"{blame.file}:{blame.line}",
+            description=f"{error} (raised while importing {blame.file}, line {blame.line})",
+            fix=f"Fix {blame.file} so it can be imported; it raised: {error}",
+            source="test",
+        )
+        return _coder_report(task, [issue], severity)
+
     issues = []
     for failure in result.failures:
+        if failure.timed_out:
+            blame = _blame(failure.details, coder_dir, qa_dir)
+            if blame.owner == "qa":
+                return (
+                    f"{failure.name} timed out after {settings.test_timeout}s in the test's "
+                    f"own code (line {blame.line}); tests must be fast and must not wait "
+                    f"or loop forever."
+                )
+            description = (
+                f"{failure.name} timed out after {settings.test_timeout}s in "
+                f"{blame.file} (line {blame.line})"
+            )
+        else:
+            details = failure.details.strip().splitlines()
+            description = failure.message.strip() or (details[-1] if details else "the test failed")
         index = written.criteria.get(failure.name)
-        criterion = (
-            _criterion_text(task.acceptance_criteria[index]) if index is not None else ""
-        )
-        details = failure.details.strip().splitlines()
-        description = failure.message.strip() or (details[-1] if details else "the test failed")
         issues.append(
             Issue(
                 severity="High",
@@ -567,15 +906,81 @@ def _report_from_run(
                 description=description,
                 fix=f"Make {failure.name} pass; it failed with: {description}",
                 source="test",
-                criterion=criterion,
+                criterion=_criterion_text(task.acceptance_criteria[index]) if index is not None else "",
             )
         )
-    return QAReport(
-        task_id=task.task_id,
-        issues=issues,
-        tests_passed=result.passed,
-        tests_failed=result.failed,
-        blocking_severity=severity,
+    return _coder_report(task, issues, severity, result)
+
+
+def _test_task(
+    task: TaskSpec,
+    sources: Mapping[str, str],
+    model: BaseChatModel,
+    settings: QASettings,
+    coder_dir: Path,
+) -> QAReport:
+    """Writes and runs the task's tests, drafting again on the QA's own failures.
+
+    Each draft is one model call, and at most ``settings.max_attempts``
+    are made (DEC-141, DEC-159). A draft that imports a task file or name
+    the Coder did not provide is not run: those are the Coder's issues
+    (DEC-152).
+
+    Args:
+        task: The task to test.
+        sources: File name to content, for the task files read.
+        model: Chat model for the QA.
+        settings: QA settings.
+        coder_dir: The Coder's folder.
+
+    Returns:
+        The report of the first usable draft, or an unapproved report with
+        a ``qa`` issue when no draft was usable.
+    """
+    imports = _import_context(task, sources)
+    feedback = ""
+    for attempt in range(1, settings.max_attempts + 1):
+        try:
+            written = write_tests(task, sources, model, settings, feedback)
+        except StructuredOutputError as e:
+            logger.warning("%s: draft %d rejected: %s", task.task_id, attempt, e)
+            feedback = f"It was rejected: {e}"
+            continue
+        logger.info("%s: wrote %s with %d tests", task.task_id, written.path, len(written.criteria))
+        source = written.path.read_text(encoding="utf-8")
+
+        missing = [p for p in _import_problems(ast.parse(source), imports) if p.owner == "coder"]
+        if missing:
+            logger.info(
+                "%s: not running pytest; the Coder did not provide: %s",
+                task.task_id, "; ".join(p.message for p in missing),
+            )
+            issues = [
+                Issue(severity="High", location=p.file, description=p.message, fix=p.fix, source="test")
+                for p in missing
+            ]
+            return _coder_report(task, issues, settings.blocking_severity)
+
+        logger.info(
+            "%s: running pytest on %s (test timeout %ds, run timeout %ds)",
+            task.task_id, written.path.name, settings.test_timeout, code_executor.EXEC_TIMEOUT,
+        )
+        result = run_pytest(written.path, coder_dir, settings.test_timeout)
+        logger.info(
+            "%s: pytest %s: %d passed, %d failed",
+            task.task_id, result.status, result.passed, result.failed,
+        )
+        judged = _judge_run(task, written, result, settings, coder_dir)
+        if isinstance(judged, QAReport):
+            return judged
+        logger.warning("%s: draft %d broke by the QA's fault: %s", task.task_id, attempt, judged)
+        feedback = f"```python\n{source}```\n{judged}"
+    return _qa_failure(
+        task,
+        "test writing",
+        f"no runnable tests could be produced in {settings.max_attempts} attempts; "
+        f"last error: {_tail(feedback, 500)}",
+        settings.blocking_severity,
     )
 
 
@@ -590,8 +995,8 @@ async def run_qa(
 
     The steps are fixed (DEC-144). The task's files are read through the MCP
     server (DEC-140); the tests run in place against the Coder's folder,
-    which is never changed (DEC-145). LLM calls run in a worker thread
-    (DEC-150).
+    which is never changed (DEC-145). Model calls and pytest run in a
+    worker thread (DEC-150).
 
     Args:
         task: The task to review.
@@ -612,7 +1017,7 @@ async def run_qa(
     # DEC-142: every failure, expected or not, becomes a qa issue; the
     # traceback goes to the log so our own bugs stay visible.
     try:
-        settings = settings or load_qa_settings(os.environ, EXEC_TIMEOUT, coder_dir)
+        settings = settings or load_qa_settings(os.environ, code_executor.EXEC_TIMEOUT, coder_dir)
         severity = settings.blocking_severity
 
         step = "MCP read"
@@ -627,28 +1032,7 @@ async def run_qa(
 
         step = "test writing"
         model = model or get_chat_model(settings.model)
-        written = await asyncio.to_thread(write_tests, task, sources, model, settings)
-        logger.info("%s: wrote %s with %d tests", task.task_id, written.path, len(written.criteria))
-
-        step = "test run"
-        logger.info(
-            "%s: running pytest on %s (test timeout %ds, run timeout %ds)",
-            task.task_id, written.path.name, settings.test_timeout, EXEC_TIMEOUT,
-        )
-        result = await asyncio.to_thread(
-            run_pytest, written.path, coder_dir, settings.test_timeout
-        )
-        logger.info(
-            "%s: pytest %s: %d passed, %d failed",
-            task.task_id, result.status, result.passed, result.failed,
-        )
-        report = _report_from_run(task, written, result, severity)
-    except StructuredOutputError as e:
-        logger.warning("%s: no valid test draft: %s", task.task_id, e)
-        attempts = settings.max_attempts if settings else "?"
-        report = _qa_failure(
-            task, step, f"no runnable tests could be produced in {attempts} attempts: {e}", severity
-        )
+        report = await asyncio.to_thread(_test_task, task, sources, model, settings, coder_dir)
     except Exception as e:
         logger.exception("%s: QA step %r failed", task.task_id, step)
         report = _qa_failure(task, step, f"{type(e).__name__}: {e}", severity)

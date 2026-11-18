@@ -1,21 +1,23 @@
 """Tests of the QA agent (Lab 3.2).
 
-Covers spec `lab_3_2_qa_agent` AC-3.2-12, AC-3.2-13, AC-3.2-14 (invalid
-drafts), AC-3.2-18, AC-3.2-20 (fallback fix), AC-3.2-23, AC-3.2-24 and
-AC-3.2-25 (DEC-141, DEC-142, DEC-145, DEC-148, DEC-149, DEC-152, DEC-157,
-DEC-158), with a fake model, the linked-list task and, for ``run_qa``, the
-real MCP server over stdio and the real pytest sandbox.
+Covers spec `lab_3_2_qa_agent` AC-3.2-12 .. AC-3.2-18, AC-3.2-20 (fallback
+fix) and AC-3.2-22 .. AC-3.2-25 (DEC-141, DEC-142, DEC-145, DEC-148,
+DEC-149, DEC-152, DEC-157, DEC-158, DEC-159), with a fake model, the
+linked-list task and, for ``run_qa``, the real MCP server over stdio and the
+real pytest sandbox.
 """
 
 import ast
 import copy
 import logging
+import time
 from pathlib import Path
 
 import pytest
 from langchain_core.messages import AIMessage
 from mcp import StdioServerParameters
 
+import tools.code_executor
 import tools.mcp_client
 from agents.llm_helpers import StructuredOutputError
 from agents.qa_agent import QASettings, run_qa, write_tests
@@ -182,41 +184,13 @@ def test_ac_3_2_12_writes_test_file(task, settings):
     assert written.criteria == {"test_insert_search": 0, "test_insert_order": 1}
 
 
-@pytest.mark.parametrize(
-    ("change", "error_text"),
-    [
-        ("syntax", "invalid Python"),
-        ("duplicate", "duplicate test name"),
-        ("no-test-prefix", "must start with 'test_'"),
-        ("name-not-defined", "exactly one function named"),
-        ("criterion-missing", "criterion 1 has no test"),
-        ("preamble-statement", "preamble"),
-        ("extra-statement", "exactly one function named"),
-    ],
-)
-def test_ac_3_2_13_invalid_draft_rejected(task, settings, change, error_text):
-    model = ScriptedChatModel(
-        [_draft_reply(_invalid(change), "draft_1"), _draft_reply(VALID_DRAFT, "draft_2")]
-    )
+def test_write_tests_makes_one_call_per_draft(task, settings):
+    model = ScriptedChatModel([_draft_reply(_invalid("syntax")), _draft_reply(VALID_DRAFT, "d2")])
 
-    written = write_tests(task, {"linked_list.py": LINKED_LIST}, model, settings)
-
-    assert len(model.calls) == 2
-    assert error_text in _text(model.calls[1])
-    assert written.criteria == {"test_insert_search": 0, "test_insert_order": 1}
-    body = ast.parse(written.path.read_text()).body
-    assert all(isinstance(node, (ast.ImportFrom, ast.FunctionDef)) for node in body)
-    assert [node.name for node in body[1:]] == ["test_insert_search", "test_insert_order"]
-
-
-def test_ac_3_2_14_attempt_budget_invalid_drafts(task, settings):
-    replies = [_draft_reply(_invalid("syntax"), f"draft_{k}") for k in range(1, 4)]
-    model = ScriptedChatModel(replies)
-
-    with pytest.raises(StructuredOutputError):
+    with pytest.raises(StructuredOutputError, match="invalid Python"):
         write_tests(task, {"linked_list.py": LINKED_LIST}, model, settings)
 
-    assert len(model.calls) == 2
+    assert len(model.calls) == 1
     assert not (settings.workspace_dir / "task_1" / "test_task_1.py").exists()
 
 
@@ -428,3 +402,179 @@ async def test_ac_3_2_25_steps_logged(task, settings, coder_dir, tmp_path, caplo
     assert logged("pytest", "test timeout 2s"), messages
     assert logged("pytest", "1 passed", "1 failed"), messages
     assert logged("verdict", "not approved", "1 blocking"), messages
+
+
+def _uncollectable() -> dict:
+    """Returns a draft that passes the schema but fails at collection.
+
+    Returns:
+        The valid draft whose first test is parametrized with an argument
+        its function does not take.
+    """
+    draft = copy.deepcopy(VALID_DRAFT)
+    draft["preamble"] = "import pytest\nfrom linked_list import LinkedList\n"
+    first = draft["tests"][0]
+    first["code"] = '@pytest.mark.parametrize("x", [1])\n' + first["code"]
+    return draft
+
+
+def _report_files(settings: QASettings) -> list[Path]:
+    """Returns the JUnit reports pytest left in the task's QA folder.
+
+    Args:
+        settings: QA settings.
+
+    Returns:
+        The ``junit.xml`` files; empty when pytest never ran.
+    """
+    return list((settings.workspace_dir / "task_1").glob("junit.xml"))
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize(
+    ("change", "error_text"),
+    [
+        ("syntax", "invalid Python"),
+        ("duplicate", "duplicate test name"),
+        ("no-test-prefix", "must start with 'test_'"),
+        ("name-not-defined", "exactly one function named"),
+        ("criterion-missing", "criterion 1 has no test"),
+        ("preamble-statement", "preamble"),
+        ("extra-statement", "exactly one function named"),
+    ],
+)
+async def test_ac_3_2_13_invalid_draft_rejected(task, settings, coder_dir, tmp_path, change, error_text):
+    model = ScriptedChatModel(
+        [_draft_reply(_invalid(change), "draft_1"), _draft_reply(VALID_DRAFT, "draft_2")]
+    )
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert len(model.calls) == 2
+    assert error_text in _text(model.calls[1])
+    assert report.approved is True
+    assert report.tests_passed == 2
+    body = ast.parse((settings.workspace_dir / "task_1" / "test_task_1.py").read_text()).body
+    assert all(isinstance(node, (ast.ImportFrom, ast.FunctionDef)) for node in body)
+    assert [node.name for node in body[1:]] == ["test_insert_search", "test_insert_order"]
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("broken", ["invalid", "uncollectable"])
+async def test_ac_3_2_14_attempt_budget(task, settings, coder_dir, tmp_path, broken):
+    draft = _invalid("syntax") if broken == "invalid" else _uncollectable()
+    model = ScriptedChatModel([_draft_reply(draft, f"draft_{k}") for k in range(1, 4)])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert len(model.calls) == 2
+    assert report.approved is False
+    [issue] = report.issues
+    assert (issue.source, issue.severity) == ("qa", "High")
+    assert "no runnable tests" in issue.description
+
+
+@pytest.mark.timeout(120)
+async def test_ac_3_2_15_test_collection_error_regenerates(task, settings, coder_dir, tmp_path):
+    model = ScriptedChatModel([_draft_reply(_uncollectable(), "d1"), _draft_reply(VALID_DRAFT, "d2")])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert len(model.calls) == 2
+    assert "function uses no argument 'x'" in _text(model.calls[1])
+    assert report.approved is True
+    assert report.tests_passed == 2
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize(
+    ("case", "preamble", "coder_code", "regenerated", "named"),
+    [
+        ("a-unknown-module", "from linkedlist import LinkedList\n", LINKED_LIST, True, "linkedlist"),
+        ("b-missing-file", None, None, False, "linked_list.py"),
+        ("c-missing-task-name", None, "class Other:\n    pass\n", False, "LinkedList"),
+        ("d-invented-name", "from linked_list import LinkedList, Node\n", LINKED_LIST, True, "Node"),
+    ],
+    ids=["a", "b", "c", "d"],
+)
+async def test_ac_3_2_16_import_check(
+    task, settings, coder_dir, tmp_path, case, preamble, coder_code, regenerated, named
+):
+    if coder_code is None:
+        (coder_dir / "linked_list.py").unlink()
+    else:
+        (coder_dir / "linked_list.py").write_text(coder_code)
+    first = copy.deepcopy(VALID_DRAFT)
+    if preamble is not None:
+        first["preamble"] = preamble
+    model = ScriptedChatModel([_draft_reply(first, "d1"), _draft_reply(VALID_DRAFT, "d2")])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    if regenerated:
+        assert len(model.calls) == 2
+        assert named in _text(model.calls[1])
+        assert report.approved is True
+        assert report.tests_passed == 2
+    else:
+        assert len(model.calls) == 1
+        assert _report_files(settings) == []
+        assert report.approved is False
+        [issue] = report.issues
+        assert (issue.source, issue.severity) == ("test", "High")
+        assert named in issue.description
+
+
+@pytest.mark.timeout(120)
+async def test_ac_3_2_17_coder_collection_error(task, settings, coder_dir, tmp_path):
+    (coder_dir / "linked_list.py").write_text(LINKED_LIST + "\nraise RuntimeError('broken at import')\n")
+    model = ScriptedChatModel([_draft_reply(VALID_DRAFT, "d1"), _draft_reply(VALID_DRAFT, "d2")])
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert len(model.calls) == 1
+    assert report.approved is False
+    [issue] = report.issues
+    assert (issue.source, issue.severity) == ("test", "High")
+    assert "RuntimeError" in issue.description
+    assert "linked_list.py" in issue.description
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("case", ["a-coder-hangs", "b-test-hangs", "c-import-hangs"])
+async def test_ac_3_2_22_timeouts(task, settings, coder_dir, tmp_path, monkeypatch, case):
+    settings = settings.model_copy(update={"test_timeout": 1})
+    monkeypatch.setattr(tools.code_executor, "EXEC_TIMEOUT", 5)
+    first = VALID_DRAFT
+    if case == "a-coder-hangs":
+        (coder_dir / "linked_list.py").write_text(
+            LINKED_LIST.replace("return value in self.items", "while True:\n            pass")
+        )
+    elif case == "b-test-hangs":
+        first = copy.deepcopy(VALID_DRAFT)
+        first["tests"][1]["code"] = "def test_insert_order():\n    while True:\n        pass\n"
+    else:
+        (coder_dir / "linked_list.py").write_text(LINKED_LIST + "\nwhile True:\n    pass\n")
+    model = ScriptedChatModel([_draft_reply(first, "d1"), _draft_reply(VALID_DRAFT, "d2")])
+
+    started = time.monotonic()
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+    assert time.monotonic() - started < 15
+
+    if case == "b-test-hangs":
+        assert len(model.calls) == 2
+        assert "timed out" in _text(model.calls[1])
+        assert report.approved is True
+        assert report.tests_passed == 2
+        return
+    assert len(model.calls) == 1
+    assert report.approved is False
+    [issue] = report.issues
+    assert (issue.source, issue.severity) == ("test", "High")
+    if case == "a-coder-hangs":
+        assert issue.location == "test_task_1.py::test_insert_search"
+        assert "timed out" in issue.description
+        assert "linked_list.py" in issue.description
+        assert report.tests_passed == 1
+    else:
+        assert "whole test run timed out" in issue.description

@@ -4,7 +4,7 @@
 - **Sources:** lab handout `docs/labs/lab_3_2_qa_agent.md`, project guide
   (Module 3, `docs/course_reference.txt`, instructions 15 and 20), rubric
   C3.1, C3.3, C1.3, C4.5, C4.6
-- **Decisions:** DEC-137..DEC-158; also DEC-122, DEC-124, DEC-125, DEC-039,
+- **Decisions:** DEC-137..DEC-159; also DEC-122, DEC-124, DEC-125, DEC-039,
   DEC-040, DEC-044, DEC-088, DEC-091 (the why lives there; do not repeat it
   here)
 
@@ -190,15 +190,15 @@ task; `QA_MAX_ATTEMPTS=2` unless stated.
 
 #### AC-3.2-13 — An invalid draft is never written or run, and the model is told why
 
-- **Origin:** C1.3, DEC-148
-- **Verify:** unit — `test_ac_3_2_13_invalid_draft_rejected`
+- **Origin:** C1.3, DEC-148, DEC-159
+- **Verify:** integration — `test_ac_3_2_13_invalid_draft_rejected`
 - **Given** a first draft that is invalid in one way (parametrized: a
   syntax error; two tests with the same name; a name that does not start
   with `test_`; a name that the code does not define; criterion 1 without a
   test; a preamble with a statement other than an import, a function or a
   class, such as `ll = LinkedList()`; a test whose code has another
   top-level statement besides its function) and a valid second draft
-- **When** the QA writes the tests
+- **When** `run_qa` runs the task
 - **Then** only the valid draft is written; the second model call contains
   the validation error of the first
 
@@ -407,10 +407,11 @@ Task status: todo | map | in progress | review | done
   failure, and a task file the server cannot read is skipped with a
   warning; T6 replaces these with the blame of DEC-152.
 
-### T6 — Blame and regeneration: imports, collection errors, hangs · todo
+### T6 — Blame and regeneration: imports, collection errors, hangs · done
 
 - **Covers:** AC-3.2-14 (collection errors), AC-3.2-15, AC-3.2-16,
-  AC-3.2-17, AC-3.2-22
+  AC-3.2-17, AC-3.2-22; AC-3.2-13 moves to `run_qa`, which now owns the
+  retries (DEC-159)
 
 ### T7 — LLM review, live test and demo · todo
 

@@ -2860,7 +2860,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: send every failure to the Coder (wastes its iterations);
   separate budgets for invalid output and uncollectable tests (more
   control, rarely useful).
-- Code: `agents/qa_agent.py` (`write_tests`, `run_qa`); the shared budget from Lab 3.2 T6
+- Code: `agents/qa_agent.py` (`write_tests`, `_test_task`, `run_qa`)
 
 ### DEC-142 A QA that cannot do its job returns a structured, unapproved result
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3022,7 +3022,7 @@ A decision can mix bases; then each part states its own.
   validation; it is the payload Lab 3.3 sends back to the Coder.
 - Alternatives: the lab's three fields only (no fix instruction, no link
   to criteria).
-- Code: `orchestration/state.py` (`Issue`, `QAReport`), `agents/qa_agent.py` (`_report_from_run`)
+- Code: `orchestration/state.py` (`Issue`, `QAReport`), `agents/qa_agent.py` (`_judge_run`)
 
 ### DEC-150 `run_qa` is async and uses `QA_MODEL`
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3095,7 +3095,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: every collection error is the QA's (a missing task file
   would never reach the Coder); every timeout is the Coder's (a test that
   waits forever would cost the Coder iterations).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `agents/qa_agent.py` (`_import_problems`, `_pytest_draft_schema`, `_blame`, `_judge_run`, `_test_task`)
 
 ### DEC-153 `Issue` and `QAReport` live in the shared state and count tests
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3212,3 +3212,25 @@ A decision can mix bases; then each part states its own.
   sees the bug); no code at all (the model guesses names the task does
   not give, wasting `QA_MAX_ATTEMPTS`).
 - Code: `agents/qa_agent.py` (`_interface`, `_render_task`)
+
+### DEC-159 Each test draft is one model call, in one loop for every QA-owned failure
+- Date: 2026-11-18 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred; refines DEC-141
+- Context: DEC-141 gives one `QA_MAX_ATTEMPTS` budget to invalid drafts
+  and to drafts that run but fail by the QA's own fault (DEC-152).
+  `structured_call` retries invalid output internally and does not say
+  how many calls it spent, so the remaining budget is unknown after it.
+- Decision: `write_tests` makes exactly one model call per draft. `run_qa`
+  loops at most `QA_MAX_ATTEMPTS` times; any QA-owned failure (a draft
+  rejected by the schema, the QA's import mistakes, a collection error or a
+  timeout in the test's own code) starts the next call with the error, and
+  the previous file when there is one. When the budget runs out, the
+  report holds only the `qa` issue "no runnable tests could be produced",
+  with no `test` issue from the broken draft.
+- Why: one loop and one counter for every QA failure (1 turn = 1 call);
+  the corrective feedback is the same for all of them; `llm_helpers` stays
+  unchanged. Results of a draft that was itself broken are not trusted.
+- Alternatives: count the calls `structured_call` spends (a new helper
+  returning the count; two retry mechanisms); report the Coder's failures
+  of the broken draft too (mixes results of an untrusted draft).
+- Code: `agents/qa_agent.py` (`write_tests`, `_test_task`)
