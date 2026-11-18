@@ -4,7 +4,7 @@
 - **Sources:** lab handout `docs/labs/lab_3_2_qa_agent.md`, project guide
   (Module 3, `docs/course_reference.txt`, instructions 15 and 20), rubric
   C3.1, C3.3, C1.3, C4.5, C4.6
-- **Decisions:** DEC-137..DEC-157; also DEC-122, DEC-124, DEC-125, DEC-039,
+- **Decisions:** DEC-137..DEC-158; also DEC-122, DEC-124, DEC-125, DEC-039,
   DEC-040, DEC-044, DEC-088, DEC-091 (the why lives there; do not repeat it
   here)
 
@@ -262,13 +262,16 @@ the linked-list task.
 
 #### AC-3.2-18 — The QA reads the task's files through MCP
 
-- **Origin:** lab, DEC-140
+- **Origin:** lab, DEC-140, DEC-158
 - **Verify:** integration — `test_ac_3_2_18_reads_through_mcp`
-- **Given** a Coder folder with `linked_list.py`
+- **Given** a Coder folder with `linked_list.py` whose `LinkedList` has a
+  typed, decorated method and a typed class field
 - **When** `run_qa` runs the task
 - **Then** the server's stderr log has a `read_file` line for
-  `linked_list.py`, and the first test-writing model call contains the
-  file's content and both criteria
+  `linked_list.py`; the first test-writing model call contains both
+  criteria and the file's interface (class, method signatures with types
+  and defaults, decorators, the typed field, docstrings) but not the
+  bodies of its methods
 
 #### AC-3.2-19 — Correct code is approved
 
@@ -395,10 +398,14 @@ Task status: todo | map | in progress | review | done
   report is checked in T5, once `run_qa` exists)
 - The call budget shared with collection errors (DEC-141) comes in T6.
 
-### T5 — `run_qa`: MCP read, test run and report · todo
+### T5 — `run_qa`: MCP read, test run and report · done
 
 - **Covers:** AC-3.2-18, AC-3.2-20 (fallback fix), AC-3.2-23, AC-3.2-24,
-  AC-3.2-25
+  AC-3.2-25, AC-3.2-14 (invalid drafts: the `qa` issue in the report)
+- Until T6, a run whose status is `collection_error`, `timed_out` or
+  `error` gives a `qa` High issue, a timed-out test is a plain `test`
+  failure, and a task file the server cannot read is skipped with a
+  warning; T6 replaces these with the blame of DEC-152.
 
 ### T6 — Blame and regeneration: imports, collection errors, hangs · todo
 

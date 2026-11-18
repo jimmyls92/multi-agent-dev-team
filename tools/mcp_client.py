@@ -4,7 +4,8 @@ The lab's three functions work on an open ``ClientSession``, so they serve
 both the in-memory sessions of the tests and a real stdio connection.
 ``connect_and_run`` starts ``python -m tools.mcp_server`` as a child process
 over stdio, with ``CODER_WORKSPACE_DIR`` set explicitly, and reads one file
-through the protocol.
+through the protocol; ``read_multiple_files`` does the same for several
+files in one session, for the QA (DEC-145).
 
 Run as a module it is the lab's demo: it prints the server's tools, its
 resources, the workspace listing and the content of one file. It prints
@@ -19,6 +20,8 @@ import argparse
 import asyncio
 import os
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, TextIO
@@ -141,6 +144,38 @@ def _first_error(group: BaseExceptionGroup) -> BaseException:
     return error
 
 
+@asynccontextmanager
+async def _open_session(workspace: Path | None, errlog: TextIO) -> AsyncIterator[ClientSession]:
+    """Starts the server over stdio and yields an initialised session.
+
+    Args:
+        workspace: Folder the server serves; None uses
+            ``tools.handlers.CODER_WORKSPACE_DIR``.
+        errlog: Where the server's stderr goes; must be a real file.
+
+    Yields:
+        The client session, already initialised.
+
+    Raises:
+        McpError: If the server does not answer within ``MCP_TIMEOUT``
+            seconds or closes the connection (DEC-135).
+        OSError: If the server process cannot be started.
+        ValueError: If ``MCP_TIMEOUT`` is invalid.
+    """
+    parameters = _server_parameters(workspace or handlers.CODER_WORKSPACE_DIR)
+    try:
+        async with stdio_client(parameters, errlog=errlog) as (read, write):
+            # DEC-135: a dead or stalled server raises instead of hanging.
+            async with ClientSession(
+                read, write, read_timeout_seconds=timedelta(seconds=_timeout())
+            ) as session:
+                await session.initialize()
+                yield session
+    except ExceptionGroup as group:
+        # The SDK's task groups wrap the error; callers get the error itself.
+        raise _first_error(group) from group
+
+
 async def connect_and_run(
     filename: str | None,
     workspace: Path | None = None,
@@ -168,23 +203,13 @@ async def connect_and_run(
         OSError: If the server process cannot be started.
         ValueError: If ``MCP_TIMEOUT`` is invalid.
     """
-    parameters = _server_parameters(workspace or handlers.CODER_WORKSPACE_DIR)
-    try:
-        async with stdio_client(parameters, errlog=errlog) as (read, write):
-            # DEC-135: a dead or stalled server raises instead of hanging.
-            async with ClientSession(
-                read, write, read_timeout_seconds=timedelta(seconds=_timeout())
-            ) as session:
-                await session.initialize()
-                tools = await list_available_tools(session)
-                resources = await list_available_resources(session)
-                listing = await read_listing(session)
-                if filename is None and listing:
-                    filename = listing[0]
-                content = await call_read_file(session, filename) if filename else None
-    except ExceptionGroup as group:
-        # The SDK's task groups wrap the error; callers get the error itself.
-        raise _first_error(group) from group
+    async with _open_session(workspace, errlog) as session:
+        tools = await list_available_tools(session)
+        resources = await list_available_resources(session)
+        listing = await read_listing(session)
+        if filename is None and listing:
+            filename = listing[0]
+        content = await call_read_file(session, filename) if filename else None
     return {
         "tools": tools,
         "resources": resources,
@@ -192,6 +217,39 @@ async def connect_and_run(
         "filename": filename,
         "file_content": content,
     }
+
+
+async def read_multiple_files(
+    filenames: list[str],
+    workspace: Path | None = None,
+    errlog: TextIO = sys.stderr,
+) -> dict[str, str]:
+    """Reads several workspace files through one stdio session (DEC-145).
+
+    Args:
+        filenames: Paths relative to the workspace.
+        workspace: Folder the server serves; defaults to
+            ``tools.handlers.CODER_WORKSPACE_DIR``.
+        errlog: Where the server's stderr goes; must be a real file.
+
+    Returns:
+        File name to content, for the files the server read; a file it
+        rejects (missing, hidden, too large...) is left out. Rejections are
+        told apart by the result's error flag, not by its text.
+
+    Raises:
+        McpError: If the server does not answer within ``MCP_TIMEOUT``
+            seconds or closes the connection (DEC-135).
+        OSError: If the server process cannot be started.
+        ValueError: If ``MCP_TIMEOUT`` is invalid.
+    """
+    contents: dict[str, str] = {}
+    async with _open_session(workspace, errlog) as session:
+        for filename in filenames:
+            result = await session.call_tool("read_file", {"path": filename})
+            if not result.isError:
+                contents[filename] = result.content[0].text
+    return contents
 
 
 def main(argv: list[str] | None = None) -> int:

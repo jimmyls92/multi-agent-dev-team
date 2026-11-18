@@ -20,6 +20,7 @@ from tools.mcp_client import (
     list_available_resources,
     list_available_tools,
     read_listing,
+    read_multiple_files,
 )
 
 _PID = re.compile(r"pid=(\d+)")
@@ -73,6 +74,19 @@ async def test_ac_3_1_16_stdio_process_boundary(workspace, tmp_path):
         assert match, line
         assert int(match.group(1)) != os.getpid()
     assert marker not in log_path.read_text()
+
+
+@pytest.mark.timeout(30)
+async def test_read_multiple_files_skips_rejected(workspace, tmp_path):
+    (workspace / "a.py").write_text("x = 1\n")
+    (workspace / "b.py").write_text("ERROR: not an error\n")
+
+    with (tmp_path / "server.log").open("w") as errlog:
+        contents = await read_multiple_files(
+            ["a.py", "missing.py", "b.py"], workspace=workspace, errlog=errlog
+        )
+
+    assert contents == {"a.py": "x = 1\n", "b.py": "ERROR: not an error\n"}
 
 
 @pytest.mark.timeout(30)

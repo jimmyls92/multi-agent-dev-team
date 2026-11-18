@@ -214,6 +214,15 @@ class QAReport(BaseModel):
     notes: list[str] = Field(default_factory=list)
     approved: bool = False
 
+    def blocking_issues(self) -> list[Issue]:
+        """Returns the issues at or above ``blocking_severity`` (DEC-139).
+
+        Returns:
+            The blocking issues, in report order.
+        """
+        threshold = _SEVERITY_RANK[self.blocking_severity]
+        return [issue for issue in self.issues if _SEVERITY_RANK[issue.severity] <= threshold]
+
     @model_validator(mode="after")
     def _compute_approved(self) -> "QAReport":
         """Sets ``approved`` from the test counts and the issues.
@@ -224,9 +233,9 @@ class QAReport(BaseModel):
         """
         # DEC-139, DEC-149: never approved without a passing test run,
         # whatever value the caller or an LLM gave.
-        threshold = _SEVERITY_RANK[self.blocking_severity]
-        blocking = any(_SEVERITY_RANK[issue.severity] <= threshold for issue in self.issues)
-        self.approved = self.tests_passed > 0 and self.tests_failed == 0 and not blocking
+        self.approved = (
+            self.tests_passed > 0 and self.tests_failed == 0 and not self.blocking_issues()
+        )
         return self
 
 

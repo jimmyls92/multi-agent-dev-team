@@ -2811,7 +2811,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: tests only, no threshold (no way to make the review
   count); tests plus High issues from the review (an invented issue can
   block until the limit); LLM review only (Not Yet in C3.1).
-- Code: `orchestration/state.py` (`Issue`, `QAReport` validators)
+- Code: `orchestration/state.py` (`Issue`, `QAReport` validators, `QAReport.blocking_issues`)
 
 ### DEC-140 Separate `workspace_coder/` and `workspace_qa/` folders, each agent confined to its own
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -2860,7 +2860,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: send every failure to the Coder (wastes its iterations);
   separate budgets for invalid output and uncollectable tests (more
   control, rarely useful).
-- Code: `agents/qa_agent.py` (`write_tests`); the shared budget from Lab 3.2 T6
+- Code: `agents/qa_agent.py` (`write_tests`, `run_qa`); the shared budget from Lab 3.2 T6
 
 ### DEC-142 A QA that cannot do its job returns a structured, unapproved result
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -2884,7 +2884,7 @@ A decision can mix bases; then each part states its own.
   Coder).
 - Revisit when: Module 4 adds per-call retries and the circuit breaker
   (C4.2, C4.3).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `agents/qa_agent.py` (`run_qa`, `_qa_failure`)
 
 ### DEC-143 Lab 3.2 builds the QA as a standalone component
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -2918,7 +2918,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: ReACT with `write_test`/`run_tests` tools (flexible, but
   the model may skip running or not stop); plan-execute (the plan would
   always be the same).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `agents/qa_agent.py` (`run_qa`)
 
 ### DEC-145 QA tests run in place against the Coder's folder
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -2927,7 +2927,8 @@ A decision can mix bases; then each part states its own.
   through MCP into `workspace_qa/`, or directly against
   `workspace_coder/`.
 - Decision: the QA reads the Coder's code through MCP to give it to the
-  LLM (test writing and review). pytest runs the test file from
+  LLM (test writing gets only its interface, DEC-158; the review gets it
+  whole). pytest runs the test file from
   `workspace_qa/<task_id>/` with `cwd` and `PYTHONPATH` set to
   `workspace_coder/` (like the Coder's scripts, DEC-040), with
   `-p no:cacheprovider` and `PYTHONDONTWRITEBYTECODE=1` so nothing is
@@ -2939,7 +2940,8 @@ A decision can mix bases; then each part states its own.
   so the code run is the code read.
 - Alternatives: a copy in `workspace_qa/` read through MCP (tests exactly
   what was read, but fails on truncated or hidden files).
-- Code: `tools/code_executor.py` (`run_pytest`); the MCP read from Lab 3.2 T5
+- Code: `tools/code_executor.py` (`run_pytest`), `tools/mcp_client.py`
+  (`read_multiple_files`), `agents/qa_agent.py` (`run_qa`)
 
 ### DEC-146 `run_pytest` shares the sandbox of `run_python` and stays out of MCP
 - Date: 2026-11-17 · Area: Tools (Lab 3.2) · Status: accepted
@@ -3020,7 +3022,7 @@ A decision can mix bases; then each part states its own.
   validation; it is the payload Lab 3.3 sends back to the Coder.
 - Alternatives: the lab's three fields only (no fix instruction, no link
   to criteria).
-- Code: `orchestration/state.py` (`Issue`, `QAReport`)
+- Code: `orchestration/state.py` (`Issue`, `QAReport`), `agents/qa_agent.py` (`_report_from_run`)
 
 ### DEC-150 `run_qa` is async and uses `QA_MODEL`
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3037,7 +3039,7 @@ A decision can mix bases; then each part states its own.
   model change without touching the Coder's.
 - Alternatives: sync `run_qa` (breaks under Lab 3.3's broker); reuse
   `LLM_MODEL` (couples QA and Coder).
-- Code: — (applies from the Lab 3.2 spec)
+- Code: `agents/qa_agent.py` (`run_qa`)
 
 ### DEC-151 QA settings come from environment variables checked at startup
 - Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
@@ -3186,3 +3188,27 @@ A decision can mix bases; then each part states its own.
   messages); allow helpers next to each test (code that may run at
   import).
 - Code: `agents/qa_agent.py` (`_pytest_draft_schema`)
+
+### DEC-158 Tests are written from the criteria and the code's interface, not its bodies
+- Date: 2026-11-18 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Basis: Preferred; refines DEC-145 and DEC-148
+- Context: the LLM that writes the tests needs the Coder's module, class
+  and method names so the imports and calls work. Seeing the bodies, it
+  can copy the code's behaviour into the expected values (a tail-append
+  `insert` gets a test expecting `[1, 2, 3]`), and a buggy task is
+  approved. A test that calls with the wrong type fails inside the test,
+  which DEC-152 blames on the Coder.
+- Decision: test writing gets, per file, a skeleton extracted with `ast`:
+  imports, functions and classes with full signatures (types, defaults),
+  decorators, typed class fields, module constants (with their value
+  only when it is a simple literal) and docstrings; every body becomes
+  `...`. Attributes set inside methods (`self.x = ...`) are left out. A
+  file that does not parse is sent as one line saying so. The LLM review
+  (T7) gets the whole code.
+- Why: the expected values can only come from the criteria; types,
+  defaults and decorators prevent malformed calls that would be blamed
+  on the Coder.
+- Alternatives: the whole code with a stricter prompt (the model still
+  sees the bug); no code at all (the model guesses names the task does
+  not give, wasting `QA_MAX_ATTEMPTS`).
+- Code: `agents/qa_agent.py` (`_interface`, `_render_task`)

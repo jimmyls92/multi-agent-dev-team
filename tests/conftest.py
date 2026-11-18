@@ -15,7 +15,7 @@ temporary workspace (DEC-133).
 
 Two safety nets apply to every test: the workspace always points to a
 temporary folder, so ``run()`` never archives the real ``workspace/``
-(DEC-114); and outside ``llm`` tests the PM and Coder cannot build a real
+(DEC-114); and outside ``llm`` tests the PM, Coder and QA cannot build a real
 model, so a test that forgets its fake fails instead of spending tokens.
 """
 
@@ -32,6 +32,7 @@ from mcp.shared.memory import create_connected_server_and_client_session
 
 import agents.coder_agent
 import agents.pm_agent
+import agents.qa_agent
 import memory
 import tools.handlers
 from tools.mcp_server import server
@@ -157,7 +158,7 @@ def _fresh_coder_agent():
 
 @pytest.fixture(autouse=True)
 def _refuse_real_models(request, monkeypatch):
-    """Makes ``get_chat_model`` raise in the PM and the Coder outside ``llm`` tests.
+    """Makes ``get_chat_model`` raise in the PM, the Coder and the QA outside ``llm`` tests.
 
     A test that sets its own fake through ``monkeypatch`` overrides this,
     because its patch is applied later.
@@ -182,6 +183,7 @@ def _refuse_real_models(request, monkeypatch):
 
     monkeypatch.setattr(agents.pm_agent, "get_chat_model", refuse)
     monkeypatch.setattr(agents.coder_agent, "get_chat_model", refuse)
+    monkeypatch.setattr(agents.qa_agent, "get_chat_model", refuse)
 
 
 @pytest.fixture

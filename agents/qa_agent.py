@@ -8,7 +8,10 @@ the executed tests (DEC-137, DEC-139).
 Its settings come from environment variables and are checked when the
 module is imported, so a wrong value stops the program at startup
 (DEC-151). ``write_tests`` asks the model for a test draft, validates it
-with a per-task schema and writes it to the QA's folder (DEC-148).
+with a per-task schema and writes it to the QA's folder (DEC-148); the
+model sees the criteria and only the interface of the code (DEC-158).
+``run_qa`` chains the steps and never raises: anything that stops it
+becomes a ``qa`` issue in an unapproved report (DEC-142).
 
 Attributes:
     DEFAULT_QA_MODEL: Small, fast model used when ``QA_MODEL`` is unset
@@ -18,26 +21,40 @@ Attributes:
 
 Typical usage example:
 
-    settings = load_qa_settings(os.environ, EXEC_TIMEOUT, CODER_WORKSPACE_DIR)
-    print(settings.workspace_dir)
+    report = await run_qa(task)
+    print(report.approved, report.issues)
 """
 
 import ast
+import asyncio
+import logging
 import os
+import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import get_args
+from typing import TextIO, get_args
 
 from dotenv import load_dotenv
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agents.llm_helpers import PYTHON_ENVIRONMENT, structured_call
-from orchestration.state import NonEmptyStr, Severity, TaskSpec
+from agents.llm_helpers import PYTHON_ENVIRONMENT, StructuredOutputError, structured_call
+from llm_client import get_chat_model
+from orchestration.state import (
+    Issue,
+    NonEmptyStr,
+    QAReport,
+    Severity,
+    TaskCriterion,
+    TaskSpec,
+)
 from tools import handlers
-from tools.code_executor import EXEC_TIMEOUT
+from tools.code_executor import EXEC_TIMEOUT, PytestResult, run_pytest
+from tools.mcp_client import read_multiple_files
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_QA_MODEL = "openai/gpt-4.1-mini"  # DEC-150
 
@@ -164,6 +181,10 @@ Rules:
 - Import the task's code by module name: a file linked_list.py is imported as
   `from linked_list import ...`. The tests run with the task's folder as the
   working directory and on the import path.
+- You see only the interface of the code: signatures, types, decorators and
+  docstrings, with bodies shown as `...`. Use it for names and how to call
+  things. Take every expected value from the criteria, never from guesses
+  about the implementation; if the code is wrong, your test must fail.
 - Check behaviour with plain assert statements on observable results, as the
   criteria describe them. Do not test private details.
 - Tests must be deterministic and fast: no network, no sleeping, no reading
@@ -313,26 +334,120 @@ class WrittenTests(BaseModel):
     criteria: dict[str, int]
 
 
+def _criterion_text(criterion: TaskCriterion) -> str:
+    """Returns a criterion as one Given/When/Then sentence.
+
+    Args:
+        criterion: The criterion.
+
+    Returns:
+        ``"Given ..., When ..., Then ..."``.
+    """
+    return f"Given {criterion.given}, When {criterion.when}, Then {criterion.then}"
+
+
+def _is_simple_literal(node: ast.expr) -> bool:
+    """Returns whether a value is a short literal, safe to show (DEC-158).
+
+    Args:
+        node: The value's expression.
+
+    Returns:
+        True for a literal such as ``100``, ``"x"`` or ``(1, 2)`` whose
+        source is at most 80 characters.
+    """
+    try:
+        ast.literal_eval(node)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False
+    return len(ast.unparse(node)) <= 80
+
+
+def _skeleton_body(body: list[ast.stmt], in_class: bool) -> list[ast.stmt]:
+    """Returns the interface statements of a module or class body (DEC-158).
+
+    Args:
+        body: Statements of the module or class.
+        in_class: Whether the body is a class's; imports only count at
+            module level.
+
+    Returns:
+        Docstring, imports, signatures with ``...`` bodies, typed fields
+        and constants; every other statement is dropped.
+    """
+    kept: list[ast.stmt] = []
+    for index, node in enumerate(body):
+        if (
+            index == 0
+            and isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            kept.append(node)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)) and not in_class:
+            kept.append(node)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            docstring = ast.get_docstring(node, clean=False)
+            node.body = [ast.Expr(ast.Constant(docstring))] if docstring is not None else []
+            node.body.append(ast.Expr(ast.Constant(...)))
+            kept.append(node)
+        elif isinstance(node, ast.ClassDef):
+            node.body = _skeleton_body(node.body, in_class=True) or [ast.Expr(ast.Constant(...))]
+            kept.append(node)
+        elif isinstance(node, ast.AnnAssign):
+            if node.value is not None and not _is_simple_literal(node.value):
+                node.value = ast.Constant(...)
+            kept.append(node)
+        elif isinstance(node, ast.Assign):
+            if not _is_simple_literal(node.value):
+                node.value = ast.Constant(...)
+            kept.append(node)
+    return kept
+
+
+def _interface(name: str, source: str) -> str:
+    """Returns the interface of a file: its code without bodies (DEC-158).
+
+    Args:
+        name: File name, for the message when it does not parse.
+        source: The file's content.
+
+    Returns:
+        Python source with imports, signatures (types, defaults,
+        decorators), typed fields, constants and docstrings; every body is
+        ``...``. A file that does not parse gives a one-line comment saying
+        so.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as e:
+        return f"# {name} could not be parsed: {e.msg} (line {e.lineno})"
+    tree.body = _skeleton_body(tree.body, in_class=False)
+    return ast.unparse(tree)
+
+
 def _render_task(task: TaskSpec, sources: Mapping[str, str]) -> str:
-    """Returns the task and its code as the request for the test call.
+    """Returns the task and its code's interface as the request for the test call.
 
     Args:
         task: The task to test.
         sources: File name to content, for the task's files.
 
     Returns:
-        Title, description, numbered criteria and each file's content.
+        Title, description, numbered criteria and each file's interface
+        (DEC-158).
     """
     criteria = "\n".join(
-        f"{k}. Given {c.given}, When {c.when}, Then {c.then}"
-        for k, c in enumerate(task.acceptance_criteria)
+        f"{k}. {_criterion_text(c)}" for k, c in enumerate(task.acceptance_criteria)
     )
     files = "\n\n".join(
-        f"### {name}\n```python\n{content}\n```" for name, content in sources.items()
-    )
+        f"### {name}\n```python\n{_interface(name, content)}\n```"
+        for name, content in sources.items()
+    ) or "(no file of the task could be read)"
     return (
         f"# Task {task.task_id}: {task.title}\n\n{task.description}\n\n"
-        f"## Acceptance criteria\n{criteria}\n\n## Code\n{files}"
+        f"## Acceptance criteria\n{criteria}\n\n"
+        f"## Code interface (bodies omitted)\n{files}"
     )
 
 
@@ -346,7 +461,8 @@ def write_tests(
 
     Args:
         task: The task to test.
-        sources: File name to content, for the task's files.
+        sources: File name to content, for the task's files; the model
+            sees only their interface (DEC-158).
         model: Chat model for the QA.
         settings: The QA's settings; gives the folder and the attempts.
 
@@ -374,3 +490,173 @@ def write_tests(
     return WrittenTests(
         path=path, criteria={test.name: test.criterion_index for test in draft.tests}
     )
+
+
+def _tail(text: str, limit: int = 1500) -> str:
+    """Returns the end of a long text.
+
+    Args:
+        text: The text.
+        limit: Characters to keep.
+
+    Returns:
+        The text, or its last ``limit`` characters.
+    """
+    return text if len(text) <= limit else text[-limit:]
+
+
+def _qa_failure(task: TaskSpec, step: str, description: str, severity: Severity) -> QAReport:
+    """Returns an unapproved report for a QA that could not do its job (DEC-142).
+
+    Args:
+        task: The task reviewed.
+        step: The step that failed, used as the issue's location.
+        description: What went wrong.
+        severity: The blocking threshold of the report.
+
+    Returns:
+        A report with one ``qa`` High issue.
+    """
+    issue = Issue(
+        severity="High",
+        location=step,
+        description=description,
+        fix="Nothing for the Coder: the QA could not check this task; run the QA again.",
+        source="qa",
+    )
+    return QAReport(task_id=task.task_id, issues=[issue], blocking_severity=severity)
+
+
+def _report_from_run(
+    task: TaskSpec, written: WrittenTests, result: PytestResult, severity: Severity
+) -> QAReport:
+    """Returns the report of a test run (DEC-149).
+
+    Each failed test is a ``test`` High issue tied to its criterion. A run
+    that did not give test results is a ``qa`` High issue until the blame of
+    DEC-152 arrives (Lab 3.2 T6).
+
+    Args:
+        task: The task reviewed.
+        written: The test file and the criterion of each test.
+        result: The pytest run.
+        severity: The blocking threshold of the report.
+
+    Returns:
+        The report; ``approved`` is computed by ``QAReport``.
+    """
+    if result.status not in ("passed", "failed"):
+        return _qa_failure(
+            task,
+            "test run",
+            f"pytest could not run the tests ({result.status}): {_tail(result.output)}",
+            severity,
+        )
+    issues = []
+    for failure in result.failures:
+        index = written.criteria.get(failure.name)
+        criterion = (
+            _criterion_text(task.acceptance_criteria[index]) if index is not None else ""
+        )
+        details = failure.details.strip().splitlines()
+        description = failure.message.strip() or (details[-1] if details else "the test failed")
+        issues.append(
+            Issue(
+                severity="High",
+                location=f"{written.path.name}::{failure.name}",
+                description=description,
+                fix=f"Make {failure.name} pass; it failed with: {description}",
+                source="test",
+                criterion=criterion,
+            )
+        )
+    return QAReport(
+        task_id=task.task_id,
+        issues=issues,
+        tests_passed=result.passed,
+        tests_failed=result.failed,
+        blocking_severity=severity,
+    )
+
+
+async def run_qa(
+    task: TaskSpec,
+    model: BaseChatModel | None = None,
+    settings: QASettings | None = None,
+    coder_dir: Path | None = None,
+    errlog: TextIO = sys.stderr,
+) -> QAReport:
+    """Reviews one task: reads its code, writes and runs its tests, reports.
+
+    The steps are fixed (DEC-144). The task's files are read through the MCP
+    server (DEC-140); the tests run in place against the Coder's folder,
+    which is never changed (DEC-145). LLM calls run in a worker thread
+    (DEC-150).
+
+    Args:
+        task: The task to review.
+        model: Chat model; None builds ``settings.model``.
+        settings: QA settings; None reads them from the environment now.
+        coder_dir: The Coder's folder; None uses
+            ``tools.handlers.CODER_WORKSPACE_DIR``.
+        errlog: Where the MCP server's stderr goes; must be a real file.
+
+    Returns:
+        The report. Nothing is raised: a step that fails gives an
+        unapproved report with a ``qa`` High issue naming the cause
+        (DEC-142).
+    """
+    coder_dir = coder_dir or handlers.CODER_WORKSPACE_DIR
+    severity: Severity = settings.blocking_severity if settings else "High"
+    step = "settings"
+    # DEC-142: every failure, expected or not, becomes a qa issue; the
+    # traceback goes to the log so our own bugs stay visible.
+    try:
+        settings = settings or load_qa_settings(os.environ, EXEC_TIMEOUT, coder_dir)
+        severity = settings.blocking_severity
+
+        step = "MCP read"
+        sources = await read_multiple_files(task.files, coder_dir, errlog)
+        logger.info(
+            "%s: read %d of %d task files through MCP: %s",
+            task.task_id, len(sources), len(task.files), ", ".join(sources) or "none",
+        )
+        missing = [name for name in task.files if name not in sources]
+        if missing:
+            logger.warning("%s: files not readable: %s", task.task_id, ", ".join(missing))
+
+        step = "test writing"
+        model = model or get_chat_model(settings.model)
+        written = await asyncio.to_thread(write_tests, task, sources, model, settings)
+        logger.info("%s: wrote %s with %d tests", task.task_id, written.path, len(written.criteria))
+
+        step = "test run"
+        logger.info(
+            "%s: running pytest on %s (test timeout %ds, run timeout %ds)",
+            task.task_id, written.path.name, settings.test_timeout, EXEC_TIMEOUT,
+        )
+        result = await asyncio.to_thread(
+            run_pytest, written.path, coder_dir, settings.test_timeout
+        )
+        logger.info(
+            "%s: pytest %s: %d passed, %d failed",
+            task.task_id, result.status, result.passed, result.failed,
+        )
+        report = _report_from_run(task, written, result, severity)
+    except StructuredOutputError as e:
+        logger.warning("%s: no valid test draft: %s", task.task_id, e)
+        attempts = settings.max_attempts if settings else "?"
+        report = _qa_failure(
+            task, step, f"no runnable tests could be produced in {attempts} attempts: {e}", severity
+        )
+    except Exception as e:
+        logger.exception("%s: QA step %r failed", task.task_id, step)
+        report = _qa_failure(task, step, f"{type(e).__name__}: {e}", severity)
+
+    logger.info(
+        "%s: verdict %s, %d blocking issues",
+        task.task_id,
+        "approved" if report.approved else "not approved",
+        len(report.blocking_issues()),
+    )
+    return report
