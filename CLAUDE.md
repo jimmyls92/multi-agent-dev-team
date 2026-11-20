@@ -77,7 +77,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 - Framework: **LangGraph** desde el Módulo 1 (DEC-068, sustituye a DEC-047); el Coder usa `create_agent` de LangChain con tool calling nativo y middleware (DEC-069). Documentarlo en el README. Si se cambia de framework, justificarlo (C2.6).
 - LLM: la guía permite GPT-4o, Claude Sonnet u Ollama. Si se usa un equivalente, por ejemplo vía OpenRouter, indicarlo en el README.
 - Patrón del agente: **ReACT** (lo exige la guía).
-- Protocolo del Módulo 3: **pendiente hasta el Lab 3.3** (DEC-123; MCP con el SDK oficial de Python, **o** A2A con `sender`, `receiver`, `intent`, `payload`, `correlation_id` y validación de intent).
+- Protocolo evaluado del Módulo 3 (C3.5): **A2A** en el bucle Coder↔QA (DEC-162, sustituye a DEC-123), con `sender`, `receiver`, `intent`, `payload`, `correlation_id` y validación de intent. El QA sigue leyendo por MCP (no evaluado).
 
 ## Notas del repo
 
@@ -90,7 +90,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Lab 3.2 (QA agent) cerrado: `docs/specs/lab_3_2_qa_agent.md` (DEC-137..DEC-161), T1–T7 y R1 hechas; README aplazado a la entrega del Módulo 3. Siguiente: Lab 3.3 (elegir protocolo, DEC-123). Rama: `week-3`. Lab 3.1 (servidor MCP) cerrado: `docs/specs/lab_3_1_mcp_server.md` (DEC-122..DEC-136); T4 (README) aplazada a la entrega del Módulo 3. Material de los labs del módulo en `Multi-Agent-lab-3-<n>/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
+Lab 3.2 (QA agent) cerrado: `docs/specs/lab_3_2_qa_agent.md` (DEC-137..DEC-161), T1–T7 y R1 hechas; README aplazado a la entrega del Módulo 3. Activo: Lab 3.3 (A2A), spec `docs/specs/lab_3_3_a2a_loop.md` aprobado (DEC-162..DEC-187), tarea T1. Rama: `week-3`. Lab 3.1 (servidor MCP) cerrado: `docs/specs/lab_3_1_mcp_server.md` (DEC-122..DEC-136); T4 (README) aplazada a la entrega del Módulo 3. Material de los labs del módulo en `Multi-Agent-lab-3-<n>/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
 
 Módulo 2: cerrado y subido (C2.1–C2.6), `master` = `week-2`. PM Agent (Lab 2.1, `docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096), Coder node (Lab 2.2, `docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109) y pipeline PM → Coder (Lab 2.3, `docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-121).
 
@@ -108,7 +108,6 @@ Tests aplazados por decisión del usuario (como tarde en C4.7; proponer y aproba
 Otros:
 - README del Lab 3.1 (T4 de `docs/specs/lab_3_1_mcp_server.md`): aplazado por decisión del usuario hasta justo antes de la entrega del Módulo 3.
 - Mejoras de memoria IMP-001..IMP-005 en `idea`. "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
-- Protocolo evaluado (C3.5): se elige al empezar el Lab 3.3 (DEC-123). Si es MCP, spec propio para que el Coder sea cliente MCP antes de cerrar el Módulo 3.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
 
 ## Notas técnicas de LangChain/LangGraph

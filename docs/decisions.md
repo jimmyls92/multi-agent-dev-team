@@ -2038,7 +2038,7 @@ A decision can mix bases; then each part states its own.
 - Code: `orchestration/graph.py` — `build_coder_graph`; `tests/test_integration_coder.py`
 
 ### DEC-101 State records each task's status, the code on disk and its result
-- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: superseded by DEC-178 in the team graph (kept for the Coder-only graph)
 - Basis: status per task and accumulated code — Required (C2.2); full
   result per task — Preferred
 - Context: C2.2 asks for per-task status and accumulated code in shared
@@ -2234,7 +2234,7 @@ A decision can mix bases; then each part states its own.
 - Code: `orchestration/graph.py` — `route_after_pm`, `build_graph`
 
 ### DEC-111 A run succeeds only with no error and every task done
-- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: superseded by DEC-181
 - Basis: Preferred (anticipates C3.3: never report success with failures)
 - Context: with PM and Coder in one run there are three endings: all tasks
   done, some task `failed` while the loop went on (DEC-097), or a fatal
@@ -2326,7 +2326,7 @@ A decision can mix bases; then each part states its own.
   `tests/conftest.py` — `_temporary_workspace`
 
 ### DEC-115 The full graph has an explicit step limit and never loses the state
-- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: accepted
+- Date: 2026-11-11 · Area: Pipeline (Lab 2.3) · Status: superseded by DEC-180
 - Basis: Preferred (guards C2.4 and the future C3.3 loop; C4.4 cost)
 - Context: LangGraph's default recursion limit is 10007 steps, so it is no
   safety net (IMP-010). Today the Coder loop ends by construction (one
@@ -2486,7 +2486,7 @@ A decision can mix bases; then each part states its own.
 - Code: — (applies from Lab 3.2)
 
 ### DEC-123 The graded protocol route is chosen at Lab 3.3
-- Date: 2026-11-16 · Area: Protocol (Module 3) · Status: accepted
+- Date: 2026-11-16 · Area: Protocol (Module 3) · Status: superseded by DEC-162
 - Basis: Provisional
 - Context: C3.5 grades one route: MCP (official SDK, a server exposing the
   file-system tools and the Coder as its client) or A2A (Coder/QA messages
@@ -2790,7 +2790,7 @@ A decision can mix bases; then each part states its own.
 - Code: — (applies from the Lab 3.2 spec)
 
 ### DEC-139 Approval depends on a configurable blocking severity; only failing tests are High
-- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: superseded by DEC-174
 - Basis: Required (C3.1, C3.2: the loop exits when all tests pass; lab:
   `approved` enforced by a `model_validator`); the threshold — Preferred
 - Context: issues come from two sources: executed tests (evidence) and the
@@ -3246,7 +3246,7 @@ A decision can mix bases; then each part states its own.
 - Code: `agents/qa_agent.py` (`write_tests`, `_test_task`)
 
 ### DEC-160 The LLM review runs after the tests, sees the whole code and has its own budget
-- Date: 2026-11-18 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Date: 2026-11-18 · Area: QA Agent (Lab 3.2) · Status: superseded by DEC-174
 - Basis: Preferred; refines DEC-137, DEC-139 and DEC-149
 - Context: the test-writing call sees only the code's interface
   (DEC-158), so the default fix of a failing test says what failed, not
@@ -3294,3 +3294,644 @@ A decision can mix bases; then each part states its own.
   when several tests hang); forbid every expression at import in the
   test file (breaks `parametrize` for a rare case).
 - Code: `agents/qa_agent.py` (`_test_task`, `_judge_run`)
+
+### DEC-162 The graded protocol route (C3.5) is A2A
+- Date: 2026-11-19 · Area: Protocol (Lab 3.3) · Status: accepted
+- Basis: Preferred (C3.5 grades one route; supersedes DEC-123)
+- Context: C3.5 accepts MCP (official SDK, a server exposing the
+  file-system tools and the Coder as its client) or A2A (Coder/QA messages
+  with sender, receiver, intent, payload, correlation_id and intent
+  validation). Labs 3.1-3.2 built the MCP server and the QA reads files
+  through it; Lab 3.3 builds A2A for the Coder-QA review loop.
+- Decision: the Coder-QA review loop exchanges A2A messages (sender,
+  receiver, intent, payload, correlation_id, with intent validation). The
+  QA keeps reading files through the MCP server (DEC-145); that pathway
+  stays but is not the graded route.
+- Why: A2A models agent-to-agent dialogue, which is what the review loop
+  is; MCP models agent-to-tool access, and through it the agents would
+  only communicate indirectly through shared files. The loop has to be
+  built anyway, so A2A is its envelope (about 5-6 tasks, one spec) and the
+  Coder's Module 1 tools stay untouched.
+- Alternatives: the MCP route, with the Coder as an MCP client (a second
+  spec of about 8-9 tasks in total, changes code already Met under C1.3
+  and C1.5, and the review messages would still travel outside the
+  protocol).
+- Code: —
+
+### DEC-163 The QA reviews each task in its own bounded loop
+- Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Required (C3.3: limit from an environment variable, default 5,
+  never exceeded); per task and counted in QA reviews — Preferred
+- Context: the Coder runs the PM's tasks one by one and the QA reviews one
+  task (Lab 3.2). The evaluator forces the limit and counts the rounds
+  ("the limit was five, but the run started a sixth" is Not Yet).
+- Decision: after the Coder finishes a task, the QA reviews it, and the
+  task goes back to the Coder until the QA approves it or the limit is
+  reached; only then does the next task start. One iteration is one QA
+  review (n = 1 is the first). The limit, `QA_MAX_ITERATIONS` (default 5),
+  applies to each task: if review n = limit is not approved, the task
+  closes and no review n + 1 starts.
+- Why: defects are fixed before other tasks build on them, each A2A
+  exchange is about one task, and the QA works as built in Lab 3.2. A
+  limit for the whole run would run out after one or two tasks.
+- Alternatives: review the whole project at the end (failures found when
+  later tasks already depend on them); one limit for the whole run.
+- Code: —
+
+### DEC-164 A task that ends the loop unapproved stays failed and the run goes on
+- Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Preferred; confirms DEC-097 now that the QA loop exists
+- Context: DEC-097 asked to be revisited when Module 3 added the QA loop.
+  A task can reach the review limit with failures while later tasks remain.
+- Decision: the task is marked `failed` with its report of unresolved
+  issues, and the next task starts. Nothing goes back to the PM:
+  re-planning is IMP-018.
+- Why: tasks that do not depend on the failed one still get done, and the
+  QA of later tasks catches what breaks because of it. No lab or criterion
+  asks for re-planning, which would open a second loop to bound.
+- Alternatives: stop the run at the first failed task (saves tokens,
+  leaves independent tasks unattempted); send the task back to the PM
+  (IMP-018).
+- Code: —
+
+### DEC-165 A run ends `success` only if the QA approved every task
+- Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Required (C3.3: never claim success with unresolved failures;
+  the README must say how to tell both outcomes apart); exit code —
+  Preferred
+- Context: the evaluator forces a run that does not converge and checks
+  that it is not reported as a success.
+- Decision: every run ends with an overall status: `success` when the QA
+  approved every task, `unresolved` otherwise. An `unresolved` run comes
+  with a final report listing each unapproved task, its blocking issues
+  and the review it stopped at. `main.py` prints it and exits with a
+  non-zero code unless the status is `success`.
+- Why: one field says the outcome, the report says what is left, and the
+  exit code makes it visible the same way in logs, Docker and scripts.
+- Alternatives: only per-task statuses (the reader must work out the
+  outcome); exit code 0 always (a failed run looks fine to a script).
+- Code: —
+
+### DEC-166 Every LLM call has its own timeout
+- Date: 2026-11-19 · Area: LLM client (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: `ChatOpenAI` uses the OpenAI SDK's default timeout of 600 s,
+  and nothing bounds a whole run. With the QA loop a run makes many more
+  calls, so one call that hangs can stall the demo or the container for
+  ten minutes.
+- Decision: each LLM call gets a timeout, configurable through
+  `LLM_TIMEOUT`, set now instead of in Module 4. Retries and the circuit
+  breaker stay for Module 4 (C4.2, C4.3).
+- Why: a small change that bounds the slowest piece of the loop; the
+  value is configured, not hard-coded.
+- Alternatives: wait for Module 4 (runs can hang until then).
+- Code: —
+
+### DEC-167 The Coder critiques each submission once and revises only real bugs
+- Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: superseded by DEC-172
+- Basis: Required (C3.4: a self-critique after generating and before QA,
+  with the revised artifact sent to QA); the shape of the step — Preferred
+- Context: C3.4 is Not Yet when the critique is only logged or causes no
+  revision. Forcing the model to always find something would make it
+  invent defects.
+- Decision: before every submission to the QA, after the Coder's ReACT
+  pass, one structured LLM call without tools critiques the result. It
+  sees the code, the task and its criteria, and the `plan`,
+  `explanation` and `result` of the `Finish`, but not the ReACT trace. It
+  lists the edge cases it checked, each `ok` or `bug` with its reason. If
+  any is a `bug`, a second ReACT pass of the Coder (up to 10 calls) gets
+  those bugs, the task with its criteria and the current files, and fixes
+  only them; its output goes to the QA with no second critique. If all
+  are `ok`, the code goes to the QA unchanged and the log says so. This
+  holds for every submission, also after a pass that hit its 10 calls
+  (what is on disk is critiqued and sent).
+- Why: the `explanation` carries the reasons behind each choice without
+  the noise of every tool call, and re-reading its own full reasoning
+  tends to make a model agree with itself. A ReACT revision runs the
+  fixed code before it is sent, so `result` still comes from a real run
+  (C1.5). One critique per submission, without exceptions, is easy to
+  check in the log and cannot loop.
+- Alternatives: the critique sees only the code (misses deliberate
+  choices) or the whole trace (many tokens, self-confirming); a single
+  LLM call rewrites the code (sent to QA without ever running); the
+  critique must always find something (invented defects); skip the
+  critique after a pass that hit its limit (a submission without
+  reflection, a gap for C3.4).
+- Code: —
+
+### DEC-168 A run has a time budget checked between steps
+- Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: every piece is bounded, but the sum is not: a run of 8 tasks
+  that never converge could take about four hours.
+- Decision: `RUN_TIMEOUT` (default 30 min) is checked between graph
+  steps. Once it is spent, the remaining tasks close as `failed` with the
+  reason "out of time" and the run ends `unresolved` with its report
+  (DEC-165). A step that has started is not interrupted.
+- Why: a clean, reported exit with little code. The run can overshoot
+  the budget by at most the step in progress.
+- Alternatives: no total budget (runs of hours); cancel the step in
+  progress (half-written files, harder to report).
+- Code: —
+
+### DEC-169 A failure of the QA itself is retried once and never charged to the Coder
+- Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: when the QA cannot do its job (the MCP server does not start,
+  its model returns nothing valid), its report holds only `qa` issues,
+  whose fix says there is nothing for the Coder (DEC-142). Sent back as a
+  `fix_instruction`, it would spend the Coder's reviews on nothing.
+- Decision: a report whose issues are all `qa` repeats the QA review once,
+  on the same code, without a Coder pass and without counting as a
+  review. If it fails again, the task closes `failed` with the reason
+  "the QA could not review it", not blamed on the Coder.
+- Why: a transient failure (e.g. the MCP server starting slowly) gets a
+  second chance, and the Coder's budget goes only to its own defects.
+- Alternatives: count it as a review (wastes the Coder's budget); retry
+  until it works (unbounded).
+- Code: —
+
+### DEC-170 An invalid A2A message closes its task as a protocol error
+- Date: 2026-11-19 · Area: A2A (Lab 3.3) · Status: accepted
+- Basis: Required (C3.5: intent validation); what happens next —
+  Preferred
+- Context: A2A messages are built by our code, not by an LLM. An unknown
+  intent, an unknown agent, `sender == receiver` or a reply whose
+  `correlation_id` does not match the request is a bug.
+- Decision: the message is rejected and never acted on, the error is
+  logged at ERROR, and its task closes `failed` with a protocol-error
+  issue. The run goes on with the next task (DEC-164). No retry.
+- Why: a deterministic bug gives the same message again, so a retry
+  wastes time; closing only the task keeps the rest of the run.
+- Alternatives: retry the exchange (same result); stop the whole run
+  (loses independent tasks).
+- Code: —
+
+### DEC-171 A critique with no valid output lets the code go to QA as it is
+- Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: the critique is an LLM call validated with Pydantic; it can
+  fail to give a valid output.
+- Decision: the critique gets one corrective retry (two calls, as the PM).
+  If it is still invalid, the code on disk goes to the QA unchanged and
+  the log notes "critique unavailable".
+- Why: the QA still checks the code with executed tests, and the
+  evaluator sees the critique in every other submission. Failing the
+  task instead would punish the Coder for a problem of the critique.
+- Alternatives: fail the task (loses a task that may be correct); retry
+  more times (more cost for a rare case).
+- Code: —
+
+### DEC-172 Self-reflection scores each version with a rubric and sends the best
+- Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted (context superseded by DEC-173; items, score and trigger by DEC-182)
+- Basis: Required (C3.4: a self-critique after generating and before QA
+  that drives a revision); the rubric, the score and the best-of choice —
+  Preferred
+- Context: the self-critique cycle is generate, evaluate, reflect,
+  improve and evaluate again. DEC-167 merged evaluate and reflect and sent
+  the improved code without checking it, so an improvement that made the
+  code worse went to the QA.
+- Decision: after the Coder's ReACT pass (generate), one structured LLM
+  call without tools evaluates the version against a rubric and reflects
+  on it, with the context of DEC-167 (code, task and criteria, `plan`,
+  `explanation`, `result`; no ReACT trace). The rubric has one item per
+  acceptance criterion of the task plus a fixed list of edge cases; each
+  item is `ok`, `bug` or `n/a` with brief evidence (evaluate), and each
+  `bug` gets its cause and a fix plan (reflect). The code computes the
+  score from the verdicts, not the LLM: criteria `ok` count 2 points,
+  edge cases `ok` 1 point, `n/a` nothing; score = points ok / applicable
+  points. If every item is `ok`, the version goes to the QA. Otherwise a
+  ReACT pass (improve) gets the reflection of the best version so far,
+  the task with its criteria and the current files, and fixes only those
+  bugs; the new version is evaluated the same way. This repeats up to
+  `REFLECTION_MAX_ROUNDS` improvements (default 1). Each version's files
+  and `CoderResult` are kept; the version with the highest score is
+  restored on disk and sent to the QA, the improved one on a tie. Each
+  improvement starts from the best version so far and also gets the
+  regressions of the last discarded attempt (items `ok` before and `bug`
+  after) with its `explanation`. A pass that hit its 10 calls is evaluated
+  like any other (DEC-167); an evaluation with no valid output follows
+  DEC-171.
+- Why: separate evaluate and reflect sections keep the verdict apart
+  from the diagnosis in one call; a score computed from verdicts is
+  reproducible, while a number asked from the LLM is not. Keeping the
+  best version means an improvement that made things worse never reaches
+  the QA; the improved code was still produced and judged from the
+  critique. The regressions stop a new round from repeating a change that
+  already failed. One round by default because the QA follows with
+  executed tests; the cost per submission is up to 26 Coder calls.
+- Alternatives: always send the improved version (a worse version can
+  reach the QA); a score given by the LLM (arbitrary, varies between
+  calls); evaluate and reflect in two calls (double cost, the second
+  rephrases the first); restart from the best version with no lesson (it
+  tends to repeat the same failing change).
+- Revisit when: the rubric items and the critique prompt are designed
+  (end of the Lab 3.3 technical phase).
+- Code: —
+
+### DEC-173 The self-evaluation sees only the version and its task, with no memory
+- Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Basis: Preferred; replaces the context part of DEC-172
+- Context: DEC-172 gave the evaluate-and-reflect call the code plus the
+  `plan`, `explanation` and `result` of the ReACT pass, so the critique
+  would not flag a deliberate choice as a bug. With a rubric built from
+  the acceptance criteria, the criteria define what is correct, not the
+  Coder's reasons. The Coder's memory also carries the pass: the window
+  holds its whole trace and Chroma its `explanation` (`store_outcome`).
+- Decision: the call receives only the version's files and the task with
+  its acceptance criteria (which come from the PM, not from ReACT). No
+  `plan`, `explanation` or `result`, and no memory: neither the window
+  nor Chroma. The Coder's ReACT calls (plan and every pass) keep using
+  both memory layers as before.
+- Why: an evaluator that does not read the author's reasoning judges what
+  is there instead of agreeing with it, like an external reviewer.
+  Without memory the trace cannot come back through the window or
+  Chroma. The PM and the QA already call the LLM without memory.
+- Alternatives: the context of DEC-172 (the evaluation is anchored on the
+  author's reasoning); memory through `build_context` (brings the trace
+  back).
+- Risk: C1.2 says Chroma is queried before every LLM call. It is read as
+  the Coder's ReACT agent, which still queries it on every call; this
+  evaluator call is documented in the README as the exception and why.
+- Code: —
+
+### DEC-174 Every QA issue comes from an executed test; the LLM only explains failures
+- Date: 2026-11-19 · Area: QA Agent (Lab 3.3) · Status: accepted
+- Basis: Required (C3.1: real tests decide; fix instructions linked to
+  failing assertions); dropping the advisory review — Preferred
+- Context: the QA's LLM review (DEC-160) did two jobs: it turned each
+  failing test into a fix that says where to change the code, and it
+  added advisory Medium or Low issues of its own (DEC-139). With the
+  Coder's rubric evaluation before the QA (DEC-172), the advisory issues
+  repeat an LLM opinion, and in a `fix_instruction` they can make the
+  Coder spend reviews on remarks no test supports.
+- Decision: the review call runs only when some test failed, and it only
+  writes one fix per failure (the matching and validation of DEC-160 are
+  kept). It never adds issues. Every issue therefore comes from an
+  executed test or from the QA's own failure (`qa`), and all are High.
+  `QA_BLOCKING_SEVERITY` and the `review` issue source are removed;
+  `severity` stays in `Issue` (the lab's schema). A task is approved
+  when its tests ran and all passed (as DEC-139 with its default).
+- Why: approval and feedback rest only on executed evidence, the LLM
+  opinion lives in one place (the Coder's self-evaluation), and an
+  approved review makes no extra model call. The fix of each failure
+  keeps saying where to change the code, which the test alone cannot.
+- Alternatives: keep the review as it is (duplicated opinion, noise in
+  the fixes); drop the review entirely (the Coder gets only what failed
+  and spends ReACT calls finding where).
+- Code: —
+
+### DEC-175 A2A messages travel in a mailbox inside the shared state
+- Date: 2026-11-19 · Area: A2A (Lab 3.3) · Status: accepted
+- Basis: Required (C3.5: sender, receiver, intent, payload,
+  correlation_id and intent validation; C2.3: one orchestration graph);
+  the mailbox — Preferred
+- Context: the lab's `Broker` keeps one asyncio queue per agent and runs
+  the Coder and the QA as concurrent tasks outside any graph. Our agents
+  run as nodes of one LangGraph graph (C2.3), and the evaluator checks
+  the messages in the run's logs.
+- Decision: `orchestration/a2a.py` defines `A2AMessage` (Pydantic:
+  `sender`, `receiver`, `intent`, `payload: dict`, `correlation_id`,
+  UUID4 by default) with its validation: known agents and intent,
+  `sender != receiver`, an intent the receiver accepts, a reply that
+  carries its request's `correlation_id`, and a payload validated by one
+  Pydantic model per intent. `ProjectState.messages` is an append-only
+  list of messages. Nodes use only `send` and `inbox` from that module;
+  every message is logged at INFO with sender, receiver, intent, task,
+  review and correlation id.
+- Why: everything stays inside the graph and in the final state, which
+  is JSON-serializable, so the message history itself is C3.5 evidence.
+  The append reducer also merges messages from parallel branches, and
+  with nodes going only through `send` and `inbox`, a queue or network
+  transport could replace the state later without touching the agents.
+- Alternatives: the lab's asyncio `Broker` (outside the graph, harder to
+  test, messages not in the state); a synchronous broker in the run
+  context (messages not in the state or the traces).
+- Code: `orchestration/a2a.py` (`A2AMessage`, `send`, `inbox`), `ProjectState.messages`
+
+### DEC-176 The QA answers each review request with one of three intents
+- Date: 2026-11-19 · Area: A2A (Lab 3.3) · Status: accepted
+- Basis: Required (C3.3: at the limit the QA returns a final report of
+  unresolved issues); the extra intent — Preferred
+- Context: the lab has `review_request`, `fix_instruction` and
+  `approved`. C3.3 asks the QA itself for the final report when the
+  limit is reached.
+- Decision: the Coder sends `review_request` with the task, the review
+  number n and the limit. The QA answers `approved` (tests ran and all
+  passed), `fix_instruction` (tests failed and reviews are left; the
+  payload is the report with one fix per failing test) or `unresolved`
+  (review n = limit not approved, or the QA failed twice as in DEC-169;
+  the payload is the final report). The router maps them to done, back
+  to the Coder and failed.
+- Why: the final report comes from the QA, as C3.3 says, and the router
+  needs no counting of its own. The rubric grades the guide's fields, not
+  a closed list of intents.
+- Alternatives: the lab's three intents with the router counting n (the
+  final report would not come from the QA).
+- Code: `orchestration/a2a.py` (`ACCEPTED_INTENTS`, payload models)
+
+### DEC-177 Self-reflection is its own graph node between the Coder and the QA
+- Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Basis: Preferred (C3.4 asks for evidence that reflection runs before QA)
+- Context: the cycle of DEC-172 could run inside the Coder node or as a
+  node of its own.
+- Decision: the graph runs `coder → reflect → qa`. The `reflect` node
+  runs DEC-172 (evaluate and reflect, improve, evaluate the improvement,
+  keep the best version and restore it on disk). Its code lives in
+  `agents/coder_agent.py`, since the guide places reflection inside the
+  Coder agent.
+- Why: the order is part of the graph's structure, so reflection before
+  QA is visible without reading code; the node is tested on its own and
+  gets its own span in Module 4.
+- Alternatives: inside the Coder node (the order is hidden and the node
+  grows).
+- Code: —
+
+### DEC-178 With the QA in the graph, only the QA's verdict closes a task
+- Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Required (C2.2: status of each task in shared state; C3.2: done
+  means the QA approved it); the fields — Preferred; supersedes DEC-101
+  for the team graph
+- Context: DEC-101 closes the task in the Coder's step: `done` when the
+  Coder's result is `success`. With a QA loop, `done` must mean approved
+  by the QA, and the task must survive several Coder passes.
+- Decision: in the team graph the Coder leaves its task `in_progress`;
+  the router closes it `done` or `failed` from the QA's answer.
+  `TaskState` gains `reviews` (n) and `qa_report` (the last report). The
+  Coder-only graph of Lab 2.2 (`build_coder_graph`) keeps DEC-101 through
+  a parameter of the node, so its behavior and tests do not change.
+- Why: each task's state shows where it is in the loop, and nothing is
+  marked done before the QA approves it.
+- Alternatives: keep DEC-101 and add a separate approval flag (two
+  sources of truth for one status).
+- Code: —
+
+### DEC-179 The QA node runs the async QA to completion inside the sync graph
+- Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: `run_qa` is async (MCP client, DEC-150); the graph runs with
+  the synchronous `stream`.
+- Decision: the `qa` node is synchronous and calls
+  `asyncio.run(run_qa(...))`. The single retry of DEC-169 lives in this
+  node. The graph stays sequential: while the QA reviews a task, nothing
+  else runs, and the next task starts only after the verdict (DEC-163).
+- Why: no event loop is running inside a synchronous graph run, so
+  `asyncio.run` is safe; the rest of the system does not change.
+- Alternatives: make the whole graph async (`astream`): touches `run()`,
+  `main.py` and the tests of Modules 1-2 for no graded gain. An async
+  pipeline is IMP-019.
+- Code: —
+
+### DEC-180 Loop settings are read per run, a timeout node closes the run, and the step limit follows the loop
+- Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Required (C3.3: the limit is configurable through an environment
+  variable); the rest — Preferred; supersedes DEC-115
+- Context: the loop adds `QA_MAX_ITERATIONS` (DEC-163), `RUN_TIMEOUT`
+  (DEC-168), `LLM_TIMEOUT` (DEC-166) and `REFLECTION_MAX_ROUNDS`
+  (DEC-172). DEC-115's step limit (`1 + MAX_TASKS + 2`) counted one step
+  per task. A router cannot change the state, so it cannot close the
+  remaining tasks when time runs out.
+- Decision: the settings are read and validated when each run starts, so
+  tests and the evaluator can change them. `ProjectState.deadline` holds
+  the absolute end time; the routers send the run to an `out_of_time`
+  node once it has passed, which closes the remaining tasks `failed`
+  ("out of time") and ends the run. `LLM_TIMEOUT` goes to
+  `ChatOpenAI(timeout=...)`. The step limit is computed per run as
+  `1 + MAX_TASKS × QA_MAX_ITERATIONS × 3 + 3` (PM; coder, reflect and qa
+  per review; `out_of_time` and margin); reaching it still returns the
+  last state with `error` set, as DEC-115.
+- Why: the cut-off is visible in the graph and reported like any other
+  ending; the step limit stays a guard against routing bugs whatever
+  limit the user configures.
+- Alternatives: read the settings at import (tests cannot change them);
+  check the deadline only in `run()` (cannot close the tasks inside the
+  graph); keep DEC-115's formula (the loop would hit it on the first
+  task).
+- Code: —
+
+### DEC-181 The run's outcome is a computed field and the verdict names unresolved runs
+- Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Required (C3.3, DEC-165); the form — Preferred; supersedes DEC-111
+- Context: DEC-111 already exits 0 only when every task is done and there
+  is no error, with the verdict `RESULT: incomplete`. DEC-165 names the
+  outcomes `success` and `unresolved` and asks for a final report.
+- Decision: `ProjectState.outcome` is a computed field (`success` or
+  `unresolved`), so it is also in `--json`. `final_report()` lists each
+  unapproved task with its blocking issues, the review it stopped at and
+  why (limit, QA failure, protocol error, out of time). `main.py` prints
+  `RESULT: success`, `RESULT: unresolved — …` with the report, or
+  `RESULT: error — …` for a fatal error; exit codes stay 0, 1 and 2.
+- Why: one field and one verdict word match the README; computed, it can
+  never disagree with the task statuses.
+- Alternatives: a stored status field (can drift from the tasks); keep
+  "incomplete" (a different word from the one documented).
+- Code: —
+
+### DEC-182 The self-evaluation rubric: fixed items, defect kinds and a strict ranking
+- Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Basis: Preferred; replaces the items, score and trigger of DEC-172
+- Context: DEC-172 left the rubric's items for later and scored versions
+  with 2 points per criterion and 1 per edge case. A severity chosen
+  freely by the LLM varies between calls, so two versions could not be
+  compared; a severity tied to the item misjudges a crash found under an
+  edge case. The course's critique prompt adds security, types and
+  severity levels, but sees no task and asks to catch every exception.
+- Decision: the rubric checks one item per acceptance criterion of the
+  task (C0..Cn, never `n/a`) plus a fixed list: E1 empty input, E2 one
+  element and boundaries, E3 repeated values, E4 invalid input and
+  errors (as the task says, with a clear message, no broad `except`
+  hiding failures), E5 interface (files, names and signatures as in the
+  task), E6 state consistent across calls, E7 safe import and
+  termination, E8 security (paths, injection, credentials; `n/a`
+  without files, network or processes), E9 type annotations on public
+  functions, E10 style, naming and docstrings, and E11 any other real
+  defect that fits none of the above (a file never closed, a behaviour
+  the description asks for but no criterion checks). Each item gets `ok`, `bug`
+  or `n/a` with evidence; a `bug` needs a concrete input and the wrong
+  result traced through the code. Each `bug` names its defect kind from
+  a closed list, and the code maps the kind to a severity: High for
+  `logic_error`, `crash` (exception, hang or endless loop on valid
+  input) and `security`; Medium for `missing_edge_case` and
+  `unclear_error`; Low for `missing_type_annotation`, `style`, `naming`
+  and `docstring`. Versions are ranked by their bug counts compared in
+  order (High, then Medium, then Low): one High is worse than any number
+  of Medium, one Medium worse than any number of Low; on a tie the
+  improved version wins. Only a High or Medium bug starts an improvement
+  pass; Low bugs count in the ranking and stay in the record.
+- Why: the items make every evaluation look at the same things; picking
+  a kind from given definitions is steadier than inventing a severity,
+  so the ranking of two versions is reproducible. A strict order means
+  no pile of minor remarks can outweigh a crash. Type annotations, style
+  and docs are not tested by the QA, so they never cost an improvement
+  pass of up to 11 calls.
+- Alternatives: severity by item (a crash under E1 would be Medium);
+  severity chosen by the LLM (varies between calls); weighted points
+  3/2/1 (enough Medium bugs would outweigh a High); missing annotations
+  as Medium (an improvement pass for a cosmetic gap); the course prompt as
+  is (no task given to check correctness against, and catching every
+  exception hides bugs and breaks tasks that must raise).
+- Code: —
+
+### DEC-183 Every bug of the self-evaluation gets a diagnosis with a minimal fix
+- Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Basis: Preferred (the "reflect" step of DEC-172)
+- Context: the evaluation says what is wrong; the improvement pass needs
+  to know why and what to change, or it has to guess. Low bugs do not
+  start an improvement (DEC-182), but later passes can still learn from
+  them.
+- Decision: the same call that evaluates writes one diagnosis for every
+  `bug`, Low ones included, with `item` (rubric item), `kind` (defect
+  kind, DEC-182), `location` (function and file), `evidence` (concrete
+  input and wrong result), `cause` (why it fails) and `fix` (the
+  smallest change that fixes it, not a rewrite, and never against
+  another criterion of the task). The code checks there is exactly one
+  diagnosis per `bug` and none for `ok` or `n/a` items; an invalid output
+  follows DEC-171.
+- Why: a cause and a minimal fix let the improvement pass change only
+  what is broken, which protects what already worked (the ranking of
+  DEC-182 penalises regressions). Diagnosing every bug in the same call
+  costs few tokens and keeps the Low ones available to later passes.
+- Alternatives: diagnose only High and Medium (Low bugs lost for later
+  passes); a free-form critique text (cannot be checked or matched to
+  the rubric).
+- Code: —
+
+### DEC-184 Each task keeps an explicit review history in the state
+- Date: 2026-11-20 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: from the second pass on, the Coder must know what was already
+  tried on the task and what failed, so it does not repeat a failed
+  approach. Memory cannot give this reliably: the sliding window
+  (DEC-057) drops older passes (two passes per review), and Chroma
+  recalls by similarity, not by order.
+- Decision: `TaskState.history` holds one record per review: the
+  `explanation` of the version sent, the self-evaluation result (bugs per
+  severity, version chosen) and the QA result (passed and failed tests,
+  with name and criterion). Every pass after the first renders it as a
+  "Background" section of its prompt, and marks a test that fails again
+  ("fails for the 2nd time"). It is task-scoped working state, not a
+  third memory layer: it is deterministic and lives in the typed state.
+- Why: a complete, ordered summary of the task's attempts at a fixed,
+  small cost; it is also the evidence for C3.2 and the source of the
+  final report (DEC-181).
+- Alternatives: rely on the window and Chroma only (loses early reviews,
+  no order); pass the previous ReACT traces (many tokens, mostly noise).
+- Code: —
+
+### DEC-185 The sliding window keeps whole passes during the loop
+- Date: 2026-11-20 · Area: Coder memory (Lab 3.3) · Status: accepted
+- Basis: Provisional
+- Context: each ReACT pass enters the window as one turn with its full
+  trace (DEC-057, DEC-077), and the window is injected before every Coder
+  LLM call. In the loop this costs many tokens and pushes earlier tasks
+  out of the window sooner.
+- Decision: no change. The window keeps whole passes during the loop;
+  the history of DEC-184 covers what the window drops.
+- Why: changing the turn format touches a Required decision of Module 1
+  and its C1.2 evidence, with a regression risk; the cost is better
+  judged in Module 4 with tracing and cost reports.
+- Alternatives: compact turns (pass prompt plus final summary, no tool
+  calls), recorded as IMP-020.
+- Revisit when: Module 4 (C4.4) shows the window is a large share of the
+  Coder's prompt tokens.
+- Code: —
+
+### DEC-186 Chroma keeps working in the loop; the self-evaluation and the QA use no memory
+- Date: 2026-11-20 · Area: Coder memory (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: in the loop the Coder runs several passes per task, and two
+  new steps call the LLM outside the Coder's ReACT pass: the
+  self-evaluation and the QA.
+- Decision: every Coder pass keeps storing its prompt and outcome in
+  Chroma and querying it before each call, as today (DEC-031 still keeps
+  the current prompt from coming back). The self-evaluation (DEC-173)
+  neither reads nor writes memory: no window turn, nothing stored in
+  Chroma. The QA keeps no memory, as in Lab 3.2. The QA's lessons reach
+  Chroma only through the Coder's correction prompts, which carry the
+  `fix_instruction`.
+- Why: correction prompts hold the QA's lessons, so a later task can
+  recall them ("reverse failed with one element in task_1") with no new
+  code. Keeping the self-evaluation out of memory stops its opinions from
+  leaking into the Coder's context.
+- Alternatives: store the self-evaluation in Chroma (unverified opinions
+  as memories); give the QA its own memory (not required, more state).
+- Code: —
+
+### DEC-187 What each Coder pass receives in its prompt
+- Date: 2026-11-20 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: the loop has three kinds of ReACT pass: the first one (n = 1),
+  the improvement pass after the self-evaluation (DEC-172) and the
+  correction pass after a `fix_instruction` (DEC-176). Each needs a
+  different "what to fix", and all of them need to know the current
+  code. The Coder cannot read `workspace_qa/` (DEC-154).
+- Decision: every pass gets the project, the task and its criteria, and
+  the current contents of the task's planned files that already exist
+  on disk (capped like the read tool, DEC-041, and marked as truncated
+  past the cap); other files written in the run stay listed by name
+  only. Passes after the first also get the history of DEC-184. The
+  improvement pass gets, as what to fix, the High and Medium bugs with
+  their diagnosis (DEC-183) and the regressions of a discarded attempt
+  (DEC-172), and, in the background, the Low bugs ("fix only if trivial
+  and safe"). The correction pass gets, as what to fix, the failed tests
+  (name, criterion, error, the QA's fix and the test's source, which the
+  QA puts in the `fix_instruction` payload), and, in the background, the
+  Medium and Low bugs left by the last self-evaluation. The prompt lists
+  what to fix before what is pending.
+- Why: one rule for file contents, with no special case for the first
+  pass, saves the 1–2 read calls of the 10 the pass has (C1.4), also when
+  another task already wrote the file. The test source tells the Coder
+  what is expected so it can reproduce the failure. Putting pending bugs
+  after the main fix lets the Coder learn from Medium and Low bugs
+  without losing focus.
+- Alternatives: file contents only from the second pass on (the Coder
+  reads by hand what an earlier task wrote); no test source (the Coder
+  guesses the expected behaviour from the assertion message).
+- Code: —
+
+### DEC-188 The QA report models live in their own module
+- Date: 2026-11-20 · Area: A2A (Lab 3.3) · Status: accepted
+- Basis: Provisional
+- Context: the `fix_instruction`, `approved` and `unresolved` payloads
+  carry a `QAReport`, which lived in `orchestration/state.py`, while
+  `ProjectState` needs `A2AMessage` for its mailbox (DEC-175). Each
+  module would import the other.
+- Decision: `Severity`, `Issue`, `QAReport` (and the `NonEmptyStr` type
+  they use) move unchanged to `orchestration/qa_report.py`. Both
+  `state.py` and `a2a.py` import them from there, and `state.py`
+  re-exports them, so existing imports keep working.
+- Why: a move with no change of behaviour breaks the cycle and keeps the
+  report fully validated inside each message.
+- Alternatives: the report as an unvalidated `dict` (an invalid report
+  could reach the Coder, against C1.3); import `a2a` at the end of
+  `state.py` and rebuild the model (works or fails depending on which
+  module is imported first).
+- Revisit when: the shared models are gathered in one `models.py`
+  (IMP-008).
+- Code: `orchestration/qa_report.py`, `orchestration/state.py`
+
+### DEC-189 A message validates itself; `send` checks it answers the open request
+- Date: 2026-11-20 · Area: A2A (Lab 3.3) · Status: accepted
+- Basis: Required (C3.5: intent validation; C1.3: validate before
+  acting); the split — Preferred
+- Context: some checks depend only on the message (agents, intent,
+  payload) and one depends on the conversation (a reply must carry the
+  correlation id of its request). The guide asks for `payload` as a
+  dict.
+- Decision: `A2AMessage` validates its own fields: known agents and
+  intent, `sender != receiver`, an intent the receiver accepts, and a
+  payload that its intent's model accepts, with a report consistent with
+  the intent (approved for `approved`, not approved for
+  `fix_instruction` and `unresolved`). The payload is stored as the
+  model's JSON dump, so the state stays serializable; `payload_model()`
+  rebuilds the typed payload. `send(state, message)` also checks that a
+  reply carries the correlation id of the last `review_request` its
+  receiver sent and that request has no reply yet; otherwise it raises
+  `A2AProtocolError` and the message never enters the state.
+- Why: a message alone cannot know which request is open; the state can.
+  Storing the dump keeps the guide's dict field and the C2.2 JSON round
+  trip, while no payload reaches a node without validation.
+- Alternatives: keep the typed model in `payload` (not the guide's dict;
+  JSON round trip needs a discriminator); check correlation in each node
+  (repeated, easy to forget).
+- Code: `orchestration/a2a.py` (`A2AMessage`, `payload_model`, `send`)

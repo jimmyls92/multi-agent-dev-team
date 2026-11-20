@@ -252,6 +252,46 @@ each idea has a stable ID (`IMP-NNN`, never reused).
 - Notes: deterministic rule kept for Lab 3.2; an arbiter adds cost and
   non-reproducible verdicts, so only for the ambiguous cases.
 
+## Coder-QA loop (Lab 3.3)
+
+### IMP-018 Re-plan a task that stays failed after the QA loop
+- Status: idea
+- Area: Coder-QA loop (Lab 3.3)
+- Why: a task that reaches the review limit with failures stays `failed`
+  and the run ends `unresolved`. The PM could re-plan it instead (split
+  it, rewrite its criteria) and hand it back to the Coder, closer to a
+  long-running agent that keeps working until the project is done.
+- Rubric: C3.3 (re-planning opens a second loop that needs its own
+  configurable limit, and the final report must still list what stays
+  unresolved), C2.4 (a re-planned list must still have at most 8 tasks).
+  Adds on top of the review limit; never replaces it.
+- Notes: unlikely to be done; no lab or criterion asks for re-planning.
+
+### IMP-019 Async pipeline: the Coder starts the next task while the QA reviews
+- Status: idea
+- Area: Coder-QA loop (Lab 3.3)
+- Why: today the graph is sequential (DEC-179): while the QA tests task N,
+  the Coder waits. With async nodes the Coder could start task N+1 in
+  parallel and save wall-clock time.
+- Rubric: C3.2 and C3.3 (each task's loop and limit must stay intact),
+  C2.4 (order and progress per task). Risks: task N+1 may build on code
+  the QA has not approved yet (against DEC-163), and the Coder may write
+  files while the QA reads them, so the workspace needs per-task
+  isolation or locking.
+- Notes: unclear gain for the course's tasks; noted for later.
+
+### IMP-020 Compact window turns for the Coder
+- Status: idea
+- Area: Coder-QA loop (Lab 3.3)
+- Why: each ReACT pass enters the sliding window with its full trace,
+  tool calls and repeated code included, and the window is injected in
+  every Coder call (DEC-185). A turn made of the pass prompt plus its
+  final summary would cut tokens and keep more tasks in the window.
+- Rubric: C1.2 (the window must still be injected before every LLM
+  call; changes DEC-057 and DEC-077, which are Required), C4.4 (cost).
+  Risk: regression of the Module 1 memory evidence.
+- Notes: decide with Module 4 cost reports.
+
 ## General
 
 ### IMP-008 One module for the models shared between agents
@@ -267,3 +307,6 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   the whole suite must stay green.
 - Notes: decided to postpone during Lab 2.2; `CoderResult` moves to
   `orchestration/state.py` meanwhile (DEC-065).
+  Lab 3.3 split `Issue` and `QAReport` into `orchestration/qa_report.py`
+  to break an import cycle with the A2A messages (DEC-188); the user
+  raised `models.py` again then.
