@@ -1,9 +1,14 @@
-"""Tests for the structured-call helper (spec `lab_2_1_pm_agent`, AC-2.1-3, AC-2.1-4)."""
+"""Tests for the shared LLM helpers.
+
+Covers the structured-call helper (spec `lab_2_1_pm_agent`, AC-2.1-3,
+AC-2.1-4) and the chat model's timeout (spec `lab_3_3_a2a_loop`, AC-3.3-7).
+"""
 
 import pytest
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
+import llm_client
 from agents.llm_helpers import StructuredOutputError, structured_call
 from tests.fakes import ScriptedChatModel, tool_call_reply
 
@@ -49,3 +54,16 @@ def test_ac_2_1_4_second_invalid_raises():
 
     assert "-1" in str(exc_info.value)
     assert len(model.calls) == 2
+
+
+def test_ac_3_3_7_llm_timeout(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_TIMEOUT", "12")
+    assert llm_client.get_chat_model("openai/gpt-4.1-mini").request_timeout == 12
+
+    monkeypatch.setenv("LLM_TIMEOUT", "30")
+    assert llm_client.get_chat_model("openai/gpt-4.1-mini").request_timeout == 30
+
+    monkeypatch.setenv("LLM_TIMEOUT", "0")
+    with pytest.raises(ValueError, match="LLM_TIMEOUT"):
+        llm_client.get_chat_model("openai/gpt-4.1-mini")

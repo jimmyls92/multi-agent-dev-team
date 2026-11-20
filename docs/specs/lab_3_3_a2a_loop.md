@@ -544,7 +544,7 @@ Task status: todo | map | in progress | review | done
   `orchestration/qa_report.py` to break the import cycle (DEC-188); the
   correlation check lives in `send` (DEC-189).
 
-### T2 — Loop settings and `LLM_TIMEOUT` · todo
+### T2 — Loop settings and `LLM_TIMEOUT` · done
 
 - **Covers:** AC-3.3-5, AC-3.3-7
 - `.env.example` gains the four settings; AC-3.3-6 is checked in T7, once

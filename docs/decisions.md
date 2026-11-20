@@ -3385,7 +3385,7 @@ A decision can mix bases; then each part states its own.
 - Why: a small change that bounds the slowest piece of the loop; the
   value is configured, not hard-coded.
 - Alternatives: wait for Module 4 (runs can hang until then).
-- Code: —
+- Code: `llm_client.py` (`get_chat_model`), `orchestration/settings.py`
 
 ### DEC-167 The Coder critiques each submission once and revises only real bugs
 - Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: superseded by DEC-172
@@ -3935,3 +3935,24 @@ A decision can mix bases; then each part states its own.
   JSON round trip needs a discriminator); check correlation in each node
   (repeated, easy to forget).
 - Code: `orchestration/a2a.py` (`A2AMessage`, `payload_model`, `send`)
+
+### DEC-190 Loop settings share one integer reader; the model cache keys on the timeout
+- Date: 2026-11-20 · Area: Configuration (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: the loop adds `QA_MAX_ITERATIONS`, `RUN_TIMEOUT`, `LLM_TIMEOUT`
+  and `REFLECTION_MAX_ROUNDS` (DEC-180). The QA already reads integer
+  settings with a private helper. `get_chat_model` caches one model per
+  id, so a timeout read inside it would stay fixed after the first call.
+- Decision: `orchestration/settings.py` holds `LoopSettings`,
+  `load_loop_settings(env)` and `int_setting`, moved from the QA, which
+  now imports it. Every value is an integer with a minimum of 1 and no
+  maximum; timeouts are in seconds. `get_chat_model(model)` reads and
+  validates `LLM_TIMEOUT` on every call and caches one model per
+  `(model, timeout)` pair.
+- Why: one reader keeps the same checks and error messages everywhere;
+  keying the cache on the timeout makes a changed `LLM_TIMEOUT` apply to
+  the next run without changing the callers.
+- Alternatives: copy the reader (two versions to keep in step); pass the
+  timeout from each agent (three callers and their tests change for the
+  same result).
+- Code: `orchestration/settings.py`, `llm_client.py`

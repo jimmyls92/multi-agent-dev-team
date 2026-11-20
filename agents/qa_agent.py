@@ -55,6 +55,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents.llm_helpers import PYTHON_ENVIRONMENT, StructuredOutputError, structured_call
 from llm_client import get_chat_model
+from orchestration.settings import int_setting
 from orchestration.state import (
     Issue,
     NonEmptyStr,
@@ -97,32 +98,6 @@ class QASettings(BaseModel):
     test_timeout: int
 
 
-def _int_setting(env: Mapping[str, str], name: str, default: int, minimum: int) -> int:
-    """Returns an integer setting, checked against its minimum.
-
-    Args:
-        env: Environment variables.
-        name: Variable to read.
-        default: Value when the variable is unset.
-        minimum: Lowest value allowed.
-
-    Returns:
-        The variable's value as an integer, or ``default``.
-
-    Raises:
-        ValueError: If the value is not an integer or is below ``minimum``;
-            the message names the variable.
-    """
-    raw = env.get(name, str(default))
-    try:
-        value = int(raw)
-    except ValueError:
-        raise ValueError(f"{name} must be an integer, got {raw!r}") from None
-    if value < minimum:
-        raise ValueError(f"{name} must be at least {minimum}, got {value}")
-    return value
-
-
 def load_qa_settings(
     env: Mapping[str, str], exec_timeout: int, coder_dir: Path
 ) -> QASettings:
@@ -163,7 +138,7 @@ def load_qa_settings(
             f"got {severity!r}"
         )
 
-    test_timeout = _int_setting(env, "QA_TEST_TIMEOUT", default=2, minimum=1)
+    test_timeout = int_setting(env, "QA_TEST_TIMEOUT", default=2, minimum=1)
     # DEC-152: a single test must time out before the whole run does.
     if test_timeout >= exec_timeout:
         raise ValueError(
@@ -174,7 +149,7 @@ def load_qa_settings(
     return QASettings(
         workspace_dir=workspace_dir,
         model=model,
-        max_attempts=_int_setting(env, "QA_MAX_ATTEMPTS", default=2, minimum=1),
+        max_attempts=int_setting(env, "QA_MAX_ATTEMPTS", default=2, minimum=1),
         blocking_severity=severity,
         test_timeout=test_timeout,
     )
