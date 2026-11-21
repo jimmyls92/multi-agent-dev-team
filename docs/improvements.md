@@ -328,3 +328,15 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   template formats. Keep the `DEC-NNN` anchors as YAML comments next to
   each prompt. Needs `pyyaml` pinned in `requirements.txt`. Own commit;
   the whole suite must stay green.
+
+### IMP-022 The rubric flags debug prints left in library code
+- Status: idea
+- Area: Coder self-reflection (Lab 3.3)
+- Why: in a live run of AC-3.3-41 the improvement pass left `print` calls
+  inside `reverse`; the evaluation gave 0 High and 0 Medium, so the
+  version went out with them. Output from library code breaks callers
+  and tests that read stdout.
+- Rubric: C3.4 (a sharper critique), C1.3 (no risk).
+- Notes: add it to E10 or E11's definition ("no debug output in library
+  code"), kind `style` (Low) or `unclear_error`; measure with the live
+  test before keeping it.

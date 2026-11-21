@@ -192,6 +192,9 @@ task.
 - **When** the version is evaluated
 - **Then** the second model call contains the validation error of the
   first, and the evaluation comes from the valid reply
+- **Changed by DEC-200:** the reply has one field per item, so a repeated
+  item cannot be expressed and that case is dropped; a missing item fails
+  as a required field and an unknown one as an extra field.
 
 #### AC-3.3-13 — The code maps each defect kind to its severity
 
@@ -621,11 +624,16 @@ Task status: todo | map | in progress | review | done
   expects `RESULT: unresolved — task_2 not approved` and the final report
   (DEC-181 supersedes DEC-111's `incomplete`).
 
-### T9 — Live evidence · todo
+### T9 — Live evidence · done
 
 - **Covers:** AC-3.3-40, AC-3.3-41
 - The `--run-llm` runs and the manual demo, with their logs kept for the
   README.
+- **Review notes:** logs in `docs/evidence/lab_3_3/` (DEC-199). The live
+  runs found the evaluation unreliable with the small model; fixed by
+  DEC-200 (one field per item, `EVALUATION_MODEL`), measured
+  with AC-3.3-41 after each step. AC-3.3-41 compares the last line of its
+  check's output, since the Coder may leave debug prints (IMP-022).
 
 README (three-agent diagram, A2A justification, how to tell success from
 unresolved, the memory exception of DEC-173): at the Module 3 delivery,

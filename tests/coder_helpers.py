@@ -169,11 +169,12 @@ def clean_evaluation(criteria: int = 1, call_id: str = "call_eval") -> AIMessage
         call_id: ID of the tool call.
 
     Returns:
-        The AI message calling the ``SelfEvaluation`` tool, every item ``ok``.
+        The AI message calling the ``SelfEvaluation`` tool, one field per
+        item, every item ``ok`` (DEC-200).
     """
-    items = [{"item": item, "verdict": "ok", "evidence": "checked", "bugs": []}
-             for item in [*(f"C{k}" for k in range(criteria)), *RUBRIC_ITEMS]]
-    return tool_call_reply("SelfEvaluation", {"items": items}, call_id)
+    fields = {item: {"verdict": "ok", "evidence": "checked", "bugs": []}
+              for item in [*(f"C{k}" for k in range(criteria)), *RUBRIC_ITEMS]}
+    return tool_call_reply("SelfEvaluation", fields, call_id)
 
 
 async def approve_all(task: TaskSpec) -> QAReport:

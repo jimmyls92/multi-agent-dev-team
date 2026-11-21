@@ -3,11 +3,12 @@
 Covers spec `lab_3_3_a2a_loop` AC-3.3-12 .. AC-3.3-16 and AC-3.3-21 ..
 AC-3.3-26 (DEC-171, DEC-172, DEC-173, DEC-182, DEC-183, DEC-193,
 DEC-196), with a fake evaluation model, a fake Coder and the linked-list
-task.
+task; AC-3.3-41 uses the real model and runs only with ``--run-llm``.
 """
 
-import copy
 import logging
+import subprocess
+import sys
 
 import pytest
 from langgraph.runtime import Runtime
@@ -16,6 +17,7 @@ import memory
 from agents import coder_reflection
 from agents.coder_agent import CoderRunContext
 from agents.coder_reflection import (
+    EVALUATION_ATTEMPTS,
     KIND_SEVERITY,
     RUBRIC_ITEMS,
     BugCounts,
@@ -112,9 +114,11 @@ def _reply(items: list[dict], call_id: str = "eval_1"):
         call_id: ID of the tool call.
 
     Returns:
-        The AI message calling the ``SelfEvaluation`` tool.
+        The AI message calling the ``SelfEvaluation`` tool, one field per
+        item (DEC-200).
     """
-    return tool_call_reply("SelfEvaluation", {"items": items}, call_id)
+    fields = {i["item"]: {k: v for k, v in i.items() if k != "item"} for i in items}
+    return tool_call_reply("SelfEvaluation", fields, call_id)
 
 
 def _text(messages: list) -> str:
@@ -141,8 +145,6 @@ def _invalid(case: str) -> list[dict]:
     items = _items({"E2": [_bug()]})
     if case == "missing-item":
         items = [i for i in items if i["item"] != "E4"]
-    elif case == "repeated-item":
-        items.append(copy.deepcopy(items[1]))
     elif case == "unknown-criterion":
         items.append({"item": "C2", "verdict": "ok", "evidence": "x", "bugs": []})
     elif case == "criterion-na":
@@ -161,9 +163,8 @@ def _invalid(case: str) -> list[dict]:
 @pytest.mark.parametrize(
     ("case", "error"),
     [
-        ("missing-item", "no verdict for E4"),
-        ("repeated-item", "more than once"),
-        ("unknown-criterion", "unknown item C2"),
+        ("missing-item", "Field required"),
+        ("unknown-criterion", "Extra inputs are not permitted"),
         ("criterion-na", "cannot be n/a"),
         ("bug-without-evidence", "evidence"),
         ("unknown-kind", "kind"),
@@ -268,7 +269,7 @@ def test_ac_3_3_16_evaluation_unavailable(task, caplog):
     evaluation = evaluate_version(task, {"linked_list.py": LINKED_LIST}, model)
 
     assert evaluation is None
-    assert len(model.calls) == 2
+    assert len(model.calls) == EVALUATION_ATTEMPTS == 2
     assert "critique unavailable" in caplog.text
 
 
@@ -404,7 +405,7 @@ def test_ac_3_3_16_unavailable_sends_v0(task, isolated_run, monkeypatch, caplog)
     update = _reflect(_state(task, isolated_run), model, coder, monkeypatch)
 
     sent = _sent(update)
-    assert len(model.calls) == 2
+    assert len(model.calls) == EVALUATION_ATTEMPTS
     assert coder.prompts == []
     assert sent.result.explanation == "EXPLANATION-v0"
     assert (sent.reflection.version, sent.reflection.high) == (0, None)
@@ -569,3 +570,77 @@ def test_dec_196_one_task_in_progress(task, isolated_run, monkeypatch, statuses)
     assert update["error"]
     assert "tasks" not in update
     assert model.calls == []
+
+
+PLANTED = '''class Node:
+    def __init__(self, value, next=None):
+        self.value = value
+        self.next = next
+
+
+class LinkedList:
+    def __init__(self):
+        self.head = None
+
+    def insert(self, value):
+        self.head = Node(value, self.head)
+
+    def search(self, value):
+        node = self.head
+        while node is not None:
+            if node.value == value:
+                return True
+            node = node.next
+        return False
+
+    def to_list(self):
+        values, node = [], self.head
+        while node is not None:
+            values.append(node.value)
+            node = node.next
+        return values
+
+    def reverse(self):
+        previous, current = None, self.head
+        if current is not None:
+            following = current.next
+            current.next = previous
+            previous, current = current, following
+        self.head = previous
+'''
+
+
+@pytest.mark.llm
+@pytest.mark.timeout(900)
+def test_ac_3_3_41_live_planted_bug(task, isolated_run, monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    monkeypatch.setenv("REFLECTION_MAX_ROUNDS", "1")
+    reverse_task = task.model_copy(update={
+        "description": "Create linked_list.py with a LinkedList class: insert at the head, search, "
+        "to_list and reverse (reverses the list in place).",
+        "acceptance_criteria": [
+            *task.acceptance_criteria,
+            TaskCriterion(given="a list whose to_list() is [1, 2, 3]", when="reverse()",
+                          then="to_list() is [3, 2, 1]"),
+        ],
+    })
+    (isolated_run / "linked_list.py").write_text(PLANTED)
+    v0 = CoderResult(status="success", explanation="Wrote linked_list.py.", main_file="linked_list.py",
+                     code=PLANTED, steps=[StepRecord(iteration=1, action="write_file",
+                                                     action_input={"path": "linked_list.py", "content": PLANTED})])
+    current = TaskState(**reverse_task.model_dump(), status="in_progress", result=v0)
+    state = ProjectState(requirement="r", tasks=[current], code={"linked_list.py": PLANTED})
+
+    update = make_reflect_node()(state, Runtime(context=CoderRunContext()))
+
+    [sent] = update["tasks"]
+    critiques = [r.getMessage() for r in caplog.records if "critique v0" in r.getMessage()]
+    assert any("reverse" in c and (" High " in c or " Medium " in c) for c in critiques), critiques
+    assert sent.reflection.improvements == 1
+    check = subprocess.run(
+        [sys.executable, "-c", "from linked_list import LinkedList\nl = LinkedList()\n"
+         "for v in (3, 2, 1):\n    l.insert(v)\nl.reverse()\nprint(l.to_list())"],
+        cwd=isolated_run, capture_output=True, text=True, timeout=10,
+    )
+    # The last line is the check's own print; the module may print more.
+    assert check.stdout.strip().splitlines()[-1:] == ["[3, 2, 1]"], check.stdout + check.stderr

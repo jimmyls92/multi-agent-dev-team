@@ -18,6 +18,9 @@ up to ``REFLECTION_MAX_ROUNDS`` improvement passes while the best version
 has High or Medium bugs, puts the best version back on disk and sends it.
 
 Attributes:
+    EVALUATION_ATTEMPTS: Model calls allowed for one evaluation (DEC-171).
+    EVALUATION_MODEL: Model of the evaluation call, from the
+        ``EVALUATION_MODEL`` environment variable (DEC-200).
     RUBRIC_ITEMS: The fixed items E1-E11 and what each checks.
     EVALUATION_SYSTEM_PROMPT: Instructions for the evaluation call.
 
@@ -29,19 +32,19 @@ Typical usage example:
 """
 
 import logging
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, NamedTuple
+from typing import ClassVar, Literal, NamedTuple
 
 from langchain_core.language_models import BaseChatModel
 from langgraph.runtime import Runtime
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 import tools.handlers
 import agents.coder_agent as coder_agent
 from agents.coder_agent import (
-    MODEL,
     CoderRunContext,
     _resolved,
     _with_task,
@@ -71,6 +74,7 @@ __all__ = [
     "Bug",
     "BugCounts",
     "DefectKind",
+    "ItemCheck",
     "ItemVerdict",
     "SelfEvaluationBase",
     "best_version",
@@ -80,6 +84,10 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+EVALUATION_ATTEMPTS = 2  # DEC-171: one corrective retry
+# DEC-200: the small model left bug verdicts without a diagnosis; a larger one judges.
+EVALUATION_MODEL = os.getenv("EVALUATION_MODEL", "openai/gpt-4.1")
 
 RUBRIC_ITEMS: dict[str, str] = {
     "E1": "empty input: empty collections, empty strings, no elements",
@@ -110,7 +118,8 @@ EVALUATION_SYSTEM_PROMPT = f"""You are a strict code reviewer checking one versi
 before it goes to the QA team. Judge only the code you are given against the
 task and its acceptance criteria.
 
-Give exactly one verdict for every rubric item listed in the request:
+The tool has one field per rubric item listed in the request (C0, C1... and
+E1-E11); fill every field with one verdict:
 - ok: you checked it and the code handles it; say briefly how.
 - bug: the code fails it. List each bug. Every bug needs a concrete input and
   the wrong result it gives, traced through the code (evidence); no guesses.
@@ -135,22 +144,22 @@ Do not invent problems: a version may have no bugs at all.
 {PYTHON_ENVIRONMENT}"""
 
 
-class ItemVerdict(BaseModel):
-    """The verdict on one rubric item (DEC-193).
+class ItemCheck(BaseModel):
+    """The verdict on one rubric item, as the model fills it in one field (DEC-193, DEC-200).
 
     Attributes:
-        item: Rubric item, ``C0``..``Cn`` or ``E1``..``E11``.
         verdict: ``ok``, ``bug`` or ``n/a``.
         evidence: Brief reason for the verdict.
         bugs: The item's bugs; at least one for ``bug``, none otherwise.
     """
-    item: NonEmptyStr
+    model_config = ConfigDict(extra="forbid")
+
     verdict: Literal["ok", "bug", "n/a"]
     evidence: NonEmptyStr
     bugs: list[Bug] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _bugs_match_verdict(self) -> "ItemVerdict":
+    def _bugs_match_verdict(self) -> "ItemCheck":
         """Checks that only a ``bug`` verdict has bugs, and it has some.
 
         Returns:
@@ -161,10 +170,19 @@ class ItemVerdict(BaseModel):
                 ``n/a`` item has any.
         """
         if self.verdict == "bug" and not self.bugs:
-            raise ValueError(f"item {self.item} is a bug but lists no bug with its diagnosis")
+            raise ValueError("the item is a bug but lists no bug with its diagnosis")
         if self.verdict != "bug" and self.bugs:
-            raise ValueError(f"item {self.item} is {self.verdict} but lists bugs")
+            raise ValueError(f"the item is {self.verdict} but lists bugs")
         return self
+
+
+class ItemVerdict(ItemCheck):
+    """The verdict on one rubric item, with the item's name (DEC-193).
+
+    Attributes:
+        item: Rubric item, ``C0``..``Cn`` or ``E1``..``E11``.
+    """
+    item: NonEmptyStr
 
 
 class BugCounts(NamedTuple):
@@ -203,48 +221,63 @@ class SelfEvaluationBase(BaseModel):
         return counts.high + counts.medium > 0
 
 
-def _evaluation_schema(criteria_count: int) -> type[SelfEvaluationBase]:
-    """Returns a SelfEvaluation schema with the rubric of one task (DEC-193).
+class _EvaluationSchema(BaseModel):
+    """Base of the per-task schema the model fills: one required field per rubric item (DEC-200).
+
+    Attributes:
+        CRITERIA: Names of the task's criterion fields, ``C0``..``Cn``.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    CRITERIA: ClassVar[tuple[str, ...]] = ()
+
+    @model_validator(mode="after")
+    def _criteria_apply(self) -> "_EvaluationSchema":
+        """Checks that no acceptance criterion is ``n/a``.
+
+        Returns:
+            This evaluation.
+
+        Raises:
+            ValueError: If a criterion field is ``n/a``.
+        """
+        for name in self.CRITERIA:
+            if getattr(self, name).verdict == "n/a":
+                raise ValueError(f"criterion {name} cannot be n/a")
+        return self
+
+    def to_evaluation(self) -> SelfEvaluationBase:
+        """Returns the evaluation as a list of named verdicts, in rubric order."""
+        return SelfEvaluationBase(items=[
+            ItemVerdict(item=name, **getattr(self, name).model_dump())
+            for name in type(self).model_fields
+        ])
+
+
+def _evaluation_schema(task: TaskSpec) -> type[_EvaluationSchema]:
+    """Returns the SelfEvaluation schema of one task: a required field per rubric item (DEC-193, DEC-200).
+
+    The model cannot leave an item out or merge the list, since the tool
+    call needs every field by name.
 
     Args:
-        criteria_count: Number of acceptance criteria of the task.
+        task: The task; its criteria become fields ``C0``..``Cn``.
 
     Returns:
-        A subclass of ``SelfEvaluationBase`` named ``SelfEvaluation``, the
-        tool name the LLM sees.
+        A model named ``SelfEvaluation``, the tool name the LLM sees, with
+        fields ``C0``..``Cn`` then ``E1``..``E11``.
     """
-    criteria = [f"C{k}" for k in range(criteria_count)]
-    expected = [*criteria, *RUBRIC_ITEMS]
-
-    class SelfEvaluation(SelfEvaluationBase):
-        """Self-evaluation with exactly one verdict per rubric item of the task."""
-
-        @model_validator(mode="after")
-        def _check_items(self) -> "SelfEvaluation":
-            """Returns the evaluation if it covers each item exactly once.
-
-            Returns:
-                This evaluation.
-
-            Raises:
-                ValueError: If an item is unknown, repeated or missing, or a
-                    criterion is ``n/a``.
-            """
-            given = [verdict.item for verdict in self.items]
-            for item in given:
-                if item not in expected:
-                    raise ValueError(f"unknown item {item}; the items are {', '.join(expected)}")
-                if given.count(item) > 1:
-                    raise ValueError(f"item {item} is given more than once")
-            missing = [item for item in expected if item not in given]
-            if missing:
-                raise ValueError(f"no verdict for {', '.join(missing)}")
-            for verdict in self.items:
-                if verdict.item in criteria and verdict.verdict == "n/a":
-                    raise ValueError(f"criterion {verdict.item} cannot be n/a")
-            return self
-
-    return SelfEvaluation
+    criteria = {
+        f"C{k}": f"Acceptance criterion: Given {c.given}, When {c.when}, Then {c.then}"
+        for k, c in enumerate(task.acceptance_criteria)
+    }
+    fields = {
+        name: (ItemCheck, Field(description=text))
+        for name, text in {**criteria, **RUBRIC_ITEMS}.items()
+    }
+    schema = create_model("SelfEvaluation", __base__=_EvaluationSchema, **fields)
+    schema.CRITERIA = tuple(criteria)
+    return schema
 
 
 def _render_request(task: TaskSpec, files: Mapping[str, str]) -> str:
@@ -286,13 +319,15 @@ def evaluate_version(
 
     Returns:
         The validated evaluation; None, with a WARNING "critique
-        unavailable", if no output was valid or the call failed.
+        unavailable", if no output of ``EVALUATION_ATTEMPTS`` calls was
+        valid or the call failed.
     """
-    schema = _evaluation_schema(len(task.acceptance_criteria))
+    schema = _evaluation_schema(task)
     try:
         evaluation = structured_call(
-            model, schema, EVALUATION_SYSTEM_PROMPT, _render_request(task, files), max_attempts=2
-        )
+            model, schema, EVALUATION_SYSTEM_PROMPT, _render_request(task, files),
+            max_attempts=EVALUATION_ATTEMPTS,
+        ).to_evaluation()
     except Exception as e:
         logger.warning("%s: critique unavailable: %s: %s", task.task_id, type(e).__name__, e)
         return None
@@ -462,8 +497,9 @@ def reflect_task(
     spec: ProjectSpec | None,
     written: list[str],
     window,
-    model: BaseChatModel,
+    model: BaseChatModel | None,
     max_rounds: int,
+    evaluation_model: BaseChatModel | None = None,
 ) -> tuple[CoderResult, Reflection]:
     """Evaluates the task's version, improves it and leaves the best one on disk (DEC-172).
 
@@ -478,14 +514,18 @@ def reflect_task(
         spec: The PM's spec, or None.
         written: Files already written in this run.
         window: The Coder's window; improvement passes add their turn.
-        model: Chat model of the Coder, also used for the evaluation.
+        model: Chat model of the Coder's improvement passes; None uses the
+            configured one.
         max_rounds: ``REFLECTION_MAX_ROUNDS``.
+        evaluation_model: Chat model of the evaluation; None uses ``model``
+            (DEC-200).
 
     Returns:
         The result of the version sent and its reflection record.
     """
+    judge = evaluation_model or model
     first = _Version(0, task.result, _snapshot(), None)
-    first.evaluation = evaluate_version(task, _version_files(task, task.result), model)
+    first.evaluation = evaluate_version(task, _version_files(task, task.result), judge)
     if first.evaluation is None:
         return first.result, _reflection(first, 0)
     _log_evaluation(task, first)
@@ -515,7 +555,7 @@ def reflect_task(
                         task.task_id, rounds, best.index)
             break
         version = _Version(len(versions), result, snapshot, None)
-        version.evaluation = evaluate_version(task, _version_files(task, result), model)
+        version.evaluation = evaluate_version(task, _version_files(task, result), judge)
         versions.append(version)
         if version.evaluation is None:  # DEC-196: sent unevaluated, it was written to fix bugs
             best = version
@@ -554,8 +594,11 @@ def make_reflect_node(
     """Returns the reflect node, between the Coder and the QA (DEC-177).
 
     Args:
-        model: Chat model of the Coder. None uses the Coder's configured
-            one, through the Coder's own ``get_chat_model`` (DEC-193).
+        model: Chat model of the Coder, also used for the evaluation when
+            given (tests). None uses the Coder's configured model for the
+            improvement passes and ``EVALUATION_MODEL`` for the evaluation,
+            both through the Coder's own ``get_chat_model`` (DEC-193,
+            DEC-200).
 
     Returns:
         The node: it takes the state and the run's runtime and returns a
@@ -588,7 +631,9 @@ def make_reflect_node(
         settings = runtime.context.settings
         result, reflection = reflect_task(
             task, state.spec, list(state.code), runtime.context.window,
-            model or coder_agent.get_chat_model(MODEL), settings.reflection_max_rounds,
+            model, settings.reflection_max_rounds,
+            # DEC-200: tests pass one fake for both; otherwise the larger evaluation model.
+            model or coder_agent.get_chat_model(EVALUATION_MODEL),
         )
         # A restored version may have removed files a discarded pass added.
         files = {name: content for name, content in state.code.items()

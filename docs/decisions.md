@@ -3996,7 +3996,7 @@ A decision can mix bases; then each part states its own.
 - Code: `agents/coder_reflection.py`
 
 ### DEC-193 The self-evaluation schema is built per task and an item may hold several bugs
-- Date: 2026-11-21 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Date: 2026-11-21 · Area: Coder self-reflection (Lab 3.3) · Status: accepted (list form and model superseded by DEC-200)
 - Basis: Preferred (shape of DEC-182 and DEC-183)
 - Context: one rubric item can fail in more than one place (E2 may break
   `reverse` with one element and `delete` of the last node). The valid
@@ -4162,3 +4162,57 @@ A decision can mix bases; then each part states its own.
   clock jump can end the run early); a monotonic deadline only (a
   meaningless number for people).
 - Code: `orchestration/state.py` (`closed_reason`, `deadline`, `deadline_at`), `orchestration/graph.py` (`out_of_time`, `run`), `agents/qa_agent.py` (`make_qa_node`)
+
+### DEC-199 Logs of the live runs are kept in the repo as evidence
+- Date: 2026-11-21 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Preferred (C3.5 asks for logs of real use; the evaluator reads
+  the repo at one SHA)
+- Context: the live tests (AC-3.3-40, AC-3.3-41) and the manual demo with
+  `main.py` show the A2A loop and the self-reflection with the real
+  models; their output is the evidence the README points to.
+- Decision: the INFO logs of those runs are saved as text files in
+  `docs/evidence/lab_3_3/` and linked from the README. Before each commit
+  they are checked: no key or secret appears, and absolute paths of the
+  local machine are replaced by paths relative to the repo.
+- Why: the evaluator can read real runs at the delivered SHA; an excerpt
+  pasted in the README alone is weaker evidence.
+- Alternatives: only excerpts in the README (lighter repo, weaker
+  evidence); keep the logs out of git (nothing to check at the SHA).
+- Code: `docs/evidence/lab_3_3/` (logs and their index)
+
+### DEC-200 The self-evaluation fills one required field per item and uses a larger model
+- Date: 2026-11-21 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Basis: Preferred (C3.4 needs the critique to happen in real runs);
+  supersedes the list form of DEC-193 and, for the evaluation only,
+  DEC-193's use of the Coder's model
+- Context: the live runs of T9 showed the evaluation with `gpt-4.1-mini`
+  giving no valid output in about 16 % of the calls: items left out (E11),
+  the item list broken into loose strings, and `bug` verdicts with no
+  diagnosis. With no valid output the version goes to the QA without a
+  critique (DEC-171), so a forced run could show no self-reflection.
+- Decision, applied in the order agreed with the user and measured with
+  the live test AC-3.3-41 after each step:
+  - The schema has one required field per rubric item (`C0`..`Cn`,
+    `E1`..`E11`) instead of a list, so no item can be left out or merged;
+    the code turns it back into the list of named verdicts. This removed
+    the missing and broken items (1 failure in 5 runs left: `bug` with no
+    diagnosis). Making `bugs` required as well made it worse (the model
+    left it out on `ok` items) and was reverted.
+  - A trial with three calls (two corrective retries) still failed 1 in
+    6 runs: the small model repeats the same mistake on every retry.
+  - The evaluation uses `EVALUATION_MODEL`, `openai/gpt-4.1` by default.
+    12 of 12 evaluations were valid at the first call, and the critique
+    stopped reporting the same bug under several items. With it, the
+    calls went back to two (DEC-171): the third was never needed, so it
+    was not kept.
+- Why: the critique is the graded evidence of C3.4 and must happen when
+  the evaluator forces a buggy case. The larger model is used for one to
+  two calls per review only; the Coder's ReACT passes and the QA keep the
+  small model (C4.5).
+- Alternatives: keep the small model with more retries (it repeats the
+  same mistake); keep three calls with the larger model (no run needed
+  the third); accept missing items as `ok` (hides real bugs).
+- Revisit when: Module 4 cost reports show the evaluation is a large
+  share of the run's cost.
+- Code: `agents/coder_reflection.py` (`_evaluation_schema`, `ItemCheck`,
+  `EVALUATION_MODEL`, `reflect_task`)
