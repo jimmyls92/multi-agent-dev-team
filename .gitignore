@@ -15,6 +15,7 @@ docs/course_reference.txt
 
 # Coder working directory (Lab 1.2 tools, DEC-036, DEC-140)
 workspace_coder/
+workspace_coder_history/
 # QA's generated tests (DEC-140)
 workspace_qa/
 workspace_history/
