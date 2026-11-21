@@ -88,6 +88,7 @@ Then `to_list()` is `[3, 2, 1]`.
 - **Then** the defaults are `workspace_qa`, `openai/gpt-4.1-mini`, 2,
   `High` and a per-test timeout of 2 s; each invalid value raises
   `ValueError` naming its variable
+- **Changed by DEC-174** (Lab 3.3): there is no `QA_BLOCKING_SEVERITY`; a leftover value only logs a WARNING (DEC-191, AC-3.3-11).
 
 ### Report
 
@@ -100,6 +101,7 @@ Then `to_list()` is `[3, 2, 1]`.
 - **When** each is validated as an `Issue` inside a `QAReport`
 - **Then** each raises a validation error; a `test` issue with severity
   `High` and a `review` issue with severity `Low` are accepted
+- **Changed by DEC-174** (Lab 3.3): the `review` source no longer exists, so any `review` issue is rejected; `test` and `qa` issues must be High.
 
 #### AC-3.2-6 — `approved` follows the rule, whatever value it is given
 
@@ -112,6 +114,7 @@ Then `to_list()` is `[3, 2, 1]`.
   (e) a `qa` High issue, no test ran
 - **When** each report is validated
 - **Then** `approved` is True only in (a)
+- **Changed by DEC-174** (Lab 3.3): no threshold: a report is approved only if some test passed, none failed and it has no issue; cases (a) with no issue, (c), (d) and (e).
 
 ### Running pytest
 
@@ -284,6 +287,7 @@ the linked-list task.
 - **When** `run_qa` runs the task
 - **Then** the report is approved with 2 passed tests and holds the Low
   `review` issue
+- **Changed by DEC-174** (Lab 3.3): no review runs on correct code, so the report holds no issue (AC-3.3-8).
 
 #### AC-3.2-20 — A failing test becomes a High issue linked to its criterion
 
@@ -307,6 +311,7 @@ the linked-list task.
 - **Then** (a) is approved with the note "review unavailable"; (b) is not
   approved and its `test` issue has the fix "Make <test> pass; it failed
   with: ..."; (c) is not approved
+- **Changed by DEC-174** (Lab 3.3): only case (b) remains: the failing test keeps its default fix and the note "review unavailable"; no `qa` issue is added.
 
 #### AC-3.2-22 — A hang is blamed on the file where it hangs
 

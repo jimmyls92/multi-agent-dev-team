@@ -3579,7 +3579,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: keep the review as it is (duplicated opinion, noise in
   the fixes); drop the review entirely (the Coder gets only what failed
   and spends ReACT calls finding where).
-- Code: —
+- Code: `agents/qa_agent.py` (`review_code`, `CodeReviewBase`, `run_qa`), `orchestration/qa_report.py`
 
 ### DEC-175 A2A messages travel in a mailbox inside the shared state
 - Date: 2026-11-19 · Area: A2A (Lab 3.3) · Status: accepted
@@ -3956,3 +3956,25 @@ A decision can mix bases; then each part states its own.
   timeout from each agent (three callers and their tests change for the
   same result).
 - Code: `orchestration/settings.py`, `llm_client.py`
+
+### DEC-191 A failing test's issue carries the test's code; an old threshold only warns
+- Date: 2026-11-21 · Area: QA Agent (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: the correction pass gets the source of each failing test
+  (DEC-187), since the Coder cannot read `workspace_qa/` (DEC-154); the
+  report only knew the test's name. DEC-174 removes
+  `QA_BLOCKING_SEVERITY`, which existing `.env` files may still set.
+- Decision: `Issue` gains `test_code`, the failing test function as
+  written, decorators included, taken with `ast` from the QA's test file
+  (a parametrized `test_x[case]` is looked up as `test_x`); empty for
+  every other issue. The field is not called `test_source` because
+  `source` already names the issue's origin. When `QA_BLOCKING_SEVERITY`
+  is set, the QA logs a WARNING that it is no longer used and goes on.
+- Why: a few lines per failure tell the Coder exactly what is expected,
+  without the passing tests. A threshold only changed how strict the
+  verdict was, never where anything is written, so a warning is enough
+  (unlike `WORKSPACE_DIR`, DEC-151).
+- Alternatives: send the whole test file (noise, repeats passing tests);
+  raise on the old variable (stops runs for a harmless leftover).
+- Code: `orchestration/qa_report.py` (`Issue.test_code`),
+  `agents/qa_agent.py` (`_judge_run`, `load_qa_settings`)

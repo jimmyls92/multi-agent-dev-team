@@ -19,60 +19,57 @@ NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length
 
 Severity = Literal["High", "Medium", "Low"]
 
-# Lower rank is more severe; a severity blocks when its rank is at most the
-# threshold's (DEC-139).
-_SEVERITY_RANK: dict[str, int] = {"High": 0, "Medium": 1, "Low": 2}
-
 
 class Issue(BaseModel):
-    """One problem the QA found in a task (C3.1, DEC-149).
+    """One problem the QA found in a task (C3.1, DEC-149, DEC-174).
 
     Attributes:
-        severity: How serious the problem is.
+        severity: How serious the problem is; always High, since every
+            issue comes from executed evidence (DEC-174). Kept from the
+            lab's schema.
         location: Where it happens: a test, a file or a file and line.
         description: What is wrong, e.g. the assertion that failed.
         fix: What the Coder must change.
         source: Where the issue comes from: ``test`` (an executed test
-            failed), ``review`` (the LLM's opinion) or ``qa`` (the QA could
-            not do its job; not the Coder's fault).
+            failed or could not import the code) or ``qa`` (the QA could not
+            do its job; not the Coder's fault).
         criterion: The Given/When/Then criterion broken; empty when none.
+        test_code: The failing test function as written, decorators
+            included; empty for any other issue (DEC-191).
     """
     severity: Severity
     location: NonEmptyStr
     description: NonEmptyStr
     fix: NonEmptyStr
-    source: Literal["test", "review", "qa"]
+    source: Literal["test", "qa"]
     criterion: str = ""
+    test_code: str = ""
 
     @model_validator(mode="after")
-    def _severity_matches_source(self) -> "Issue":
-        """Checks that the severity is allowed for the issue's source.
+    def _always_high(self) -> "Issue":
+        """Checks that the issue is High.
 
         Returns:
             The issue unchanged.
 
         Raises:
-            ValueError: If a ``test`` or ``qa`` issue is not High, or a
-                ``review`` issue is High.
+            ValueError: If the severity is not High.
         """
-        # DEC-139: only executed evidence (or the QA's own failure) blocks
-        # by default; an LLM opinion is never High.
-        if self.source == "review" and self.severity == "High":
-            raise ValueError("a review issue must be Medium or Low")
-        if self.source != "review" and self.severity != "High":
+        # DEC-174: only executed evidence (or the QA's own failure) is an
+        # issue, and it always blocks.
+        if self.severity != "High":
             raise ValueError(f"a {self.source} issue must be High")
         return self
 
 
 class QAReport(BaseModel):
-    """The QA's verdict on one task (C3.1, C3.3, DEC-149, DEC-153).
+    """The QA's verdict on one task (C3.1, C3.3, DEC-149, DEC-153, DEC-174).
 
     Attributes:
         task_id: The task reviewed.
-        issues: Problems found, from tests, the review or the QA itself.
+        issues: Problems found by the tests or the QA itself.
         tests_passed: Tests that passed in the run.
         tests_failed: Tests that failed in the run.
-        blocking_severity: Lowest severity that blocks approval.
         notes: Remarks on the run, e.g. "review unavailable".
         approved: Computed by the validator; any value given is ignored.
     """
@@ -80,18 +77,8 @@ class QAReport(BaseModel):
     issues: list[Issue] = Field(default_factory=list)
     tests_passed: int = Field(default=0, ge=0)
     tests_failed: int = Field(default=0, ge=0)
-    blocking_severity: Severity = "High"
     notes: list[str] = Field(default_factory=list)
     approved: bool = False
-
-    def blocking_issues(self) -> list[Issue]:
-        """Returns the issues at or above ``blocking_severity`` (DEC-139).
-
-        Returns:
-            The blocking issues, in report order.
-        """
-        threshold = _SEVERITY_RANK[self.blocking_severity]
-        return [issue for issue in self.issues if _SEVERITY_RANK[issue.severity] <= threshold]
 
     @model_validator(mode="after")
     def _compute_approved(self) -> "QAReport":
@@ -99,11 +86,9 @@ class QAReport(BaseModel):
 
         Returns:
             The report with ``approved`` True only if some test passed, none
-            failed and no issue is at or above ``blocking_severity``.
+            failed and there is no issue.
         """
-        # DEC-139, DEC-149: never approved without a passing test run,
-        # whatever value the caller or an LLM gave.
-        self.approved = (
-            self.tests_passed > 0 and self.tests_failed == 0 and not self.blocking_issues()
-        )
+        # DEC-139, DEC-149, DEC-174: never approved without a passing test
+        # run, whatever value the caller or an LLM gave.
+        self.approved = self.tests_passed > 0 and self.tests_failed == 0 and not self.issues
         return self

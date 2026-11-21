@@ -1,4 +1,4 @@
-"""QA & Debugger agent (Lab 3.2).
+"""QA & Debugger agent (Labs 3.2 and 3.3).
 
 Reviews one task of the PM's handoff: it reads the Coder's files through the
 MCP server, writes pytest tests for the task's acceptance criteria and
@@ -14,9 +14,10 @@ model sees the criteria and only the interface of the code (DEC-158).
 becomes a ``qa`` issue in an unapproved report (DEC-142). Each failure is
 blamed on the file where it happens: the Coder's failures become issues,
 the QA's own make it write a new draft within ``QA_MAX_ATTEMPTS`` model
-calls (DEC-152, DEC-159). A second model call, ``review_code``, reads the
-whole code and writes the fix of each failing test plus advisory issues;
-it never decides approval (DEC-160).
+calls (DEC-152, DEC-159). Only when a test failed, a second model call,
+``review_code``, reads the whole code and writes the fix of each failing
+test; it adds no issues and never decides approval (DEC-160, DEC-174).
+Each failing test's issue carries the test's code (DEC-191).
 
 Run as a module it is the demo: it reviews a bundled buggy linked list with
 the real model and prints the report.
@@ -26,7 +27,7 @@ Attributes:
         (C4.5, DEC-150).
     QA_SETTINGS: Settings read at import time from the environment.
     TESTS_SYSTEM_PROMPT: Instructions for writing the tests of a task.
-    REVIEW_SYSTEM_PROMPT: Instructions for reviewing a task's code.
+    REVIEW_SYSTEM_PROMPT: Instructions for writing the fix of each failing test.
 
 Typical usage example:
 
@@ -47,7 +48,7 @@ import sys
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal, NamedTuple, TextIO, get_args
+from typing import Literal, NamedTuple, TextIO
 
 from dotenv import load_dotenv
 from langchain_core.language_models import BaseChatModel
@@ -60,7 +61,6 @@ from orchestration.state import (
     Issue,
     NonEmptyStr,
     QAReport,
-    Severity,
     TaskCriterion,
     TaskSpec,
 )
@@ -86,7 +86,6 @@ class QASettings(BaseModel):
         model: Model the QA calls (DEC-150).
         max_attempts: Attempts the QA has to produce runnable tests
             (DEC-141).
-        blocking_severity: Lowest severity that blocks approval (DEC-139).
         test_timeout: Seconds each test may run (DEC-152).
     """
     model_config = ConfigDict(frozen=True)
@@ -94,7 +93,6 @@ class QASettings(BaseModel):
     workspace_dir: Path
     model: str
     max_attempts: int
-    blocking_severity: Severity
     test_timeout: int
 
 
@@ -131,11 +129,11 @@ def load_qa_settings(
     if not model.strip():
         raise ValueError("QA_MODEL must not be empty")
 
-    severity = env.get("QA_BLOCKING_SEVERITY", "High")
-    if severity not in get_args(Severity):
-        raise ValueError(
-            f"QA_BLOCKING_SEVERITY must be one of {', '.join(get_args(Severity))}, "
-            f"got {severity!r}"
+    # DEC-174, DEC-191: the threshold is gone; a leftover value only warns.
+    if "QA_BLOCKING_SEVERITY" in env:
+        logger.warning(
+            "QA_BLOCKING_SEVERITY is no longer used: every QA issue comes from an "
+            "executed test and blocks approval (DEC-174); remove it from .env"
         )
 
     test_timeout = int_setting(env, "QA_TEST_TIMEOUT", default=2, minimum=1)
@@ -150,7 +148,6 @@ def load_qa_settings(
         workspace_dir=workspace_dir,
         model=model,
         max_attempts=int_setting(env, "QA_MAX_ATTEMPTS", default=2, minimum=1),
-        blocking_severity=severity,
         test_timeout=test_timeout,
     )
 
@@ -636,6 +633,30 @@ def _criterion_text(criterion: TaskCriterion) -> str:
     return f"Given {criterion.given}, When {criterion.when}, Then {criterion.then}"
 
 
+def _test_code(path: Path, name: str) -> str:
+    """Returns a test function of the QA's test file as written (DEC-191).
+
+    Args:
+        path: The test file.
+        name: The test's name, without a parametrized ``[case]`` suffix.
+
+    Returns:
+        The function's lines, decorators included; empty if the file
+        cannot be read or has no such function.
+    """
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return ""
+    lines = source.splitlines(keepends=True)
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            start = min([node.lineno] + [d.lineno for d in node.decorator_list])
+            return "".join(lines[start - 1 : node.end_lineno])
+    return ""
+
+
 def _is_simple_literal(node: ast.expr) -> bool:
     """Returns whether a value is a short literal, safe to show (DEC-158).
 
@@ -807,14 +828,13 @@ def _tail(text: str, limit: int = 1500) -> str:
     return text if len(text) <= limit else text[-limit:]
 
 
-def _qa_failure(task: TaskSpec, step: str, description: str, severity: Severity) -> QAReport:
+def _qa_failure(task: TaskSpec, step: str, description: str) -> QAReport:
     """Returns an unapproved report for a QA that could not do its job (DEC-142).
 
     Args:
         task: The task reviewed.
         step: The step that failed, used as the issue's location.
         description: What went wrong.
-        severity: The blocking threshold of the report.
 
     Returns:
         A report with one ``qa`` High issue.
@@ -826,7 +846,7 @@ def _qa_failure(task: TaskSpec, step: str, description: str, severity: Severity)
         fix="Nothing for the Coder: the QA could not check this task; run the QA again.",
         source="qa",
     )
-    return QAReport(task_id=task.task_id, issues=[issue], blocking_severity=severity)
+    return QAReport(task_id=task.task_id, issues=[issue])
 
 
 _FRAME = re.compile(r"^\s*(?P<path>\S+?\.py):(?P<line>\d+):", re.MULTILINE)
@@ -886,13 +906,12 @@ def _error_line(output: str) -> str:
     return lines[-1] if lines else ""
 
 
-def _coder_report(task: TaskSpec, issues: list[Issue], severity: Severity, result: PytestResult | None = None) -> QAReport:
+def _coder_report(task: TaskSpec, issues: list[Issue], result: PytestResult | None = None) -> QAReport:
     """Returns the report of a run whose failures are the Coder's.
 
     Args:
         task: The task reviewed.
         issues: The Coder's issues.
-        severity: The blocking threshold of the report.
         result: The pytest run, for its counts; None when pytest did not run.
 
     Returns:
@@ -903,7 +922,6 @@ def _coder_report(task: TaskSpec, issues: list[Issue], severity: Severity, resul
         issues=issues,
         tests_passed=result.passed if result else 0,
         tests_failed=result.failed if result else 0,
-        blocking_severity=severity,
     )
 
 
@@ -926,18 +944,17 @@ def _judge_run(
         task: The task reviewed.
         written: The test file and the criterion of each test.
         result: The pytest run.
-        settings: QA settings; gives the threshold and the test timeout.
+        settings: QA settings; gives the test timeout.
         coder_dir: The Coder's folder.
 
     Returns:
         The report, or the error to send back to the model when the QA's
         own tests broke (a collection error or a timeout in its code).
     """
-    severity = settings.blocking_severity
     qa_dir = written.path.parent
     if result.status == "error":
         return _qa_failure(
-            task, "test run", f"pytest could not run the tests: {_tail(result.output)}", severity
+            task, "test run", f"pytest could not run the tests: {_tail(result.output)}"
         )
     if result.status == "timed_out":
         files = ", ".join(task.files)
@@ -952,7 +969,7 @@ def _judge_run(
             f"and that no function waits forever.",
             source="test",
         )
-        return _coder_report(task, [issue], severity)
+        return _coder_report(task, [issue])
     if result.status == "collection_error":
         blame = _blame(result.output, coder_dir, qa_dir)
         if blame.owner == "qa":
@@ -965,7 +982,7 @@ def _judge_run(
             fix=f"Fix {blame.file} so it can be imported; it raised: {error}",
             source="test",
         )
-        return _coder_report(task, [issue], severity)
+        return _coder_report(task, [issue])
 
     if result.skipped:
         return (
@@ -990,7 +1007,8 @@ def _judge_run(
             details = failure.details.strip().splitlines()
             description = failure.message.strip() or (details[-1] if details else "the test failed")
         # A parametrized test is reported as name[case].
-        index = written.criteria.get(failure.name.split("[")[0])
+        test_name = failure.name.split("[")[0]
+        index = written.criteria.get(test_name)
         issues.append(
             Issue(
                 severity="High",
@@ -999,9 +1017,10 @@ def _judge_run(
                 fix=f"Make {failure.name} pass; it failed with: {description.splitlines()[0]}",
                 source="test",
                 criterion=_criterion_text(task.acceptance_criteria[index]) if index is not None else "",
+                test_code=_test_code(written.path, test_name),
             )
         )
-    return _coder_report(task, issues, severity, result)
+    return _coder_report(task, issues, result)
 
 
 def _test_task(
@@ -1055,7 +1074,7 @@ def _test_task(
                 Issue(severity="High", location=p.file, description=p.message, fix=p.fix, source="test")
                 for p in missing
             ]
-            return _coder_report(task, issues, settings.blocking_severity), source
+            return _coder_report(task, issues), source
 
         # DEC-161: room for every test's own timeout, so one hang per test
         # never kills the run; the sandbox caps it at MAX_TIMEOUT.
@@ -1080,7 +1099,6 @@ def _test_task(
         "test writing",
         f"no runnable tests could be produced in {settings.max_attempts} attempts; "
         f"last error: {_tail(feedback, 500)}",
-        settings.blocking_severity,
     ), ""
 
 
@@ -1093,12 +1111,7 @@ Rules:
   failure's number in the list. The fix tells the developer what to change
   in which function so the test passes, based on the criterion and the
   code. No fix for anything not listed.
-- In issues, list other real problems the tests did not catch: bugs in edge
-  cases, behaviour of the criteria that is missing, risky code. Use Medium
-  for likely bugs and Low for minor or style remarks; never High, since the
-  tests decide approval. Do not repeat a listed failure as an issue.
-- Location of an issue: the file and the function or class.
-- If the code is fine, leave issues empty."""
+- Give only fixes: never report other problems of the code."""
 
 
 class FailureFix(BaseModel):
@@ -1112,30 +1125,18 @@ class FailureFix(BaseModel):
     fix: NonEmptyStr
 
 
-class ReviewIssue(BaseModel):
-    """A problem the review found that the tests did not (DEC-139).
-
-    Attributes:
-        severity: Medium or Low; the review never blocks by itself.
-        location: File and function or class.
-        description: What is wrong.
-        fix: What the Coder should change.
-    """
-    severity: Literal["Medium", "Low"]
-    location: NonEmptyStr
-    description: NonEmptyStr
-    fix: NonEmptyStr
-
-
 class CodeReviewBase(BaseModel):
     """A code review as written by the LLM, before the per-report checks.
 
+    Only fixes are allowed: any other field, such as issues of its own, is
+    rejected (DEC-174).
+
     Attributes:
         fixes: One fix per failure of the report.
-        issues: Advisory issues.
     """
+    model_config = ConfigDict(extra="forbid")
+
     fixes: list[FailureFix] = Field(default_factory=list)
-    issues: list[ReviewIssue] = Field(default_factory=list)
 
 
 def _code_review_schema(failure_count: int) -> type[CodeReviewBase]:
@@ -1234,25 +1235,24 @@ def review_code(
     model: BaseChatModel,
     settings: QASettings,
 ) -> QAReport:
-    """Adds the LLM review to a report: better fixes and advisory issues (DEC-160).
+    """Gives each failing test of a report a fix that says where to change the code (DEC-160, DEC-174).
 
     The review sees the whole code. Its fix for each ``test`` issue
-    replaces the default one, and its issues are added with source
-    ``review``. Approval stays with the tests (DEC-139).
+    replaces the default one; it never adds issues, and approval stays
+    with the tests (DEC-139).
 
     Args:
         task: The task reviewed.
         sources: File name to content, for the task files read.
         tests: Source of the test file run.
-        report: The report from the tests.
+        report: The report from the tests, with at least one ``test`` issue.
         model: Chat model for the QA.
         settings: QA settings; gives the review's attempts.
 
     Returns:
-        The report with the review. If the review fails, the report with
-        the note "review unavailable"; below the default threshold it also
-        gets a ``qa`` High issue, since lower issues cannot be checked
-        (DEC-142). Nothing is raised.
+        The report with the review's fixes. If the review fails, the report
+        unchanged with the note "review unavailable" (DEC-142). Nothing is
+        raised.
     """
     failures = [issue for issue in report.issues if issue.source == "test"]
     schema = _code_review_schema(len(failures))
@@ -1266,18 +1266,7 @@ def review_code(
         )
     except Exception as e:
         logger.warning("%s: review unavailable: %s: %s", task.task_id, type(e).__name__, e)
-        issues = list(report.issues)
-        # DEC-142: a stricter threshold cannot be checked without the review.
-        if report.blocking_severity != "High":
-            issues.append(Issue(
-                severity="High",
-                location="review",
-                description=f"review unavailable ({type(e).__name__}: {e}); issues below "
-                f"High could not be checked",
-                fix="Nothing for the Coder: the QA could not review this task; run the QA again.",
-                source="qa",
-            ))
-        return _rebuilt(report, issues, report.notes + ["review unavailable"])
+        return _rebuilt(report, list(report.issues), report.notes + ["review unavailable"])
 
     fixes = {fix.failure: fix.fix for fix in review.fixes}
     issues = []
@@ -1287,12 +1276,7 @@ def review_code(
             issue = issue.model_copy(update={"fix": fixes[number]})
             number += 1
         issues.append(issue)
-    issues += [
-        Issue(**found.model_dump(), source="review") for found in review.issues
-    ]
-    logger.info(
-        "%s: review gave %d fixes and %d issues", task.task_id, len(review.fixes), len(review.issues)
-    )
+    logger.info("%s: review gave %d fixes", task.task_id, len(review.fixes))
     return _rebuilt(report, issues, report.notes)
 
 
@@ -1325,13 +1309,11 @@ async def run_qa(
         (DEC-142).
     """
     coder_dir = coder_dir or handlers.CODER_WORKSPACE_DIR
-    severity: Severity = settings.blocking_severity if settings else "High"
     step = "settings"
     # DEC-142: every failure, expected or not, becomes a qa issue; the
     # traceback goes to the log so our own bugs stay visible.
     try:
         settings = settings or load_qa_settings(os.environ, code_executor.EXEC_TIMEOUT, coder_dir)
-        severity = settings.blocking_severity
 
         step = "MCP read"
         files = await read_multiple_files(task.files, coder_dir, errlog or sys.stderr)
@@ -1349,21 +1331,22 @@ async def run_qa(
             _test_task, task, sources, files.rejected, model, settings, coder_dir
         )
 
-        # DEC-160: a qa failure cannot be approved, so it is not reviewed.
-        if not any(issue.source == "qa" for issue in report.issues):
+        # DEC-174: the review only explains failing tests; a qa failure or
+        # an approved run makes no review call.
+        if any(issue.source == "test" for issue in report.issues):
             step = "review"
             report = await asyncio.to_thread(
                 review_code, task, sources, tests, report, model, settings
             )
     except Exception as e:
         logger.exception("%s: QA step %r failed", task.task_id, step)
-        report = _qa_failure(task, step, f"{type(e).__name__}: {e}", severity)
+        report = _qa_failure(task, step, f"{type(e).__name__}: {e}")
 
     logger.info(
         "%s: verdict %s, %d blocking issues",
         task.task_id,
         "approved" if report.approved else "not approved",
-        len(report.blocking_issues()),
+        len(report.issues),
     )
     return report
 
@@ -1464,7 +1447,6 @@ def _print_report(report: QAReport) -> None:
     verdict = "APPROVED" if report.approved else "NOT APPROVED"
     print(f"\nQA verdict for {report.task_id}: {verdict}")
     print(f"Tests: {report.tests_passed} passed, {report.tests_failed} failed")
-    print(f"Blocking severity: {report.blocking_severity}")
     print(f"Issues ({len(report.issues)}):")
     for issue in report.issues:
         print(f"  [{issue.severity}] {issue.source}: {issue.location}")

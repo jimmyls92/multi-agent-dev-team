@@ -550,7 +550,7 @@ Task status: todo | map | in progress | review | done
 - `.env.example` gains the four settings; AC-3.3-6 is checked in T7, once
   the loop exists.
 
-### T3 — QA explains failures only and returns the test source · todo
+### T3 — QA explains failures only and returns the test source · done
 
 - **Covers:** AC-3.3-8 .. AC-3.3-11
 - Updates the Lab 3.2 ACs that used the threshold or `review` issues
