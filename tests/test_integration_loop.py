@@ -1,12 +1,14 @@
 """Integration tests of the Coder-QA loop through ``run()`` (Lab 3.3, T7).
 
-Covers spec `lab_3_3_a2a_loop` AC-3.3-29 .. AC-3.3-34 (DEC-163, DEC-164,
-DEC-169, DEC-170, DEC-176, DEC-178, DEC-197), with a fake PM, a fake
+Covers spec `lab_3_3_a2a_loop` AC-3.3-29 .. AC-3.3-34 and AC-3.3-36
+(DEC-163, DEC-164, DEC-168, DEC-169, DEC-170, DEC-176, DEC-178, DEC-197,
+DEC-198), with a fake PM, a fake
 Coder, a clean fake evaluation and a fake QA; AC-3.3-31 runs the real QA
 with a fake test-writing model.
 """
 
 import logging
+import time
 
 import pytest
 
@@ -361,3 +363,30 @@ def test_ac_3_3_34_next_task_after_failure(loop, monkeypatch):
     assert (task_1.status, task_1.reviews) == ("failed", 2)
     assert (task_2.status, task_2.reviews) == ("done", 1)
     assert final.outcome == "unresolved"
+
+
+def test_ac_3_3_36_out_of_time(loop, monkeypatch):
+    monkeypatch.setenv("RUN_TIMEOUT", "1")
+    real_pass = loop.__call__
+
+    def slow_first_task(prompt, window, model=None):
+        """Runs the fake pass; task_1's first pass takes 2 s."""
+        if "Task task_1:" in prompt and not loop.prompts:
+            time.sleep(2)
+        return real_pass(prompt, window, model)
+
+    monkeypatch.setattr(coder_agent, "run_agent", slow_first_task)
+    qa = FakeQA({})
+
+    final = run(REQUIREMENT, pm_model=_pm(_task_draft(1), _task_draft(2), _task_draft(3)),
+                coder_model=ScriptedChatModel([]), qa_review=qa)
+
+    task_1, task_2, task_3 = final.tasks
+    assert qa.calls == []
+    assert [t.status for t in final.tasks] == ["failed", "failed", "failed"]
+    assert {t.closed_reason for t in final.tasks} == {"out of time"}
+    assert final.outcome == "unresolved"
+    assert final.error == ""
+    assert task_1.result is not None and "file_1.py" in final.code
+    assert final.deadline_at and any("out of time" in note for note in final.progress)
+    assert "out of time" in final.final_report()

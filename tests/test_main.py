@@ -12,8 +12,9 @@ import pytest
 import agents.coder_agent as coder_agent
 import agents.pm_agent as pm_agent
 import agents.qa_agent as qa_agent
+import main as main_module
 from main import main
-from orchestration.state import Issue, QAReport
+from orchestration.state import Issue, ProjectState, QAReport
 from tests.coder_helpers import approving_review_steps, successful_task, unsuccessful_task
 from tests.fakes import ScriptedChatModel
 from tests.test_pm_agent import _draft, _spec_reply, _tasks_reply, _valid_tasks
@@ -153,7 +154,8 @@ def test_ac_2_3_13_main_incomplete(isolated_run, monkeypatch, capsys):
     assert code == 1
     assert "· done ·" in _task_block(out, "task_1")
     assert "· failed ·" in _task_block(out, "task_2")
-    assert out.strip().splitlines()[-1] == "RESULT: incomplete — task_2 failed"
+    assert out.strip().splitlines()[-1] == "RESULT: unresolved — task_2 not approved"
+    assert "[FINAL REPORT]" in out and "review limit reached" in out
     assert "RESULT: success" not in out
 
 
@@ -167,3 +169,44 @@ def test_ac_2_3_14_main_error(isolated_run, monkeypatch, capsys):
     last = out.strip().splitlines()[-1]
     assert last.startswith("RESULT: error")
     assert "API down" in last
+
+
+def _final(status: str, error: str = "") -> ProjectState:
+    """Returns a final state with two tasks, the second with the given status.
+
+    Args:
+        status: Status of task_2.
+        error: The run's error.
+
+    Returns:
+        The state; a failed task_2 closed at the review limit.
+    """
+    from tests.test_state import _closed, _state_data
+
+    data = _state_data()
+    second = (_closed(data, 2, "failed", "review limit reached", 5, "ISSUE-X") if status == "failed"
+              else _closed(data, 2, status, reviews=1))
+    return ProjectState(**{**data, "error": error, "tasks": [_closed(data, 1, "done", reviews=1), second]})
+
+
+@pytest.mark.parametrize(
+    ("state", "verdict", "code"),
+    [
+        (_final("done"), "RESULT: success", 0),
+        (_final("failed"), "RESULT: unresolved — task_2 not approved", 1),
+        (_final("done", "RuntimeError: API down"), "RESULT: error — RuntimeError: API down", 1),
+    ],
+    ids=["success", "unresolved", "error"],
+)
+def test_ac_3_3_39_verdict(monkeypatch, capsys, state, verdict, code):
+    monkeypatch.setattr(main_module, "run", lambda requirement: state)
+
+    exit_code = main(["Build an echo API"])
+
+    out = capsys.readouterr().out
+    assert exit_code == code
+    assert out.strip().splitlines()[-1] == verdict
+    if code == 0 or "error" in verdict:
+        assert "[FINAL REPORT]" not in out
+    else:
+        assert "[FINAL REPORT]" in out and "ISSUE-X" in out and "review 5" in out

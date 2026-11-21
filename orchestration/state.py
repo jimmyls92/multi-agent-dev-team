@@ -292,6 +292,9 @@ class TaskState(TaskSpec):
         reviews: QA reviews of the task so far, n (DEC-163, DEC-178).
         qa_report: The QA's report of the last review; None before the
             first (DEC-178).
+        closed_reason: Why the task closed unapproved, e.g. "review limit
+            reached" or "out of time"; empty while open or once done
+            (DEC-198).
     """
     status: TaskStatus = "pending"
     result: CoderResult | None = None
@@ -299,6 +302,7 @@ class TaskState(TaskSpec):
     reflection: Reflection | None = None
     reviews: int = Field(default=0, ge=0)
     qa_report: QAReport | None = None
+    closed_reason: str = ""
 
 
 class ProjectState(BaseModel):
@@ -316,6 +320,10 @@ class ProjectState(BaseModel):
         messages: A2A messages between the agents, in send order; nodes
             append through ``orchestration.a2a.send`` only (DEC-175).
         error: Empty on success; the failure message otherwise (DEC-087).
+        deadline: ``time.monotonic()`` value at which the run is out of
+            time; None without a time limit. The routers check only this
+            (DEC-168, DEC-198).
+        deadline_at: The same moment as a local ISO time, for people only.
         outcome: Computed: ``success`` when the QA approved every task and
             there is no error, ``unresolved`` otherwise (DEC-181).
     """
@@ -326,6 +334,8 @@ class ProjectState(BaseModel):
     progress: Annotated[list[str], operator.add] = Field(default_factory=list)
     messages: Annotated[list[A2AMessage], operator.add] = Field(default_factory=list)
     error: str = ""
+    deadline: float | None = None
+    deadline_at: str = ""
 
     @computed_field
     @property
@@ -334,3 +344,23 @@ class ProjectState(BaseModel):
         if not self.error and self.tasks and all(task.status == "done" for task in self.tasks):
             return "success"
         return "unresolved"
+
+    def final_report(self) -> str:
+        """Returns the report of every task not approved, empty on success (DEC-165, DEC-181).
+
+        Returns:
+            One block per task that is not done: why it closed, the review
+            it stopped at and its blocking issues (or "not reviewed").
+        """
+        blocks = []
+        for task in self.tasks:
+            if task.status == "done":
+                continue
+            reason = task.closed_reason or ("not run" if task.status == "pending" else task.status)
+            lines = [f"- {task.task_id} — {reason}; stopped at review {task.reviews}"]
+            issues = task.qa_report.issues if task.qa_report else []
+            lines += [f"    [{i.severity}] {i.location}: {i.description}" for i in issues]
+            if not issues:
+                lines.append("    not reviewed by the QA" if task.reviews == 0 else "    no issue reported")
+            blocks.append("\n".join(lines))
+        return "\n".join(blocks)

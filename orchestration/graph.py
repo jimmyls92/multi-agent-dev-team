@@ -11,8 +11,9 @@ QA in a ``review_request``, and the QA answers by A2A; its verdict closes
 the task or sends it back to the Coder, until the review limit
 (DEC-163, DEC-177, DEC-178). Each run gets its own memory window and
 settings through the run context (DEC-104, DEC-197), starts with an empty
-workspace (DEC-114) and has a step limit that ends a runaway loop with the
-state kept (DEC-115, DEC-180).
+workspace (DEC-114), a time limit checked by every router of the team
+graph (``out_of_time``, DEC-168) and a step limit that ends a runaway loop
+with the state kept (DEC-115, DEC-180).
 
 The Coder also has its own graph, ``START → coder ⟲ → END``, run from a
 state that already has tasks; there the Coder closes each task itself
@@ -29,10 +30,14 @@ Attributes:
     CODER_NODE: Name of the Coder node in the graph.
     REFLECT_NODE: Name of the self-reflection node.
     QA_NODE: Name of the QA node.
+    OUT_OF_TIME_NODE: Name of the node that closes the open tasks once
+        ``RUN_TIMEOUT`` is spent (DEC-168, DEC-180).
 """
 
 import logging
 import os
+import time
+from datetime import datetime, timedelta
 
 from langchain_core.language_models import BaseChatModel
 from langgraph.errors import GraphRecursionError
@@ -52,23 +57,38 @@ PM_NODE = "pm"
 CODER_NODE = "coder"
 REFLECT_NODE = "reflect"
 QA_NODE = "qa"
+OUT_OF_TIME_NODE = "out_of_time"
+OUT_OF_TIME_REASON = "out of time"
 
 logger = logging.getLogger(__name__)
 
 
+def _out_of_time(state: ProjectState) -> bool:
+    """Returns whether the run's deadline has passed (DEC-168, DEC-198).
+
+    Args:
+        state: Current state.
+
+    Returns:
+        True when the state has a deadline and the monotonic clock is past
+        it.
+    """
+    return state.deadline is not None and time.monotonic() >= state.deadline
+
+
 def route_after_pm(state: ProjectState) -> str:
-    """Returns the node that follows the PM: the Coder, or END (DEC-110).
+    """Returns the node that follows the PM: the Coder, ``out_of_time`` or END (DEC-110).
 
     Args:
         state: State after the PM's step.
 
     Returns:
-        ``CODER_NODE`` when ``error`` is empty and there is at least one
-        task; ``END`` otherwise.
+        ``END`` on error or without tasks; ``OUT_OF_TIME_NODE`` once the
+        deadline has passed; ``CODER_NODE`` otherwise.
     """
-    if not state.error and state.tasks:
-        return CODER_NODE
-    return END
+    if state.error or not state.tasks:
+        return END
+    return OUT_OF_TIME_NODE if _out_of_time(state) else CODER_NODE
 
 
 def route_after_coder(state: ProjectState) -> str:
@@ -93,9 +113,12 @@ def route_after_pass(state: ProjectState) -> str:
         state: State after the Coder's step.
 
     Returns:
-        ``REFLECT_NODE`` when ``error`` is empty; ``END`` otherwise.
+        ``END`` on error; ``OUT_OF_TIME_NODE`` once the deadline has
+        passed; ``REFLECT_NODE`` otherwise.
     """
-    return END if state.error else REFLECT_NODE
+    if state.error:
+        return END
+    return OUT_OF_TIME_NODE if _out_of_time(state) else REFLECT_NODE
 
 
 def route_after_reflect(state: ProjectState) -> str:
@@ -105,9 +128,12 @@ def route_after_reflect(state: ProjectState) -> str:
         state: State after the reflect step.
 
     Returns:
-        ``QA_NODE`` when ``error`` is empty; ``END`` otherwise.
+        ``END`` on error; ``OUT_OF_TIME_NODE`` once the deadline has
+        passed; ``QA_NODE`` otherwise.
     """
-    return END if state.error else QA_NODE
+    if state.error:
+        return END
+    return OUT_OF_TIME_NODE if _out_of_time(state) else QA_NODE
 
 
 def route_after_qa(state: ProjectState) -> str:
@@ -119,11 +145,38 @@ def route_after_qa(state: ProjectState) -> str:
         state: State after the QA's step.
 
     Returns:
-        ``CODER_NODE`` while a task is in progress (sent back) or pending
-        and ``error`` is empty; ``END`` otherwise.
+        ``END`` on error or when no task is open; ``OUT_OF_TIME_NODE`` once
+        the deadline has passed; ``CODER_NODE`` while a task is in progress
+        (sent back) or pending.
     """
     open_tasks = any(task.status in ("in_progress", "pending") for task in state.tasks)
-    return CODER_NODE if not state.error and open_tasks else END
+    if state.error or not open_tasks:
+        return END
+    return OUT_OF_TIME_NODE if _out_of_time(state) else CODER_NODE
+
+
+def out_of_time(state: ProjectState) -> dict:
+    """Closes every open task as ``failed`` "out of time" and ends the run (DEC-168, DEC-198).
+
+    Done tasks, the code and the last result and report of the task in
+    progress are kept.
+
+    Args:
+        state: State once the deadline has passed.
+
+    Returns:
+        Update with ``tasks`` and ``progress``.
+    """
+    closed = [task.task_id for task in state.tasks if task.status in ("pending", "in_progress")]
+    tasks = [
+        task.model_copy(update={"status": "failed", "closed_reason": OUT_OF_TIME_REASON})
+        if task.task_id in closed else task
+        for task in state.tasks
+    ]
+    note = (f"Run out of time (time limit ended at {state.deadline_at}): "
+            f"{', '.join(closed)} closed as failed.")
+    logger.warning(note)
+    return {"tasks": tasks, "progress": [note]}
 
 
 def step_limit(settings: LoopSettings) -> int:
@@ -189,18 +242,21 @@ def build_graph(
             (DEC-197).
 
     Returns:
-        The compiled graph ``START → pm → coder → reflect → qa ⟲ → END``.
+        The compiled graph ``START → pm → coder → reflect → qa ⟲ → END``,
+        with ``out_of_time → END`` reachable from every router.
     """
     builder = StateGraph(ProjectState, context_schema=CoderRunContext)
     builder.add_node(PM_NODE, make_pm_node(pm_model))
     builder.add_node(CODER_NODE, make_coder_node(coder_model, close_tasks=False))
     builder.add_node(REFLECT_NODE, make_reflect_node(coder_model))
     builder.add_node(QA_NODE, make_qa_node(qa_review))
+    builder.add_node(OUT_OF_TIME_NODE, out_of_time)
     builder.add_edge(START, PM_NODE)
-    builder.add_conditional_edges(PM_NODE, route_after_pm, [CODER_NODE, END])
-    builder.add_conditional_edges(CODER_NODE, route_after_pass, [REFLECT_NODE, END])
-    builder.add_conditional_edges(REFLECT_NODE, route_after_reflect, [QA_NODE, END])
-    builder.add_conditional_edges(QA_NODE, route_after_qa, [CODER_NODE, END])
+    builder.add_conditional_edges(PM_NODE, route_after_pm, [CODER_NODE, OUT_OF_TIME_NODE, END])
+    builder.add_conditional_edges(CODER_NODE, route_after_pass, [REFLECT_NODE, OUT_OF_TIME_NODE, END])
+    builder.add_conditional_edges(REFLECT_NODE, route_after_reflect, [QA_NODE, OUT_OF_TIME_NODE, END])
+    builder.add_conditional_edges(QA_NODE, route_after_qa, [CODER_NODE, OUT_OF_TIME_NODE, END])
+    builder.add_edge(OUT_OF_TIME_NODE, END)
     return builder.compile()
 
 
@@ -228,8 +284,10 @@ def run(
 
     Never raises once the requirement is valid: invalid loop settings, a
     workspace that cannot be archived and a run that hits the step limit
-    end with ``error`` set. The loop settings are read once, here, for the
-    whole run (DEC-180, DEC-197). Each progress note is logged at INFO
+    end with ``error`` set; a run out of time ends normally through
+    ``out_of_time``. The loop settings are read once, here, for the whole
+    run, and the deadline is set from ``RUN_TIMEOUT`` (DEC-180, DEC-197,
+    DEC-198). Each progress note is logged at INFO
     when the step that wrote it ends (DEC-120).
 
     Args:
@@ -259,6 +317,15 @@ def run(
         state = state.model_copy(
             update={"progress": [f"Workspace: previous files moved to {archive}."]}
         )
+    # DEC-198: the routers check the monotonic deadline; deadline_at is for people.
+    deadline_at = (datetime.now().astimezone() + timedelta(seconds=settings.run_timeout)).isoformat(
+        timespec="seconds"
+    )
+    state = state.model_copy(update={
+        "deadline": time.monotonic() + settings.run_timeout,
+        "deadline_at": deadline_at,
+        "progress": [*state.progress, f"Run: time limit {settings.run_timeout} s, until {deadline_at}."],
+    })
     for note in state.progress:
         logger.info(note)
     logged = len(state.progress)

@@ -1,13 +1,16 @@
 """Unit tests of the team graph's routing and loop (specs `lab_2_3_pipeline`, `lab_3_3_a2a_loop`).
 
-Covers AC-2.3-5, and AC-3.3-6, AC-3.3-27 and AC-3.3-28 (DEC-178,
-DEC-180, DEC-184, DEC-197) with the fakes of ``test_integration_loop``.
+Covers AC-2.3-5, and AC-3.3-6, AC-3.3-27, AC-3.3-28 and AC-3.3-37
+(DEC-178, DEC-180, DEC-184, DEC-197) with the fakes of
+``test_integration_loop``.
 """
 
 from langgraph.graph import END
 
+import orchestration.graph as graph_module
 from agents.coder_agent import CoderRunContext
-from orchestration.graph import CODER_NODE, build_graph, route_after_pm, run
+from agents.pm_agent import MAX_TASKS
+from orchestration.graph import CODER_NODE, QA_NODE, REFLECT_NODE, build_graph, route_after_pm, run
 from orchestration.state import ProjectState
 from tests.coder_helpers import state_data
 from tests.fakes import ScriptedChatModel
@@ -64,3 +67,18 @@ def test_ac_3_3_28_graph_order(loop):
     assert coder["tasks"][0].status == "in_progress"
     assert reflect["tasks"][0].status == "in_progress"
     assert qa_step["tasks"][0].status == "done"
+
+
+def test_ac_3_3_37_step_limit(loop, monkeypatch):
+    monkeypatch.setenv("QA_MAX_ITERATIONS", "2")
+    monkeypatch.setattr(graph_module, "route_after_pass", lambda state: REFLECT_NODE)
+    monkeypatch.setattr(graph_module, "route_after_reflect", lambda state: QA_NODE)
+    monkeypatch.setattr(graph_module, "route_after_qa", lambda state: CODER_NODE)
+    qa = FakeQA({"task_1": [failing], "task_2": [failing]})
+
+    final = run(REQUIREMENT, pm_model=_pm(_task_draft(1)), coder_model=ScriptedChatModel([]), qa_review=qa)
+
+    limit = 1 + MAX_TASKS * 2 * 3 + 3
+    assert final.error == f"Run stopped: step limit of {limit} reached."
+    assert [t.status for t in final.tasks] == ["failed", "failed"]
+    assert final.outcome == "unresolved"

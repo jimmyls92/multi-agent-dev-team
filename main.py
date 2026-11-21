@@ -1,8 +1,10 @@
-"""Entry point of the agent team (DEC-094, DEC-096, DEC-111).
+"""Entry point of the agent team (DEC-094, DEC-096, DEC-181).
 
 Runs the graph for a requirement and prints the result: a readable summary
-ending with a ``RESULT:`` verdict line by default, or the whole state as
-JSON with ``--json``. The exit code is 0 only when the run succeeded.
+ending with a ``RESULT:`` verdict line by default (``success``,
+``unresolved`` with the final report, or ``error``), or the whole state as
+JSON with ``--json``, ``outcome`` included. The exit code is 0 only when
+the run succeeded.
 
 Typical usage example:
 
@@ -28,25 +30,24 @@ RESULT_EXCERPT_CHARS = 100
 
 
 def _verdict(state: ProjectState) -> tuple[int, str]:
-    """Returns the exit code and the verdict line of a run (DEC-111).
-
-    A run succeeds only with no error and every task done.
+    """Returns the exit code and the verdict line of a run (DEC-165, DEC-181).
 
     Args:
         state: Final state of the run.
 
     Returns:
-        ``(0, "RESULT: success")`` on success; exit code 1 with an
-        ``error`` or ``incomplete`` verdict otherwise.
+        ``(0, "RESULT: success")`` when the QA approved every task; exit
+        code 1 with ``RESULT: error — …`` for a fatal error or
+        ``RESULT: unresolved — …`` naming the tasks not approved.
     """
     if state.error:
         return 1, f"RESULT: error — {state.error}"
+    if state.outcome == "success":
+        return 0, "RESULT: success"
     if not state.tasks:
-        return 1, "RESULT: incomplete — no tasks were planned"
-    unfinished = [task.task_id for task in state.tasks if task.status != "done"]
-    if unfinished:
-        return 1, f"RESULT: incomplete — {', '.join(unfinished)} failed"
-    return 0, "RESULT: success"
+        return 1, "RESULT: unresolved — no tasks were planned"
+    open_tasks = [task.task_id for task in state.tasks if task.status != "done"]
+    return 1, f"RESULT: unresolved — {', '.join(open_tasks)} not approved"
 
 
 def _result_line(task: TaskState) -> str:
@@ -69,7 +70,7 @@ def _result_line(task: TaskState) -> str:
 
 
 def _print_state(state: ProjectState) -> None:
-    """Prints the progress notes, the spec and tasks, the files and the error.
+    """Prints the progress notes, the spec and tasks, the files, and the error or final report.
 
     The spec and tasks are printed whenever the PM produced them, also when
     a later error ended the run.
@@ -100,6 +101,8 @@ def _print_state(state: ProjectState) -> None:
         print(f"  files: {', '.join(state.code) or 'none'}")
     if state.error:
         print(f"\nERROR: {state.error}")
+    elif state.outcome == "unresolved" and state.tasks:
+        print(f"\n[FINAL REPORT] tasks not approved\n{state.final_report()}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -110,8 +113,8 @@ def main(argv: list[str] | None = None) -> int:
             sys.argv[1:].
 
     Returns:
-        The exit code: 0 on success, 1 if a task failed or the run ended
-        with an error (DEC-111).
+        The exit code: 0 on success, 1 if a task was not approved or the
+        run ended with an error (DEC-181).
 
     Raises:
         SystemExit: With code 2 on invalid usage, e.g. an empty requirement

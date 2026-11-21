@@ -1452,6 +1452,7 @@ Review = Callable[[TaskSpec], Awaitable[QAReport] | QAReport]
 
 QA_FAILED_REASON = "the QA could not review it"
 LIMIT_REASON = "review limit reached"
+PROTOCOL_REASON = "A2A protocol error"
 
 
 def _qa_failed(report: QAReport) -> bool:
@@ -1645,7 +1646,7 @@ def make_qa_node(review: Review | None = None) -> Callable[[ProjectState, Runtim
         except (A2AProtocolError, ValidationError) as exc:  # DEC-170: never acted on
             logger.error("%s: rejected A2A %s: %s", task.task_id, intent, exc)
             report = _protocol_report(task.task_id, exc)
-            update, status = {"messages": []}, "failed"
+            update, status, reason = {"messages": []}, "failed", PROTOCOL_REASON
             note = f"QA: {task.task_id} failed — A2A protocol error at review {asked.review}."
         else:
             note = {
@@ -1660,6 +1661,7 @@ def make_qa_node(review: Review | None = None) -> Callable[[ProjectState, Runtim
             status=status,
             reviews=asked.review,
             qa_report=report,
+            closed_reason=reason,  # DEC-198: empty unless the task closes unapproved
             history=[*task.history, _record(task, asked.review, report)],
         )
         return {"tasks": tasks_update, "progress": [note], "error": "", **update}

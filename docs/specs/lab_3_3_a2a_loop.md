@@ -608,12 +608,18 @@ Task status: todo | map | in progress | review | done
   least two tasks, so the one-task loop tests have a second task the fake
   QA approves at once.
 
-### T8 — Time limit, step limit and outcome · todo
+### T8 — Time limit, step limit and outcome · done
 
 - **Covers:** AC-3.3-36 .. AC-3.3-39
 - The step-limit formula and the computed `outcome` already exist (T7,
   DEC-197); T8 adds `deadline` and `out_of_time`, `final_report()`,
   `main.py`'s verdict and the tests of AC-3.3-36 .. AC-3.3-39.
+- **Review notes (DEC-198):** `TaskState.closed_reason` is written by the
+  `qa` node and `out_of_time`; the deadline is monotonic, with
+  `deadline_at` as a readable copy; every router of the team graph checks
+  it. AC-3.3-36 also checks that the work done is kept. AC-2.3-13 now
+  expects `RESULT: unresolved — task_2 not approved` and the final report
+  (DEC-181 supersedes DEC-111's `incomplete`).
 
 ### T9 — Live evidence · todo
 

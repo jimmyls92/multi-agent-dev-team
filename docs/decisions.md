@@ -3432,7 +3432,7 @@ A decision can mix bases; then each part states its own.
   the budget by at most the step in progress.
 - Alternatives: no total budget (runs of hours); cancel the step in
   progress (half-written files, harder to report).
-- Code: —
+- Code: `orchestration/graph.py` (`out_of_time`, `_out_of_time`, routers)
 
 ### DEC-169 A failure of the QA itself is retried once and never charged to the Coder
 - Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
@@ -3707,7 +3707,7 @@ A decision can mix bases; then each part states its own.
   check the deadline only in `run()` (cannot close the tasks inside the
   graph); keep DEC-115's formula (the loop would hit it on the first
   task).
-- Code: —
+- Code: `orchestration/graph.py` (`run`, `step_limit`), `agents/coder_agent.py` (`CoderRunContext.settings`)
 
 ### DEC-181 The run's outcome is a computed field and the verdict names unresolved runs
 - Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
@@ -3725,7 +3725,7 @@ A decision can mix bases; then each part states its own.
   never disagree with the task statuses.
 - Alternatives: a stored status field (can drift from the tasks); keep
   "incomplete" (a different word from the one documented).
-- Code: —
+- Code: `orchestration/state.py` (`outcome`, `final_report`), `main.py` (`_verdict`)
 
 ### DEC-182 The self-evaluation rubric: fixed items, defect kinds and a strict ranking
 - Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
@@ -4137,3 +4137,28 @@ A decision can mix bases; then each part states its own.
   chosen); each node reads the environment (values can differ inside a
   run); monkeypatching `run_qa` in tests (hidden and fragile).
 - Code: `agents/coder_reflection.py` (`make_reflect_node`), `agents/qa_agent.py` (`make_qa_node`), `agents/coder_agent.py` (`CoderRunContext.settings`), `orchestration/graph.py` (`build_graph`, `run`, `step_limit`), `orchestration/state.py` (`ProjectState.outcome`)
+
+### DEC-198 Each closed task keeps its reason, and the deadline uses a monotonic clock
+- Date: 2026-11-21 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Preferred (details of DEC-168, DEC-180 and DEC-181)
+- Context: the final report must say why each unapproved task closed:
+  review limit reached, the QA could not review it, an A2A protocol error
+  or out of time (DEC-181). Only the first two leave an A2A message. The
+  run's deadline (DEC-180) needs a clock, and this WSL machine was seen
+  resyncing its wall clock after a pause.
+- Decision: `TaskState.closed_reason` holds the reason, written by the
+  node that closes the task (the `qa` node or `out_of_time`); empty while
+  the task is open or once it is done. `ProjectState.deadline` is a
+  `time.monotonic()` value and is the only one the routers check;
+  `ProjectState.deadline_at` is the same moment as a local ISO time, for
+  people only (JSON and progress), never used to decide. `out_of_time`
+  ends the run normally: done tasks, the code on disk and in `code`, and
+  the last result and report of the task in progress are all kept.
+- Why: one typed place for the reason, also in the JSON, with no rule to
+  rebuild it from messages; a monotonic clock never cuts a run early when
+  the system clock jumps, and the readable copy keeps the JSON useful.
+- Alternatives: derive the reason from the messages and reports (no
+  trace for out of time or a protocol error); wall-clock deadline (a
+  clock jump can end the run early); a monotonic deadline only (a
+  meaningless number for people).
+- Code: `orchestration/state.py` (`closed_reason`, `deadline`, `deadline_at`), `orchestration/graph.py` (`out_of_time`, `run`), `agents/qa_agent.py` (`make_qa_node`)

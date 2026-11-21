@@ -7,7 +7,7 @@ spec `lab_2_2_coder_node` (AC-2.2-1).
 import pytest
 from pydantic import ValidationError
 
-from orchestration.state import ProjectState
+from orchestration.state import Issue, ProjectState, QAReport, TaskState
 
 
 def _state_data() -> dict:
@@ -141,3 +141,55 @@ def test_ac_2_2_1_task_result_round_trip():
     assert loaded.tasks[0].result.status == "success"
     assert loaded.tasks[0].result.steps[0].action == "write_file"
     assert loaded.tasks[1].result is None
+
+
+def _closed(data: dict, k: int, status: str, reason: str = "", reviews: int = 0,
+            issue: str | None = None) -> TaskState:
+    """Returns a copy of the first task of ``data`` closed in a given way.
+
+    Args:
+        data: State data with at least one task.
+        k: Task number, for its ID and priority.
+        status: The task's status.
+        reason: Why it closed (DEC-198).
+        reviews: Reviews it took.
+        issue: Description of its one blocking issue; None for no report.
+
+    Returns:
+        The task.
+    """
+    report = None
+    if issue is not None:
+        blocking = Issue(severity="High", location=f"test_task_{k}.py::test_x", description=issue,
+                         fix="Fix it.", source="test")
+        report = QAReport(task_id=f"task_{k}", issues=[blocking], tests_failed=1)
+    return TaskState(**{**data["tasks"][0], "task_id": f"task_{k}", "priority": k, "status": status,
+                        "closed_reason": reason, "reviews": reviews, "qa_report": report})
+
+
+def test_ac_3_3_38_outcome_and_report():
+    data = _state_data()
+    done = ProjectState(**{**data, "tasks": [_closed(data, 1, "done", reviews=1)]})
+
+    assert done.outcome == "success"
+    assert done.final_report() == ""
+
+    tasks = [
+        _closed(data, 1, "failed", "review limit reached", 5, "ISSUE-LIMIT"),
+        _closed(data, 2, "failed", "the QA could not review it", 1, "ISSUE-QA"),
+        _closed(data, 3, "failed", "A2A protocol error", 2, "ISSUE-PROTOCOL"),
+        _closed(data, 4, "failed", "out of time", 0),
+    ]
+    open_run = ProjectState(**{**data, "tasks": tasks})
+    report = open_run.final_report()
+
+    assert open_run.outcome == "unresolved"
+    for k, (reason, review, issue) in enumerate([
+        ("review limit reached", 5, "ISSUE-LIMIT"),
+        ("the QA could not review it", 1, "ISSUE-QA"),
+        ("A2A protocol error", 2, "ISSUE-PROTOCOL"),
+        ("out of time", 0, "not reviewed"),
+    ], start=1):
+        [block] = [b for b in report.split("\n- ") if b.lstrip("- ").startswith(f"task_{k} ")]
+        assert reason in block and f"review {review}" in block and issue in block
+    assert '"outcome":"unresolved"' in open_run.model_dump_json()
