@@ -41,28 +41,36 @@ import ast
 import asyncio
 import builtins
 import importlib.machinery
+import inspect
 import logging
 import os
 import re
 import sys
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Literal, NamedTuple, TextIO
 
 from dotenv import load_dotenv
 from langchain_core.language_models import BaseChatModel
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from langgraph.runtime import Runtime
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from agents.llm_helpers import PYTHON_ENVIRONMENT, StructuredOutputError, structured_call
 from llm_client import get_chat_model
+from orchestration.a2a import A2AMessage, A2AProtocolError, inbox, payload_model, send
 from orchestration.settings import int_setting
 from orchestration.state import (
+    FailedTest,
     Issue,
     NonEmptyStr,
+    ProjectState,
     QAReport,
+    Reflection,
+    ReviewRecord,
     TaskCriterion,
     TaskSpec,
+    TaskState,
 )
 from tools import code_executor, handlers
 from tools.code_executor import EXEC_TIMEOUT, PytestResult, run_pytest
@@ -1436,6 +1444,241 @@ _DEMO_TASK = TaskSpec(
     files=["linked_list.py"],
     priority=1,
 )
+
+
+# --- Graph node (Lab 3.3, DEC-169, DEC-170, DEC-176, DEC-178, DEC-179) -------
+
+Review = Callable[[TaskSpec], Awaitable[QAReport] | QAReport]
+
+QA_FAILED_REASON = "the QA could not review it"
+LIMIT_REASON = "review limit reached"
+
+
+def _qa_failed(report: QAReport) -> bool:
+    """Returns whether a report holds only the QA's own failures (DEC-169).
+
+    Args:
+        report: A QA report.
+
+    Returns:
+        True when it has issues and every one is a ``qa`` issue.
+    """
+    return bool(report.issues) and all(issue.source == "qa" for issue in report.issues)
+
+
+def _review_once(review: Review, task: TaskSpec) -> QAReport:
+    """Runs the QA's work for one task to completion inside the sync graph (DEC-179).
+
+    Args:
+        review: The QA's work; may return a report or an awaitable one.
+        task: The task to review.
+
+    Returns:
+        The report.
+    """
+    outcome = review(task)
+    if not inspect.isawaitable(outcome):
+        return outcome
+
+    async def wait() -> QAReport:
+        """Returns the awaited report; no event loop runs in the graph (DEC-179)."""
+        return await outcome
+
+    return asyncio.run(wait())
+
+
+def _open_request(state) -> A2AMessage | None:
+    """Returns the QA's last ``review_request`` if it has no reply yet.
+
+    Args:
+        state: Current state.
+
+    Returns:
+        The open request, or None.
+    """
+    requests = [m for m in inbox(state, "qa") if m.intent == "review_request"]
+    if not requests:
+        return None
+    request = requests[-1]
+    answered = any(m.correlation_id == request.correlation_id and m.intent != "review_request"
+                   for m in state.messages)
+    return None if answered else request
+
+
+def _verdict_message(request: A2AMessage, intent: str, payload: dict) -> A2AMessage:
+    """Returns the QA's reply to a request (DEC-176).
+
+    Args:
+        request: The request answered; its correlation id is reused.
+        intent: ``approved``, ``fix_instruction`` or ``unresolved``.
+        payload: The reply's payload.
+
+    Returns:
+        The validated message.
+    """
+    return A2AMessage(sender="qa", receiver="coder", intent=intent, payload=payload,
+                      correlation_id=request.correlation_id)
+
+
+def _verdict(report: QAReport, review: int, limit: int, qa_failed: bool) -> tuple[str, str, str]:
+    """Returns the intent, the task's status and the reason for one review (DEC-176, DEC-178).
+
+    Args:
+        report: The review's report.
+        review: Review number n.
+        limit: Reviews allowed for the task.
+        qa_failed: Whether the QA could not review it, twice (DEC-169).
+
+    Returns:
+        Intent, new task status and the reason (empty unless unresolved).
+    """
+    if report.approved:
+        return "approved", "done", ""
+    if qa_failed:
+        return "unresolved", "failed", QA_FAILED_REASON
+    if review >= limit:  # DEC-163: no review n + 1 after the limit
+        return "unresolved", "failed", LIMIT_REASON
+    return "fix_instruction", "in_progress", ""
+
+
+def _record(task: TaskState, review: int, report: QAReport) -> ReviewRecord:
+    """Returns the history record of one review (DEC-184).
+
+    Args:
+        task: The task, with the result and reflection of the version sent.
+        review: Review number n.
+        report: The review's report.
+
+    Returns:
+        The record.
+    """
+    reflection = task.reflection or Reflection()
+    failed = [
+        FailedTest(name=issue.location.split("::")[-1], criterion=issue.criterion)
+        for issue in report.issues
+        if issue.source == "test"
+    ]
+    return ReviewRecord(
+        review=review,
+        explanation=task.result.explanation if task.result else "",
+        high=reflection.high,
+        medium=reflection.medium,
+        low=reflection.low,
+        version=reflection.version,
+        tests_passed=report.tests_passed,
+        tests_failed=report.tests_failed,
+        failed_tests=failed,
+    )
+
+
+def _protocol_report(task_id: str, error: Exception) -> QAReport:
+    """Returns the report of a task closed by an invalid A2A message (DEC-170).
+
+    Args:
+        task_id: The task.
+        error: The protocol or validation error.
+
+    Returns:
+        An unapproved report with one ``qa`` issue.
+    """
+    issue = Issue(
+        severity="High",
+        location="A2A",
+        description=f"A2A protocol error: {error}",
+        fix="Nothing for the Coder to change: the agents' messages are wrong.",
+        source="qa",
+    )
+    return QAReport(task_id=task_id, issues=[issue])
+
+
+def make_qa_node(review: Review | None = None) -> Callable[[ProjectState, Runtime], dict]:
+    """Returns the QA node of the team graph (DEC-178, DEC-179, DEC-197).
+
+    Args:
+        review: Does the QA's work for one task; None uses ``run_qa``.
+            Tests pass one that returns fixed reports.
+
+    Returns:
+        The node: it takes the state and the run's runtime and returns a
+        partial update.
+    """
+
+    def qa_node(state: ProjectState, runtime: Runtime) -> dict:
+        """Reviews the task of the open request and answers it by A2A.
+
+        A report with only ``qa`` issues is reviewed once more on the same
+        code (DEC-169). The reply's intent sets the task's status. A
+        message that fails validation closes only its task (DEC-170).
+
+        Args:
+            state: Current state; reads ``messages`` and ``tasks``.
+            runtime: The run's runtime; unused, the request carries the
+                limit.
+
+        Returns:
+            Update with ``tasks``, ``messages`` (the reply), ``progress``
+            and ``error``; only ``progress`` and ``error`` when there is
+            no open request or its task is unknown.
+        """
+        request = _open_request(state)
+        tasks = {task.task_id: task for task in state.tasks}
+        asked = payload_model(request) if request else None
+        if asked is None or asked.task_id not in tasks:
+            error = "QA: no open review request for a known task."
+            logger.error(error)
+            return {"progress": [error], "error": error}
+        task = tasks[asked.task_id]
+
+        report = _review_once(review or run_qa, task)
+        retried = _qa_failed(report)
+        if retried:  # DEC-169: once more on the same code, not a new review
+            logger.warning("%s: the QA could not review it; trying once more", task.task_id)
+            report = _review_once(review or run_qa, task)
+        qa_failed = retried and _qa_failed(report)
+        intent, status, reason = _verdict(report, asked.review, asked.limit, qa_failed)
+
+        payload = {"task_id": task.task_id, "review": asked.review, "report": report.model_dump(mode="json")}
+        if reason:
+            payload["reason"] = reason
+        try:
+            update = send(state, _verdict_message(request, intent, payload))
+        except (A2AProtocolError, ValidationError) as exc:  # DEC-170: never acted on
+            logger.error("%s: rejected A2A %s: %s", task.task_id, intent, exc)
+            report = _protocol_report(task.task_id, exc)
+            update, status = {"messages": []}, "failed"
+            note = f"QA: {task.task_id} failed — A2A protocol error at review {asked.review}."
+        else:
+            note = {
+                "done": f"QA: {task.task_id} done — approved at review {asked.review}.",
+                "failed": f"QA: {task.task_id} failed — {reason} at review {asked.review}.",
+                "in_progress": f"QA: {task.task_id} review {asked.review} of {asked.limit} not "
+                f"approved; back to the Coder.",
+            }[status]
+        tasks_update = _with_task_state(
+            state.tasks,
+            task.task_id,
+            status=status,
+            reviews=asked.review,
+            qa_report=report,
+            history=[*task.history, _record(task, asked.review, report)],
+        )
+        return {"tasks": tasks_update, "progress": [note], "error": "", **update}
+
+    return qa_node
+
+
+def _with_task_state(tasks: list[TaskState], task_id: str, **update) -> list[TaskState]:
+    """Returns the task list with one task's fields replaced.
+
+    Args:
+        tasks: The state's task list.
+        task_id: ID of the task to update.
+        **update: Fields of ``TaskState`` to replace.
+
+    Returns:
+        A new list; the other tasks are the same objects.
+    """
+    return [t.model_copy(update=update) if t.task_id == task_id else t for t in tasks]
 
 
 def _print_report(report: QAReport) -> None:

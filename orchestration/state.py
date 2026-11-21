@@ -15,7 +15,7 @@ Typical usage example:
 import operator
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from orchestration.a2a import A2AMessage
 # DEC-188: the report models live in qa_report.py; re-exported for existing imports.
@@ -289,11 +289,16 @@ class TaskState(TaskSpec):
             (DEC-184).
         reflection: What the reflect node sent in the current review;
             None before it runs (DEC-196).
+        reviews: QA reviews of the task so far, n (DEC-163, DEC-178).
+        qa_report: The QA's report of the last review; None before the
+            first (DEC-178).
     """
     status: TaskStatus = "pending"
     result: CoderResult | None = None
     history: list[ReviewRecord] = Field(default_factory=list)
     reflection: Reflection | None = None
+    reviews: int = Field(default=0, ge=0)
+    qa_report: QAReport | None = None
 
 
 class ProjectState(BaseModel):
@@ -311,6 +316,8 @@ class ProjectState(BaseModel):
         messages: A2A messages between the agents, in send order; nodes
             append through ``orchestration.a2a.send`` only (DEC-175).
         error: Empty on success; the failure message otherwise (DEC-087).
+        outcome: Computed: ``success`` when the QA approved every task and
+            there is no error, ``unresolved`` otherwise (DEC-181).
     """
     requirement: NonEmptyStr
     spec: ProjectSpec | None = None
@@ -319,3 +326,11 @@ class ProjectState(BaseModel):
     progress: Annotated[list[str], operator.add] = Field(default_factory=list)
     messages: Annotated[list[A2AMessage], operator.add] = Field(default_factory=list)
     error: str = ""
+
+    @computed_field
+    @property
+    def outcome(self) -> Literal["success", "unresolved"]:
+        """Returns ``success`` only when every task is done and there is no error (DEC-165, DEC-181)."""
+        if not self.error and self.tasks and all(task.status == "done" for task in self.tasks):
+            return "success"
+        return "unresolved"

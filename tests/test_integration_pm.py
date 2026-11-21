@@ -1,7 +1,8 @@
 """Integration tests of the PM inside the graph (spec `lab_2_1_pm_agent`, AC-2.1-16, AC-2.1-17, AC-2.1-19, AC-2.1-23).
 
 Since Lab 2.3 the graph runs the Coder after the PM: these tests use a fake
-Coder or stop right after the PM step, and run in ``isolated_run``. The
+Coder (and, since Lab 3.3, a clean evaluation and a QA that approves) or
+stop right after the PM step, and run in ``isolated_run``. The
 AC-2.1-19 test calls the real LLM and runs only with ``--run-llm``.
 """
 
@@ -15,7 +16,7 @@ from agents.coder_agent import CoderRunContext
 from main import DEMO_REQUIREMENT, main
 from orchestration.graph import build_graph, run
 from orchestration.state import ProjectState
-from tests.coder_helpers import successful_task
+from tests.coder_helpers import approving_review_steps, successful_task
 from tests.fakes import ScriptedChatModel
 from tests.test_pm_agent import REQUIREMENT, _eleven_tasks, _spec_reply, _valid_tasks
 
@@ -53,6 +54,7 @@ def test_ac_2_1_23_consolidation_visible_end_to_end(isolated_run, monkeypatch, c
     coder = ScriptedChatModel([reply for _ in range(8) for reply in successful_task()])
     monkeypatch.setattr(pm_agent, "get_chat_model", lambda model_id: model)
     monkeypatch.setattr(coder_agent, "get_chat_model", lambda model_id: coder)
+    approving_review_steps(monkeypatch)
 
     code = main(["Build a large project"])
 

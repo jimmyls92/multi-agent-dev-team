@@ -2,13 +2,19 @@
 
 The two-task state is a small project after the PM; the scripted tasks are
 replies for ``tests.fakes.ScriptedChatModel`` whose scripts really run in
-the ``isolated_run`` workspace.
+the ``isolated_run`` workspace. Since Lab 3.3 a team run also evaluates
+each version and asks the QA: ``clean_evaluation`` and ``approve_all``
+stand for a self-evaluation with no bugs and a QA that approves
+(DEC-197).
 """
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
+import agents.coder_reflection as coder_reflection
+import agents.qa_agent as qa_agent
 from agents.coder_agent import MAX_ITERATIONS
-from orchestration.state import ProjectState
+from agents.coder_reflection import RUBRIC_ITEMS, SelfEvaluationBase
+from orchestration.state import ProjectState, QAReport, TaskSpec
 from tests.fakes import tool_call_reply
 
 
@@ -153,3 +159,44 @@ def unsuccessful_task() -> list:
     return [tool_call_reply("Plan", {"steps": ["Think"]}, "call_plan")] + [
         AIMessage("Still thinking...") for _ in range(MAX_ITERATIONS)
     ]
+
+
+def clean_evaluation(criteria: int = 1, call_id: str = "call_eval") -> AIMessage:
+    """Returns a scripted self-evaluation with no bugs.
+
+    Args:
+        criteria: Acceptance criteria of the task evaluated.
+        call_id: ID of the tool call.
+
+    Returns:
+        The AI message calling the ``SelfEvaluation`` tool, every item ``ok``.
+    """
+    items = [{"item": item, "verdict": "ok", "evidence": "checked", "bugs": []}
+             for item in [*(f"C{k}" for k in range(criteria)), *RUBRIC_ITEMS]]
+    return tool_call_reply("SelfEvaluation", {"items": items}, call_id)
+
+
+async def approve_all(task: TaskSpec) -> QAReport:
+    """Stands for a QA that approves every task at its first review.
+
+    Args:
+        task: The task reviewed.
+
+    Returns:
+        An approved report.
+    """
+    return QAReport(task_id=task.task_id, tests_passed=1)
+
+
+def approving_review_steps(monkeypatch) -> None:
+    """Makes a run through ``main`` evaluate every version clean and approve every task.
+
+    ``main`` builds the graph itself, so the QA's work and the evaluation
+    are replaced in their modules.
+
+    Args:
+        monkeypatch: Pytest's monkeypatch fixture.
+    """
+    monkeypatch.setattr(qa_agent, "run_qa", approve_all)
+    monkeypatch.setattr(coder_reflection, "evaluate_version",
+                        lambda *args, **kwargs: SelfEvaluationBase(items=[]))

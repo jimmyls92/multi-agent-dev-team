@@ -2,15 +2,19 @@
 AC-2.1-21, and `lab_2_3_pipeline`, AC-2.3-12..AC-2.3-14).
 
 Since Lab 2.3 ``main`` runs the Coder after the PM, so a run that reaches
-the Coder uses a fake Coder in ``isolated_run``.
+the Coder uses a fake Coder in ``isolated_run``; since Lab 3.3 it also
+evaluates clean and has a QA that approves, unless a test says otherwise
+(DEC-197).
 """
 
 import pytest
 
 import agents.coder_agent as coder_agent
 import agents.pm_agent as pm_agent
+import agents.qa_agent as qa_agent
 from main import main
-from tests.coder_helpers import successful_task, unsuccessful_task
+from orchestration.state import Issue, QAReport
+from tests.coder_helpers import approving_review_steps, successful_task, unsuccessful_task
 from tests.fakes import ScriptedChatModel
 from tests.test_pm_agent import _draft, _spec_reply, _tasks_reply, _valid_tasks
 
@@ -31,6 +35,7 @@ def test_ac_2_1_18_main_output_and_exit_code(isolated_run, monkeypatch, capsys):
     _use_model(monkeypatch, ScriptedChatModel([_spec_reply(), _tasks_reply(drafts)]))
     coder = ScriptedChatModel(successful_task() + successful_task("X = 1\n", "validation.py"))
     monkeypatch.setattr(coder_agent, "get_chat_model", lambda model_id: coder)
+    approving_review_steps(monkeypatch)
 
     code = main(["Build an echo API"])
 
@@ -71,7 +76,7 @@ def test_ac_2_1_21_main_rejects_empty_requirement(monkeypatch, capsys, requireme
 
 
 def _two_task_run(monkeypatch, coder_replies: list) -> None:
-    """Makes ``main`` use a fake PM with two tasks and a fake Coder.
+    """Makes ``main`` use a fake PM with two tasks, a fake Coder and a QA that approves.
 
     Args:
         monkeypatch: Pytest's monkeypatch fixture.
@@ -80,6 +85,7 @@ def _two_task_run(monkeypatch, coder_replies: list) -> None:
     _use_model(monkeypatch, ScriptedChatModel([_spec_reply(), _valid_tasks()]))
     coder = ScriptedChatModel(coder_replies)
     monkeypatch.setattr(coder_agent, "get_chat_model", lambda model_id: coder)
+    approving_review_steps(monkeypatch)
 
 
 def _task_block(out: str, task_id: str) -> str:
@@ -120,8 +126,26 @@ def test_ac_2_3_12_main_success(isolated_run, monkeypatch, capsys):
     assert out.strip().splitlines()[-1] == "RESULT: success"
 
 
+async def _fail_task_2(task) -> QAReport:
+    """Stands for a QA that approves task_1 and fails task_2.
+
+    Args:
+        task: The task reviewed.
+
+    Returns:
+        An approved report for task_1; one failing test for any other.
+    """
+    if task.task_id == "task_1":
+        return QAReport(task_id=task.task_id, tests_passed=1)
+    issue = Issue(severity="High", location="test_task_2.py::test_x", description="assert False",
+                  fix="Make it pass.", source="test")
+    return QAReport(task_id=task.task_id, issues=[issue], tests_failed=1)
+
+
 def test_ac_2_3_13_main_incomplete(isolated_run, monkeypatch, capsys):
     _two_task_run(monkeypatch, successful_task() + unsuccessful_task())
+    monkeypatch.setattr(qa_agent, "run_qa", _fail_task_2)
+    monkeypatch.setenv("QA_MAX_ITERATIONS", "1")
 
     code = main(["Build an echo API"])
 

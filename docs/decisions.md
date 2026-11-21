@@ -3336,7 +3336,7 @@ A decision can mix bases; then each part states its own.
   limit for the whole run would run out after one or two tasks.
 - Alternatives: review the whole project at the end (failures found when
   later tasks already depend on them); one limit for the whole run.
-- Code: —
+- Code: `agents/qa_agent.py` (`make_qa_node`, `_verdict`), `orchestration/graph.py` (`route_after_qa`)
 
 ### DEC-164 A task that ends the loop unapproved stays failed and the run goes on
 - Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
@@ -3352,7 +3352,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: stop the run at the first failed task (saves tokens,
   leaves independent tasks unattempted); send the task back to the PM
   (IMP-018).
-- Code: —
+- Code: `orchestration/graph.py` (`route_after_qa`)
 
 ### DEC-165 A run ends `success` only if the QA approved every task
 - Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
@@ -3449,7 +3449,7 @@ A decision can mix bases; then each part states its own.
   second chance, and the Coder's budget goes only to its own defects.
 - Alternatives: count it as a review (wastes the Coder's budget); retry
   until it works (unbounded).
-- Code: —
+- Code: `agents/qa_agent.py` (`make_qa_node`, `_qa_failed`)
 
 ### DEC-170 An invalid A2A message closes its task as a protocol error
 - Date: 2026-11-19 · Area: A2A (Lab 3.3) · Status: accepted
@@ -3465,7 +3465,7 @@ A decision can mix bases; then each part states its own.
   wastes time; closing only the task keeps the rest of the run.
 - Alternatives: retry the exchange (same result); stop the whole run
   (loses independent tasks).
-- Code: —
+- Code: `agents/qa_agent.py` (`make_qa_node`, `_protocol_report`)
 
 ### DEC-171 A critique with no valid output lets the code go to QA as it is
 - Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
@@ -3664,7 +3664,7 @@ A decision can mix bases; then each part states its own.
   marked done before the QA approves it.
 - Alternatives: keep DEC-101 and add a separate approval flag (two
   sources of truth for one status).
-- Code: —
+- Code: `agents/coder_agent.py` (`make_coder_node(close_tasks=...)`), `agents/qa_agent.py` (`make_qa_node`), `orchestration/state.py` (`TaskState.reviews`, `qa_report`)
 
 ### DEC-179 The QA node runs the async QA to completion inside the sync graph
 - Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
@@ -3680,7 +3680,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: make the whole graph async (`astream`): touches `run()`,
   `main.py` and the tests of Modules 1-2 for no graded gain. An async
   pipeline is IMP-019.
-- Code: —
+- Code: `agents/qa_agent.py` (`_review_once`)
 
 ### DEC-180 Loop settings are read per run, a timeout node closes the run, and the step limit follows the loop
 - Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
@@ -4101,3 +4101,39 @@ A decision can mix bases; then each part states its own.
   evaluated (sends confirmed High or Medium bugs to the QA); fail the
   task when an improvement pass raises (loses a valid v0).
 - Code: `agents/coder_reflection.py` (`reflect_task`, `_snapshot`, `_restore`, `make_reflect_node`), `orchestration/state.py` (`Bug`, `Reflection`)
+
+### DEC-197 How the Coder-QA loop is wired into the team graph
+- Date: 2026-11-21 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Preferred (details of DEC-163, DEC-178, DEC-179, DEC-180)
+- Context: the team graph becomes `pm → coder → reflect → qa`, with the QA
+  sending the task back to the Coder. Several details were left open: who
+  sends the review request, which node writes the task's status, where
+  the run's settings live, how tests replace the QA's work, and which
+  pieces of T8 the loop needs.
+- Decision:
+  - The `reflect` node sends the `review_request` (sender `coder`), since
+    it decides which version goes to the QA; review n is `reviews + 1`
+    and the limit is the run's `QA_MAX_ITERATIONS`.
+  - The `qa` node writes the task's status in the same step as its
+    verdict: `approved` → `done`, `unresolved` → `failed`,
+    `fix_instruction` keeps it `in_progress`. Routers only read it; this
+    clarifies DEC-178, since a LangGraph router cannot write state.
+  - `run()` reads the loop settings once and puts them in the run context
+    (`CoderRunContext.settings`); the `coder`, `reflect` and `qa` nodes
+    read them there, so one run sees one set of values (DEC-180).
+  - `run()` and `build_graph()` take `qa_review`, the function that does
+    the QA's work for one task; None uses `run_qa`. Tests pass one that
+    returns fixed reports, as they pass fake PM and Coder models.
+  - The per-run step limit (DEC-180) and the computed
+    `ProjectState.outcome` (DEC-181) come with the loop, which cannot run
+    without them; T8 keeps `out_of_time`, the final report and `main.py`.
+  - The Lab 2.3 tests that go through `run()` get a fake QA that approves
+    and one clean evaluation per task; what they check is unchanged.
+- Why: `reflect` is the only node that knows the version sent; one writer
+  per status transition; the same settings in every node of a run; a
+  fake QA in the signature is explicit and survives moving `run_qa`; the
+  loop's own tests need the step limit and the outcome.
+- Alternatives: the `coder` node sends the request (before the version is
+  chosen); each node reads the environment (values can differ inside a
+  run); monkeypatching `run_qa` in tests (hidden and fragile).
+- Code: `agents/coder_reflection.py` (`make_reflect_node`), `agents/qa_agent.py` (`make_qa_node`), `agents/coder_agent.py` (`CoderRunContext.settings`), `orchestration/graph.py` (`build_graph`, `run`, `step_limit`), `orchestration/state.py` (`ProjectState.outcome`)

@@ -2,7 +2,9 @@
 
 Covers AC-2.3-6 to AC-2.3-11 with fake PM and Coder models in
 ``isolated_run``, and AC-2.3-16 with the real models on the graded demo
-(``--run-llm``).
+(``--run-llm``). Since Lab 3.3 the team graph also evaluates each version
+and asks the QA: these tests evaluate clean and use a QA that approves
+(DEC-197).
 """
 
 import logging
@@ -13,11 +15,10 @@ import agents.coder_agent as coder_module
 import orchestration.graph as graph_module
 import orchestration.workspace as workspace_module
 from agents.llm_helpers import PYTHON_ENVIRONMENT
-from agents.pm_agent import MAX_TASKS
 from main import DEMO_REQUIREMENT
-from orchestration.graph import CODER_NODE, run
+from orchestration.graph import run
 from tests.api_fixture import check_in_process, check_real_server, find_api
-from tests.coder_helpers import all_text, successful_task
+from tests.coder_helpers import all_text, approve_all, clean_evaluation, successful_task
 from tests.fakes import ScriptedChatModel
 from tests.test_pm_agent import _draft, _spec_reply, _tasks_reply, _valid_tasks
 
@@ -47,11 +48,12 @@ def _two_task_models() -> tuple[ScriptedChatModel, ScriptedChatModel]:
 
     Returns:
         The PM model and the Coder model; the Coder writes ``app.py`` and
-        then ``utils.py``.
+        then ``utils.py``, and evaluates each version clean.
     """
     pm = ScriptedChatModel([_spec_reply(), _valid_tasks()])
     coder = ScriptedChatModel(
-        successful_task('print("app")\n', "app.py") + successful_task("X = 2\n", "utils.py")
+        successful_task('print("app")\n', "app.py") + [clean_evaluation()]
+        + successful_task("X = 2\n", "utils.py") + [clean_evaluation()]
     )
     return pm, coder
 
@@ -59,13 +61,13 @@ def _two_task_models() -> tuple[ScriptedChatModel, ScriptedChatModel]:
 def test_ac_2_3_6_pm_to_coder_handoff(isolated_run):
     pm, coder = _two_task_models()
 
-    final = run(REQUIREMENT, pm_model=pm, coder_model=coder)
+    final = run(REQUIREMENT, pm_model=pm, coder_model=coder, qa_review=approve_all)
 
     assert final.error == ""
     assert [t.task_id for t in final.tasks] == ["task_1", "task_2"]
     assert [t.status for t in final.tasks] == ["done", "done"]
     assert all(t.result is not None for t in final.tasks)
-    tasks_per_call = len(successful_task())
+    tasks_per_call = len(successful_task()) + 1  # the pass and its evaluation
     for task, first_call in zip(final.tasks, (coder.calls[0], coder.calls[tasks_per_call])):
         message = all_text(first_call)
         assert task.task_id in message
@@ -90,7 +92,7 @@ def test_ac_2_3_7_pm_failure_skips_coder(isolated_run):
     pm = ScriptedChatModel([RuntimeError("API down")])
     coder = ScriptedChatModel([])
 
-    final = run(REQUIREMENT, pm_model=pm, coder_model=coder)
+    final = run(REQUIREMENT, pm_model=pm, coder_model=coder, qa_review=approve_all)
 
     assert "API down" in final.error
     assert final.tasks == []
@@ -101,7 +103,7 @@ def test_ac_2_3_8_run_archives_workspace(isolated_run):
     (isolated_run / "old.py").write_text("OLD = True\n")
     pm, coder = _two_task_models()
 
-    final = run(REQUIREMENT, pm_model=pm, coder_model=coder)
+    final = run(REQUIREMENT, pm_model=pm, coder_model=coder, qa_review=approve_all)
 
     assert final.error == ""
     assert sorted(p.name for p in isolated_run.iterdir()) == ["app.py", "utils.py"]
@@ -116,7 +118,7 @@ def test_ac_2_3_9_refused_archive_is_error(isolated_run, monkeypatch):
     monkeypatch.setattr(workspace_module, "REPO_ROOT", isolated_run)
     pm, coder = ScriptedChatModel([]), ScriptedChatModel([])
 
-    final = run(REQUIREMENT, pm_model=pm, coder_model=coder)
+    final = run(REQUIREMENT, pm_model=pm, coder_model=coder, qa_review=approve_all)
 
     assert "archive" in final.error.lower()
     assert pm.calls == [] and coder.calls == []
@@ -124,16 +126,16 @@ def test_ac_2_3_9_refused_archive_is_error(isolated_run, monkeypatch):
 
 
 def test_ac_2_3_10_step_limit_keeps_state(isolated_run, monkeypatch):
-    monkeypatch.setattr(graph_module, "route_after_coder", lambda state: CODER_NODE)
+    # pm, then coder, reflect and qa of task_1, then coder and reflect of task_2.
+    monkeypatch.setattr(graph_module, "step_limit", lambda settings: 6)
     pm, coder = _two_task_models()
 
-    final = run(REQUIREMENT, pm_model=pm, coder_model=coder)
+    final = run(REQUIREMENT, pm_model=pm, coder_model=coder, qa_review=approve_all)
 
-    assert "step limit" in final.error
+    assert "step limit of 6" in final.error
     assert _position(final.progress, "tasks created") >= 0
-    assert _position(final.progress, "task_1 done") < _position(final.progress, "task_2 done")
-    coder_steps = 2 + sum("no pending task" in note for note in final.progress)
-    assert coder_steps <= MAX_TASKS + 2
+    assert _position(final.progress, "task_1 done") < _position(final.progress, "starting task_2")
+    assert [t.status for t in final.tasks] == ["done", "in_progress"]
 
 
 def test_ac_2_3_11_eight_tasks_within_limit(isolated_run):
@@ -141,10 +143,10 @@ def test_ac_2_3_11_eight_tasks_within_limit(isolated_run):
     pm = ScriptedChatModel([_spec_reply(), _tasks_reply(drafts)])
     coder_replies = []
     for k in range(1, 9):
-        coder_replies += successful_task(f"print({k})\n", f"step_{k}.py")
+        coder_replies += successful_task(f"print({k})\n", f"step_{k}.py") + [clean_evaluation()]
     coder = ScriptedChatModel(coder_replies)
 
-    final = run(REQUIREMENT, pm_model=pm, coder_model=coder)
+    final = run(REQUIREMENT, pm_model=pm, coder_model=coder, qa_review=approve_all)
 
     assert final.error == ""
     assert [t.task_id for t in final.tasks] == [f"task_{k}" for k in range(1, 9)]
@@ -166,7 +168,7 @@ def test_ac_2_3_21_progress_logged_live(isolated_run, monkeypatch, caplog):
     monkeypatch.setattr(coder_module, "run_agent", spy)
     caplog.set_level(logging.INFO, logger="orchestration.graph")
 
-    final = run(REQUIREMENT, pm_model=pm, coder_model=coder)
+    final = run(REQUIREMENT, pm_model=pm, coder_model=coder, qa_review=approve_all)
 
     assert final.error == ""
     assert any("task_1 done" in m for m in logged_at_start["task_2"])
@@ -175,11 +177,11 @@ def test_ac_2_3_21_progress_logged_live(isolated_run, monkeypatch, caplog):
 def test_ac_2_3_23_environment_rule_in_prompts(isolated_run):
     pm, coder = _two_task_models()
 
-    final = run(REQUIREMENT, pm_model=pm, coder_model=coder)
+    final = run(REQUIREMENT, pm_model=pm, coder_model=coder, qa_review=approve_all)
 
     assert final.error == ""
     calls = pm.calls + coder.calls
-    assert len(pm.calls) == 2 and len(coder.calls) == 2 * len(successful_task())
+    assert len(pm.calls) == 2 and len(coder.calls) == 2 * (len(successful_task()) + 1)
     for call in calls:
         assert PYTHON_ENVIRONMENT in all_text(call)
     assert "Flask" in PYTHON_ENVIRONMENT and "only" in PYTHON_ENVIRONMENT

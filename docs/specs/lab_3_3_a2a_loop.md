@@ -591,15 +591,29 @@ Task status: todo | map | in progress | review | done
   needs exactly one task in progress. The node is wired into the graph in
   T7, where the Coder leaves its task `in_progress`.
 
-### T7 — The loop in the graph · todo
+### T7 — The loop in the graph · done
 
 - **Covers:** AC-3.3-6, AC-3.3-27 .. AC-3.3-35
 - `qa` node with `asyncio.run` and the DEC-169 retry; routers;
   `TaskState.reviews`, `qa_report`; DEC-178 node parameter.
+- **Review notes (DEC-197):** `reflect` sends the `review_request`; the
+  `qa` node writes the task's status with its verdict; settings live in
+  `CoderRunContext.settings`, read once by `run()`; `run()`/`build_graph()`
+  take `qa_review`; the per-run step limit and `ProjectState.outcome`
+  moved here from T8. The Lab 2.3 tests through `run()` and `main()` use a
+  clean evaluation and a QA that approves (AC-2.3-13 fails task_2 at the
+  QA with `QA_MAX_ITERATIONS=1`; AC-2.3-10 forces the step limit with a
+  smaller limit). The evaluation prompt now carries the environment rule
+  (DEC-121), so AC-2.3-23 holds for every Coder call. The PM plans at
+  least two tasks, so the one-task loop tests have a second task the fake
+  QA approves at once.
 
 ### T8 — Time limit, step limit and outcome · todo
 
 - **Covers:** AC-3.3-36 .. AC-3.3-39
+- The step-limit formula and the computed `outcome` already exist (T7,
+  DEC-197); T8 adds `deadline` and `out_of_time`, `final_report()`,
+  `main.py`'s verdict and the tests of AC-3.3-36 .. AC-3.3-39.
 
 ### T9 — Live evidence · todo
 

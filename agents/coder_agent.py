@@ -58,6 +58,7 @@ import tools.handlers
 from agents.llm_helpers import PYTHON_ENVIRONMENT
 from llm_client import get_chat_model
 from memory import SlidingWindowBuffer, build_context, store_memory, store_outcome
+from orchestration.settings import LoopSettings, load_loop_settings
 from orchestration.state import (
     Bug,
     CoderResult,
@@ -630,9 +631,12 @@ class CoderRunContext:
 
     Attributes:
         window: Short-term window shared by every task of the run, one turn
-            per task (DEC-099).
+            per pass (DEC-099).
+        settings: The loop's settings, read once when the context is made,
+            so every node of a run sees the same values (DEC-180, DEC-197).
     """
     window: SlidingWindowBuffer = field(default_factory=SlidingWindowBuffer)
+    settings: LoopSettings = field(default_factory=lambda: load_loop_settings(os.environ))
 
 
 def _next_pending(tasks: list[TaskState]) -> TaskState | None:
@@ -958,13 +962,41 @@ def _with_task(tasks: list[TaskState], task_id: str, **update: Any) -> list[Task
     return [t.model_copy(update=update) if t.task_id == task_id else t for t in tasks]
 
 
+def _pass_prompt(state: ProjectState, task: TaskState) -> tuple[str, str]:
+    """Returns the prompt of the task's next pass and a note saying which pass it is.
+
+    A task in progress whose last review was not approved gets a correction
+    pass with the QA's report and the Medium and Low bugs its last version
+    left (DEC-187); otherwise it is the task's first pass.
+
+    Args:
+        state: Current state; reads ``spec`` and ``code``.
+        task: The task to run.
+
+    Returns:
+        The prompt and the progress note that starts the pass.
+    """
+    written = list(state.code)
+    if task.status == "in_progress" and task.qa_report is not None:
+        pending = [bug for bug in (task.reflection.bugs if task.reflection else [])
+                   if bug.severity != "High"]
+        prompt = correction_prompt(task, state.spec, written, task.qa_report, pending)
+        return prompt, f"Coder Agent: correcting {task.task_id} after review {task.reviews}."
+    prompt = first_pass_prompt(task, state.spec, written)
+    return prompt, f"Coder Agent: starting {task.task_id} — {task.title}."
+
+
 def make_coder_node(
-    model: BaseChatModel | None = None,
+    model: BaseChatModel | None = None, close_tasks: bool = True
 ) -> Callable[[ProjectState, Runtime[CoderRunContext]], dict]:
     """Returns the Coder node function for the graph.
 
     Args:
         model: Chat model for the Coder. None uses the configured one.
+        close_tasks: True closes the task from the Coder's result, as in the
+            Coder-only graph (DEC-101); False leaves it ``in_progress`` for
+            the QA's verdict and runs the correction pass of a task the QA
+            sent back (DEC-178).
 
     Returns:
         The node: it takes the state and the run's runtime and returns a
@@ -972,7 +1004,10 @@ def make_coder_node(
     """
 
     def coder_node(state: ProjectState, runtime: Runtime[CoderRunContext]) -> dict:
-        """Runs the next pending task and records its status, result and code.
+        """Runs one pass of the current task and records its result and code.
+
+        The current task is the one in progress (a correction pass), or the
+        next pending one (its first pass).
 
         Args:
             state: Current state; reads ``tasks``, ``spec`` and ``code``.
@@ -987,7 +1022,8 @@ def make_coder_node(
             and ``error`` are returned when no task is pending or the run
             has no context.
         """
-        task = _next_pending(state.tasks)
+        current = [task for task in state.tasks if task.status == "in_progress"]
+        task = current[0] if current and not close_tasks else _next_pending(state.tasks)
         if task is None:
             error = "Coder Agent: no pending task to run."
             return {"progress": [error], "error": error}
@@ -996,9 +1032,8 @@ def make_coder_node(
             logger.error(error)
             return {"progress": [error], "error": error}
 
-        started = f"Coder Agent: starting {task.task_id} — {task.title}."
+        prompt, started = _pass_prompt(state, task)
         try:
-            prompt = first_pass_prompt(task, state.spec, list(state.code))
             result = run_agent(prompt, runtime.context.window, model)
         except Exception as exc:  # DEC-102: the node never raises out of the graph
             error = f"{type(exc).__name__}: {exc}"
@@ -1008,8 +1043,13 @@ def make_coder_node(
                 "progress": [started, f"Coder Agent: {task.task_id} failed — {error}"],
                 "error": error,
             }
-        status = "done" if result.status == "success" else "failed"  # DEC-101
-        finished = f"Coder Agent: {task.task_id} {status}. File: {result.main_file or 'none'}."
+        if close_tasks:
+            status = "done" if result.status == "success" else "failed"  # DEC-101
+            finished = f"Coder Agent: {task.task_id} {status}. File: {result.main_file or 'none'}."
+        else:
+            status = "in_progress"  # DEC-178: only the QA's verdict closes the task
+            finished = (f"Coder Agent: {task.task_id} pass ended {result.status}. "
+                        f"File: {result.main_file or 'none'}.")
         return {
             "tasks": _with_task(state.tasks, task.task_id, status=status, result=result),
             "code": {**state.code, **_written_files(result)},

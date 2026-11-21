@@ -29,7 +29,6 @@ Typical usage example:
 """
 
 import logging
-import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +39,7 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field, model_validator
 
 import tools.handlers
+import agents.coder_agent as coder_agent
 from agents.coder_agent import (
     MODEL,
     CoderRunContext,
@@ -49,9 +49,8 @@ from agents.coder_agent import (
     improvement_prompt,
     run_agent,
 )
-from agents.llm_helpers import structured_call
-from llm_client import get_chat_model
-from orchestration.settings import load_loop_settings
+from agents.llm_helpers import PYTHON_ENVIRONMENT, structured_call
+from orchestration.a2a import A2AMessage, send
 # DEC-196: the bug models live in the state; re-exported for existing imports.
 from orchestration.state import (
     KIND_SEVERITY,
@@ -131,7 +130,9 @@ Report each defect once, under the item it fits best; another item it also
 affects is a bug only if it fails there in a different way, otherwise it is
 ok and its evidence names the item where the defect is reported.
 
-Do not invent problems: a version may have no bugs at all."""
+Do not invent problems: a version may have no bugs at all.
+
+{PYTHON_ENVIRONMENT}"""
 
 
 class ItemVerdict(BaseModel):
@@ -553,7 +554,8 @@ def make_reflect_node(
     """Returns the reflect node, between the Coder and the QA (DEC-177).
 
     Args:
-        model: Chat model of the Coder. None uses the configured one.
+        model: Chat model of the Coder. None uses the Coder's configured
+            one, through the Coder's own ``get_chat_model`` (DEC-193).
 
     Returns:
         The node: it takes the state and the run's runtime and returns a
@@ -561,44 +563,50 @@ def make_reflect_node(
     """
 
     def reflect_node(state: ProjectState, runtime: Runtime[CoderRunContext]) -> dict:
-        """Reviews the task in progress and records the version to send.
+        """Reviews the task in progress and asks the QA to review the version chosen.
 
         Args:
-            state: Current state; reads ``tasks``, ``spec`` and ``code``.
-            runtime: The run's runtime; its context holds the window.
+            state: Current state; reads ``tasks``, ``spec``, ``code`` and
+                ``messages``.
+            runtime: The run's runtime; its context holds the window and the
+                run's settings (DEC-197).
 
         Returns:
             Update with ``tasks`` (result and reflection of the version
-            sent), ``code`` and ``progress``; only ``progress`` and
-            ``error`` when there is no single task in progress, no
-            context or invalid settings.
+            sent), ``code``, ``messages`` (the ``review_request``, DEC-197)
+            and ``progress``; only ``progress`` and ``error`` when there is
+            no single task in progress or no context.
         """
         task = _reviewed_task(state)
         error = task if isinstance(task, str) else ""
         if not error and runtime.context is None:
             error = "Reflect: no run context; invoke the graph with context=CoderRunContext()."
-        if not error:
-            try:
-                max_rounds = load_loop_settings(os.environ).reflection_max_rounds
-            except ValueError as exc:
-                error = f"Reflect: {exc}"
         if error:
             logger.error(error)
             return {"progress": [error], "error": error}
 
+        settings = runtime.context.settings
         result, reflection = reflect_task(
             task, state.spec, list(state.code), runtime.context.window,
-            model or get_chat_model(MODEL), max_rounds,
+            model or coder_agent.get_chat_model(MODEL), settings.reflection_max_rounds,
         )
         # A restored version may have removed files a discarded pass added.
         files = {name: content for name, content in state.code.items()
                  if (path := _resolved(name)) is not None and Path(path).is_file()}
         files.update(_written_files(result))
+        review = task.reviews + 1
+        request = A2AMessage(
+            sender="coder",
+            receiver="qa",
+            intent="review_request",
+            payload={"task_id": task.task_id, "review": review, "limit": settings.qa_max_iterations},
+        )
         return {
             "tasks": _with_task(state.tasks, task.task_id, result=result, reflection=reflection),
             "code": files,
-            "progress": [f"Reflect: {task.task_id} sends v{reflection.version}."],
+            "progress": [f"Reflect: {task.task_id} sends v{reflection.version} for review {review}."],
             "error": "",
+            **send(state, request),
         }
 
     return reflect_node
