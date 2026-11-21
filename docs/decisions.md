@@ -3527,7 +3527,7 @@ A decision can mix bases; then each part states its own.
   tends to repeat the same failing change).
 - Revisit when: the rubric items and the critique prompt are designed
   (end of the Lab 3.3 technical phase).
-- Code: —
+- Code: `agents/coder_reflection.py` (`reflect_task`)
 
 ### DEC-173 The self-evaluation sees only the version and its task, with no memory
 - Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
@@ -3645,7 +3645,7 @@ A decision can mix bases; then each part states its own.
   gets its own span in Module 4.
 - Alternatives: inside the Coder node (the order is hidden and the node
   grows).
-- Code: —
+- Code: `agents/coder_reflection.py` (`make_reflect_node`)
 
 ### DEC-178 With the QA in the graph, only the QA's verdict closes a task
 - Date: 2026-11-19 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
@@ -4059,3 +4059,45 @@ A decision can mix bases; then each part states its own.
 - Revisit when: Module 4 (C4.4) shows Chroma documents or prompt tokens
   are too large; see IMP-020.
 - Code: `agents/coder_agent.py` (`_prompt`)
+
+### DEC-196 How the `reflect` node keeps, restores and sends versions
+- Date: 2026-11-21 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Basis: Preferred (details of DEC-172, DEC-177 and DEC-182)
+- Context: the `reflect` node evaluates v0, runs up to
+  `REFLECTION_MAX_ROUNDS` improvement passes and sends the best version
+  (DEC-172). It must store the sent version's pending bugs for the
+  correction pass (DEC-187), put the chosen version back on disk, and
+  handle an improvement that changes nothing, an evaluation with no valid
+  output and an improvement pass that fails.
+- Decision:
+  - `Bug`, `DefectKind` and `KIND_SEVERITY` move to `orchestration/state.py`
+    (re-exported by `agents/coder_reflection.py`), so `TaskState.reflection`
+    can hold the sent version's bugs, and `agents/coder_agent.py` no longer
+    imports the reflection module (no import cycle).
+  - Before each improvement pass the node keeps a snapshot of the whole
+    Coder workspace (path to bytes); restoring a version makes the
+    workspace identical to its snapshot: changed files are rewritten and
+    files the later pass added are deleted.
+  - An improvement whose files are identical to the version it started
+    from is not evaluated; it counts as that version.
+  - If the evaluation of an improved version has no valid output after
+    two calls (Pydantic rejects it or the call fails, DEC-171), the
+    improved version is sent, no further round runs, and a WARNING says
+    "critique unavailable".
+  - If an improvement pass raises (e.g. an API error), the best version so
+    far is restored and sent, with a WARNING; only a failure of the first
+    pass is fatal for the task (DEC-102).
+  - The node reviews the one task `in_progress`; none or more than one is
+    an error, like the Coder node without a pending task.
+- Why: one bug type in the state, with no copy to keep in step; the
+  snapshot restores exactly, files created by running the code included;
+  an unchanged version needs no second call; an improved version was
+  written to fix confirmed bugs and the QA's executed tests judge it,
+  while v0 would go with those bugs; a valid v0 is not lost because a
+  later pass failed.
+- Alternatives: a copy of `Bug` in the state (two models to keep in step);
+  restore only the files written with `write_file` (misses files created
+  by running the code); send v0 when the improved version cannot be
+  evaluated (sends confirmed High or Medium bugs to the QA); fail the
+  task when an improvement pass raises (loses a valid v0).
+- Code: `agents/coder_reflection.py` (`reflect_task`, `_snapshot`, `_restore`, `make_reflect_node`), `orchestration/state.py` (`Bug`, `Reflection`)

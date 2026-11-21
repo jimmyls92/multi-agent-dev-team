@@ -22,13 +22,17 @@ from orchestration.a2a import A2AMessage
 from orchestration.qa_report import Issue, NonEmptyStr, QAReport, Severity
 
 __all__ = [
+    "KIND_SEVERITY",
+    "Bug",
     "CoderResult",
+    "DefectKind",
     "FailedTest",
     "Issue",
     "NonEmptyStr",
     "ProjectSpec",
     "ProjectState",
     "QAReport",
+    "Reflection",
     "ReviewRecord",
     "Severity",
     "SpecCriterion",
@@ -166,6 +170,75 @@ class CoderResult(BaseModel):
     steps: list[StepRecord] = Field(default_factory=list)
 
 
+DefectKind = Literal[
+    "logic_error",
+    "crash",
+    "security",
+    "missing_edge_case",
+    "unclear_error",
+    "missing_type_annotation",
+    "style",
+    "naming",
+    "docstring",
+]
+
+# DEC-182: the model picks a kind from definitions; the code fixes its severity.
+KIND_SEVERITY: dict[str, Severity] = {
+    "logic_error": "High",
+    "crash": "High",
+    "security": "High",
+    "missing_edge_case": "Medium",
+    "unclear_error": "Medium",
+    "missing_type_annotation": "Low",
+    "style": "Low",
+    "naming": "Low",
+    "docstring": "Low",
+}
+
+
+class Bug(BaseModel):
+    """One defect found by the self-evaluation, with its diagnosis (DEC-183, DEC-196).
+
+    Attributes:
+        kind: Defect kind; the code maps it to a severity (DEC-182).
+        location: File and function.
+        evidence: A concrete input and the wrong result it gives.
+        cause: Why the code fails.
+        fix: The smallest change that fixes it.
+    """
+    kind: DefectKind
+    location: NonEmptyStr
+    evidence: NonEmptyStr
+    cause: NonEmptyStr
+    fix: NonEmptyStr
+
+    @property
+    def severity(self) -> Severity:
+        """Returns the severity of the bug's kind."""
+        return KIND_SEVERITY[self.kind]
+
+
+class Reflection(BaseModel):
+    """The version the reflect node sent to the QA and its evaluation (DEC-172, DEC-196).
+
+    Attributes:
+        version: Index of the version sent; 0 is the first pass's.
+        high: High bugs of the version sent; None when its evaluation was
+            unavailable (DEC-171).
+        medium: Medium bugs, as ``high``.
+        low: Low bugs, as ``high``.
+        bugs: The bugs of the version sent, pending for the correction
+            pass (DEC-187); empty when unavailable.
+        improvements: Improvement passes run.
+    """
+    version: int = Field(default=0, ge=0)
+    high: int | None = Field(default=None, ge=0)
+    medium: int | None = Field(default=None, ge=0)
+    low: int | None = Field(default=None, ge=0)
+    bugs: list[Bug] = Field(default_factory=list)
+    improvements: int = Field(default=0, ge=0)
+
+
 class FailedTest(BaseModel):
     """A test of the QA that failed in one review (DEC-184).
 
@@ -214,10 +287,13 @@ class TaskState(TaskSpec):
             it, or after a fatal error (DEC-102, DEC-107).
         history: One record per QA review of the task, oldest first
             (DEC-184).
+        reflection: What the reflect node sent in the current review;
+            None before it runs (DEC-196).
     """
     status: TaskStatus = "pending"
     result: CoderResult | None = None
     history: list[ReviewRecord] = Field(default_factory=list)
+    reflection: Reflection | None = None
 
 
 class ProjectState(BaseModel):

@@ -12,9 +12,13 @@ no memory (DEC-173). If it gives no valid output in two calls, the
 evaluation is unavailable and the version goes to the QA as it is
 (DEC-171).
 
+The ``reflect`` node runs the whole cycle between the Coder and the QA
+(DEC-172, DEC-177, DEC-196): it evaluates the first pass's version, runs
+up to ``REFLECTION_MAX_ROUNDS`` improvement passes while the best version
+has High or Medium bugs, puts the best version back on disk and sends it.
+
 Attributes:
     RUBRIC_ITEMS: The fixed items E1-E11 and what each checks.
-    KIND_SEVERITY: Defect kind to severity (DEC-182).
     EVALUATION_SYSTEM_PROMPT: Instructions for the evaluation call.
 
 Typical usage example:
@@ -25,14 +29,56 @@ Typical usage example:
 """
 
 import logging
-from collections.abc import Mapping
+import os
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, NamedTuple
 
 from langchain_core.language_models import BaseChatModel
+from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field, model_validator
 
+import tools.handlers
+from agents.coder_agent import (
+    MODEL,
+    CoderRunContext,
+    _resolved,
+    _with_task,
+    _written_files,
+    improvement_prompt,
+    run_agent,
+)
 from agents.llm_helpers import structured_call
-from orchestration.state import NonEmptyStr, Severity, TaskSpec
+from llm_client import get_chat_model
+from orchestration.settings import load_loop_settings
+# DEC-196: the bug models live in the state; re-exported for existing imports.
+from orchestration.state import (
+    KIND_SEVERITY,
+    Bug,
+    CoderResult,
+    DefectKind,
+    NonEmptyStr,
+    ProjectSpec,
+    ProjectState,
+    Reflection,
+    TaskSpec,
+    TaskState,
+)
+
+__all__ = [
+    "KIND_SEVERITY",
+    "RUBRIC_ITEMS",
+    "Bug",
+    "BugCounts",
+    "DefectKind",
+    "ItemVerdict",
+    "SelfEvaluationBase",
+    "best_version",
+    "evaluate_version",
+    "make_reflect_node",
+    "reflect_task",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -51,31 +97,6 @@ RUBRIC_ITEMS: dict[str, str] = {
     "E10": "style, naming and docstrings",
     "E11": "any other real defect that fits none of the items above, e.g. a file never "
     "closed or behaviour the description asks for but no criterion checks",
-}
-
-DefectKind = Literal[
-    "logic_error",
-    "crash",
-    "security",
-    "missing_edge_case",
-    "unclear_error",
-    "missing_type_annotation",
-    "style",
-    "naming",
-    "docstring",
-]
-
-# DEC-182: the model picks a kind from definitions; the code fixes its severity.
-KIND_SEVERITY: dict[str, Severity] = {
-    "logic_error": "High",
-    "crash": "High",
-    "security": "High",
-    "missing_edge_case": "Medium",
-    "unclear_error": "Medium",
-    "missing_type_annotation": "Low",
-    "style": "Low",
-    "naming": "Low",
-    "docstring": "Low",
 }
 
 _KIND_HELP = """- logic_error: a wrong result on valid input.
@@ -111,28 +132,6 @@ affects is a bug only if it fails there in a different way, otherwise it is
 ok and its evidence names the item where the defect is reported.
 
 Do not invent problems: a version may have no bugs at all."""
-
-
-class Bug(BaseModel):
-    """One defect found by the self-evaluation, with its diagnosis (DEC-183).
-
-    Attributes:
-        kind: Defect kind; the code maps it to a severity (DEC-182).
-        location: File and function.
-        evidence: A concrete input and the wrong result it gives.
-        cause: Why the code fails.
-        fix: The smallest change that fixes it.
-    """
-    kind: DefectKind
-    location: NonEmptyStr
-    evidence: NonEmptyStr
-    cause: NonEmptyStr
-    fix: NonEmptyStr
-
-    @property
-    def severity(self) -> Severity:
-        """Returns the severity of the bug's kind."""
-        return KIND_SEVERITY[self.kind]
 
 
 class ItemVerdict(BaseModel):
@@ -319,3 +318,287 @@ def best_version(counts: list[BugCounts]) -> int:
         if current <= counts[best]:
             best = index
     return best
+
+
+# --- The reflect node (DEC-172, DEC-177, DEC-196) ---------------------------
+
+
+Snapshot = dict[str, bytes]
+
+# Caches that Python and pytest rebuild on their own; never part of a version.
+_CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache"})
+
+
+@dataclass
+class _Version:
+    """One version of the task's code kept by the reflect node.
+
+    Attributes:
+        index: 0 for the first pass's version, then 1, 2...
+        result: The CoderResult of the pass that wrote it.
+        snapshot: The whole workspace right after that pass.
+        evaluation: Its self-evaluation; None when unavailable.
+    """
+    index: int
+    result: CoderResult
+    snapshot: Snapshot
+    evaluation: SelfEvaluationBase | None
+
+
+def _snapshot() -> Snapshot:
+    """Returns every file of the Coder's workspace as bytes, caches left out (DEC-196).
+
+    Returns:
+        Path relative to the workspace to the file's bytes.
+    """
+    root = Path(tools.handlers.CODER_WORKSPACE_DIR)
+    if not root.is_dir():
+        return {}
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and not _CACHE_DIRS.intersection(path.relative_to(root).parts)
+    }
+
+
+def _restore(snapshot: Snapshot) -> None:
+    """Makes the Coder's workspace identical to a snapshot (DEC-196).
+
+    Files missing from the snapshot are deleted; files that differ are
+    rewritten.
+
+    Args:
+        snapshot: The workspace to restore.
+    """
+    root = Path(tools.handlers.CODER_WORKSPACE_DIR)
+    for name in _snapshot():
+        if name not in snapshot:
+            (root / name).unlink()
+    for name, content in snapshot.items():
+        path = root / name
+        if not path.is_file() or path.read_bytes() != content:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+
+
+def _version_files(task: TaskState, result: CoderResult) -> dict[str, str]:
+    """Returns the files a version is judged on: its planned files and those its pass wrote.
+
+    Args:
+        task: The task; its planned files that exist are included.
+        result: The pass's result; the files it wrote are included.
+
+    Returns:
+        File name to content.
+    """
+    files = {}
+    for name in task.files:
+        path = _resolved(name)
+        if path is not None and Path(path).is_file():
+            try:
+                files[name] = Path(path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                logger.warning("%s: cannot read %s for the evaluation: %s", task.task_id, name, exc)
+    return {**files, **_written_files(result)}
+
+
+def _log_evaluation(task: TaskState, version: _Version) -> None:
+    """Logs at INFO each bug of a version's evaluation and its counts.
+
+    Args:
+        task: The task reviewed.
+        version: A version with an evaluation.
+    """
+    for item in version.evaluation.items:
+        for bug in item.bugs:
+            logger.info(
+                "%s: critique v%d: %s %s %s at %s: %s",
+                task.task_id, version.index, item.item, bug.severity, bug.kind, bug.location, bug.cause,
+            )
+    logger.info("%s: v%d: %d High, %d Medium, %d Low", task.task_id, version.index,
+                *version.evaluation.counts())
+
+
+def _regressions(best: SelfEvaluationBase, worse: SelfEvaluationBase) -> list[Bug]:
+    """Returns the bugs of a discarded version on items the best version had ``ok`` (DEC-172).
+
+    Args:
+        best: Evaluation of the best version.
+        worse: Evaluation of the discarded version.
+
+    Returns:
+        The discarded version's bugs on those items.
+    """
+    ok = {item.item for item in best.items if item.verdict == "ok"}
+    return [bug for item in worse.items if item.item in ok for bug in item.bugs]
+
+
+def _reflection(version: _Version, improvements: int) -> Reflection:
+    """Returns the record of the version sent.
+
+    Args:
+        version: The version sent.
+        improvements: Improvement passes run.
+
+    Returns:
+        The version, its bug counts and bugs; counts None if unevaluated.
+    """
+    if version.evaluation is None:
+        return Reflection(version=version.index, improvements=improvements)
+    high, medium, low = version.evaluation.counts()
+    return Reflection(
+        version=version.index,
+        high=high,
+        medium=medium,
+        low=low,
+        bugs=version.evaluation.bugs(),
+        improvements=improvements,
+    )
+
+
+def reflect_task(
+    task: TaskState,
+    spec: ProjectSpec | None,
+    written: list[str],
+    window,
+    model: BaseChatModel,
+    max_rounds: int,
+) -> tuple[CoderResult, Reflection]:
+    """Evaluates the task's version, improves it and leaves the best one on disk (DEC-172).
+
+    Each improvement starts from the best version so far and gets the
+    regressions of the last discarded attempt. An improvement identical
+    to its starting version is not evaluated; an improved version whose
+    evaluation is unavailable is sent; a failed improvement pass restores
+    the best version (DEC-196).
+
+    Args:
+        task: The task, with the first pass's result.
+        spec: The PM's spec, or None.
+        written: Files already written in this run.
+        window: The Coder's window; improvement passes add their turn.
+        model: Chat model of the Coder, also used for the evaluation.
+        max_rounds: ``REFLECTION_MAX_ROUNDS``.
+
+    Returns:
+        The result of the version sent and its reflection record.
+    """
+    first = _Version(0, task.result, _snapshot(), None)
+    first.evaluation = evaluate_version(task, _version_files(task, task.result), model)
+    if first.evaluation is None:
+        return first.result, _reflection(first, 0)
+    _log_evaluation(task, first)
+    if not first.evaluation.needs_improvement():
+        logger.info("%s: no improvement needed for v0", task.task_id)
+    versions = [first]
+    best = first
+    regressions: list[Bug] = []
+    discarded_explanation = ""
+    rounds = 0
+    while rounds < max_rounds and best.evaluation.needs_improvement():
+        rounds += 1
+        _restore(best.snapshot)
+        prompt = improvement_prompt(
+            task, spec, written, best.evaluation, regressions, discarded_explanation
+        )
+        try:
+            result = run_agent(prompt, window, model)
+        except Exception as exc:  # DEC-196: a failed improvement keeps the best version
+            logger.warning("%s: improvement pass %d failed, keeping v%d: %s: %s",
+                           task.task_id, rounds, best.index, type(exc).__name__, exc)
+            _restore(best.snapshot)
+            break
+        snapshot = _snapshot()
+        if snapshot == best.snapshot:
+            logger.info("%s: improvement pass %d changed nothing; v%d stays",
+                        task.task_id, rounds, best.index)
+            break
+        version = _Version(len(versions), result, snapshot, None)
+        version.evaluation = evaluate_version(task, _version_files(task, result), model)
+        versions.append(version)
+        if version.evaluation is None:  # DEC-196: sent unevaluated, it was written to fix bugs
+            best = version
+            break
+        _log_evaluation(task, version)
+        chosen = versions[best_version([v.evaluation.counts() for v in versions])]
+        if chosen is not version:
+            regressions = _regressions(chosen.evaluation, version.evaluation)
+            discarded_explanation = result.explanation
+        best = chosen
+    _restore(best.snapshot)
+    logger.info("%s: sent v%d after %d improvement pass(es)", task.task_id, best.index, rounds)
+    return best.result, _reflection(best, rounds)
+
+
+def _reviewed_task(state: ProjectState) -> TaskState | str:
+    """Returns the one task in progress, or an error message (DEC-196).
+
+    Args:
+        state: Current state.
+
+    Returns:
+        The task in progress with a result, or why there is none.
+    """
+    current = [task for task in state.tasks if task.status == "in_progress"]
+    if len(current) != 1:
+        return f"Reflect: expected one task in progress, found {len(current)}."
+    if current[0].result is None:
+        return f"Reflect: {current[0].task_id} has no result to review."
+    return current[0]
+
+
+def make_reflect_node(
+    model: BaseChatModel | None = None,
+) -> Callable[[ProjectState, Runtime[CoderRunContext]], dict]:
+    """Returns the reflect node, between the Coder and the QA (DEC-177).
+
+    Args:
+        model: Chat model of the Coder. None uses the configured one.
+
+    Returns:
+        The node: it takes the state and the run's runtime and returns a
+        partial update.
+    """
+
+    def reflect_node(state: ProjectState, runtime: Runtime[CoderRunContext]) -> dict:
+        """Reviews the task in progress and records the version to send.
+
+        Args:
+            state: Current state; reads ``tasks``, ``spec`` and ``code``.
+            runtime: The run's runtime; its context holds the window.
+
+        Returns:
+            Update with ``tasks`` (result and reflection of the version
+            sent), ``code`` and ``progress``; only ``progress`` and
+            ``error`` when there is no single task in progress, no
+            context or invalid settings.
+        """
+        task = _reviewed_task(state)
+        error = task if isinstance(task, str) else ""
+        if not error and runtime.context is None:
+            error = "Reflect: no run context; invoke the graph with context=CoderRunContext()."
+        if not error:
+            try:
+                max_rounds = load_loop_settings(os.environ).reflection_max_rounds
+            except ValueError as exc:
+                error = f"Reflect: {exc}"
+        if error:
+            logger.error(error)
+            return {"progress": [error], "error": error}
+
+        result, reflection = reflect_task(
+            task, state.spec, list(state.code), runtime.context.window,
+            model or get_chat_model(MODEL), max_rounds,
+        )
+        # A restored version may have removed files a discarded pass added.
+        files = {name: content for name, content in state.code.items()
+                 if (path := _resolved(name)) is not None and Path(path).is_file()}
+        files.update(_written_files(result))
+        return {
+            "tasks": _with_task(state.tasks, task.task_id, result=result, reflection=reflection),
+            "code": files,
+            "progress": [f"Reflect: {task.task_id} sends v{reflection.version}."],
+            "error": "",
+        }
+
+    return reflect_node

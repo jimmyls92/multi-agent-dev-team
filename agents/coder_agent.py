@@ -30,7 +30,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
@@ -55,11 +55,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 import tools.file_io
 import tools.handlers
-from agents.coder_reflection import Bug, SelfEvaluationBase
 from agents.llm_helpers import PYTHON_ENVIRONMENT
 from llm_client import get_chat_model
 from memory import SlidingWindowBuffer, build_context, store_memory, store_outcome
 from orchestration.state import (
+    Bug,
     CoderResult,
     Issue,
     ProjectSpec,
@@ -72,6 +72,9 @@ from orchestration.state import (
 from tools import ExecutionResult
 from tools.agent_tools import AGENT_TOOLS, check_tool_call
 from tools.handlers import resolve_in_workspace
+
+if TYPE_CHECKING:  # DEC-196: the reflection module imports this one
+    from agents.coder_reflection import SelfEvaluationBase
 
 MODEL = os.getenv("LLM_MODEL", "openai/gpt-4.1-mini")
 MAX_ITERATIONS = 10  # C1.4, DEC-070
@@ -823,7 +826,7 @@ def improvement_prompt(
     task: TaskState,
     spec: ProjectSpec | None,
     written: list[str],
-    evaluation: SelfEvaluationBase,
+    evaluation: "SelfEvaluationBase",
     regressions: Sequence[Bug] = (),
     discarded_explanation: str = "",
 ) -> str:

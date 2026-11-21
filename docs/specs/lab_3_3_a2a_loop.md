@@ -579,9 +579,17 @@ Task status: todo | map | in progress | review | done
   The Coder node already uses `first_pass_prompt`, so every task now gets
   its planned files' contents. Tests in `tests/test_coder_passes.py`.
 
-### T6 — `reflect` node: improvement, best version and restore · todo
+### T6 — `reflect` node: improvement, best version and restore · done
 
-- **Covers:** AC-3.3-21 .. AC-3.3-26
+- **Covers:** AC-3.3-21 .. AC-3.3-26, and AC-3.3-16's "v0 is sent
+  unchanged"
+- **Review notes:** `reflect_task` and `make_reflect_node` in
+  `agents/coder_reflection.py`; `Bug` moved to the state and
+  `TaskState.reflection` added (DEC-196). Extra tests for DEC-196: an
+  unchanged improvement is not evaluated, an unevaluable improvement is
+  sent, a failed improvement pass restores the best version, and the node
+  needs exactly one task in progress. The node is wired into the graph in
+  T7, where the Coder leaves its task `in_progress`.
 
 ### T7 — The loop in the graph · todo
 

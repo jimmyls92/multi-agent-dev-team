@@ -1,25 +1,37 @@
-"""Tests of the Coder's self-evaluation (Lab 3.3, T4).
+"""Tests of the Coder's self-evaluation and the reflect node (Lab 3.3, T4, T6).
 
-Covers spec `lab_3_3_a2a_loop` AC-3.3-12 .. AC-3.3-15 and the evaluation
-part of AC-3.3-16 (DEC-171, DEC-173, DEC-182, DEC-183, DEC-193), with a
-fake model and the linked-list task.
+Covers spec `lab_3_3_a2a_loop` AC-3.3-12 .. AC-3.3-16 and AC-3.3-21 ..
+AC-3.3-26 (DEC-171, DEC-172, DEC-173, DEC-182, DEC-183, DEC-193,
+DEC-196), with a fake evaluation model, a fake Coder and the linked-list
+task.
 """
 
 import copy
 import logging
 
 import pytest
+from langgraph.runtime import Runtime
 
 import memory
+from agents import coder_reflection
+from agents.coder_agent import CoderRunContext
 from agents.coder_reflection import (
     KIND_SEVERITY,
     RUBRIC_ITEMS,
     BugCounts,
     best_version,
     evaluate_version,
+    make_reflect_node,
 )
 from memory import SlidingWindowBuffer
-from orchestration.state import TaskCriterion, TaskSpec
+from orchestration.state import (
+    CoderResult,
+    ProjectState,
+    StepRecord,
+    TaskCriterion,
+    TaskSpec,
+    TaskState,
+)
 from tests.fakes import ScriptedChatModel, tool_call_reply
 
 LINKED_LIST = "class LinkedList:\n    def __init__(self):\n        self.items = []\n"
@@ -258,3 +270,302 @@ def test_ac_3_3_16_evaluation_unavailable(task, caplog):
     assert evaluation is None
     assert len(model.calls) == 2
     assert "critique unavailable" in caplog.text
+
+
+# --- The reflect node (T6: AC-3.3-16, AC-3.3-21 .. AC-3.3-26, DEC-196) -------
+
+
+V0 = "class LinkedList:\n    VERSION = 0\n"
+V1 = "class LinkedList:\n    VERSION = 1\n"
+V2 = "class LinkedList:\n    VERSION = 2\n"
+
+
+class FakeCoder:
+    """Replaces ``run_agent``: each pass writes given files and returns a result.
+
+    Attributes:
+        passes: Files each pass writes, in order; a pass given as an
+            exception raises it instead.
+        prompts: The prompt of every pass run.
+        seen: The content of ``linked_list.py`` on disk when each pass
+            started.
+    """
+
+    def __init__(self, workspace, passes: list[dict[str, str] | Exception]):
+        """Keeps the workspace and the passes to replay.
+
+        Args:
+            workspace: The Coder's workspace directory.
+            passes: Files written by each pass, or an exception to raise.
+        """
+        self.workspace = workspace
+        self.passes = list(passes)
+        self.prompts: list[str] = []
+        self.seen: list[str | None] = []
+
+    def __call__(self, prompt: str, window, model=None) -> CoderResult:
+        """Runs the next pass: writes its files and returns its result.
+
+        Args:
+            prompt: The pass prompt.
+            window: The Coder's window; unused.
+            model: The Coder's model; unused.
+
+        Returns:
+            A ``success`` result whose steps write the pass's files.
+
+        Raises:
+            Exception: The pass's exception, if it was given one.
+        """
+        self.prompts.append(prompt)
+        current = self.workspace / "linked_list.py"
+        self.seen.append(current.read_text() if current.exists() else None)
+        files = self.passes.pop(0)
+        if isinstance(files, Exception):
+            raise files
+        number = len(self.prompts)
+        for name, content in files.items():
+            (self.workspace / name).write_text(content)
+        return _result(files, f"EXPLANATION-v{number}")
+
+
+def _result(files: dict[str, str], explanation: str, status: str = "success") -> CoderResult:
+    """Returns a CoderResult whose steps write the given files.
+
+    Args:
+        files: File name to content.
+        explanation: The result's explanation.
+        status: The result's status.
+
+    Returns:
+        The result.
+    """
+    steps = [
+        StepRecord(iteration=k, action="write_file", action_input={"path": name, "content": content})
+        for k, (name, content) in enumerate(files.items(), start=1)
+    ]
+    return CoderResult(status=status, explanation=explanation, steps=steps,
+                       main_file="linked_list.py", code=files.get("linked_list.py", ""))
+
+
+def _state(task: TaskSpec, workspace, status: str = "success") -> ProjectState:
+    """Returns a state whose task is in progress after its first pass wrote v0.
+
+    Args:
+        task: The linked-list task.
+        workspace: The Coder's workspace; v0 is written there.
+        status: Status of the first pass's result.
+
+    Returns:
+        The state.
+    """
+    (workspace / "linked_list.py").write_text(V0)
+    v0 = _result({"linked_list.py": V0}, "EXPLANATION-v0", status)
+    current = TaskState(**task.model_dump(), status="in_progress", result=v0)
+    return ProjectState(requirement="r", tasks=[current], code={"linked_list.py": V0})
+
+
+def _reflect(state: ProjectState, model, coder, monkeypatch, rounds: int = 1) -> dict:
+    """Runs the reflect node once with a fake Coder.
+
+    Args:
+        state: State before the node.
+        model: Fake evaluation model.
+        coder: The fake Coder.
+        monkeypatch: Pytest's monkeypatch fixture.
+        rounds: ``REFLECTION_MAX_ROUNDS``.
+
+    Returns:
+        The node's update.
+    """
+    monkeypatch.setattr(coder_reflection, "run_agent", coder)
+    monkeypatch.setenv("REFLECTION_MAX_ROUNDS", str(rounds))
+    return make_reflect_node(model)(state, Runtime(context=CoderRunContext()))
+
+
+def _sent(update: dict) -> TaskState:
+    """Returns the reviewed task of a node update.
+
+    Args:
+        update: The reflect node's update.
+
+    Returns:
+        The task, with the result to send and its reflection.
+    """
+    [task] = update["tasks"]
+    return task
+
+
+def test_ac_3_3_16_unavailable_sends_v0(task, isolated_run, monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
+    model = ScriptedChatModel([_reply(_invalid("missing-item"), "e1"), _reply(_invalid("criterion-na"), "e2")])
+    coder = FakeCoder(isolated_run, [])
+
+    update = _reflect(_state(task, isolated_run), model, coder, monkeypatch)
+
+    sent = _sent(update)
+    assert len(model.calls) == 2
+    assert coder.prompts == []
+    assert sent.result.explanation == "EXPLANATION-v0"
+    assert (sent.reflection.version, sent.reflection.high) == (0, None)
+    assert "critique unavailable" in caplog.text
+
+
+def test_ac_3_3_21_low_only_sent(task, isolated_run, monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    model = ScriptedChatModel([_reply(_items({"E9": [_bug("missing_type_annotation")], "E10": [_bug("style")]}))])
+    coder = FakeCoder(isolated_run, [])
+
+    sent = _sent(_reflect(_state(task, isolated_run), model, coder, monkeypatch))
+
+    assert coder.prompts == []
+    assert sent.result.explanation == "EXPLANATION-v0"
+    assert (sent.reflection.version, sent.reflection.low) == (0, 2)
+    assert [bug.kind for bug in sent.reflection.bugs] == ["missing_type_annotation", "style"]
+    assert "no improvement needed" in caplog.text
+    assert "E9" in caplog.text and "E10" in caplog.text
+
+
+def test_ac_3_3_22_improvement_sent(task, isolated_run, monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    model = ScriptedChatModel([_reply(_items({"E2": [_bug()]}), "e0"), _reply(_items(), "e1")])
+    coder = FakeCoder(isolated_run, [{"linked_list.py": V1}])
+
+    update = _reflect(_state(task, isolated_run), model, coder, monkeypatch)
+
+    sent = _sent(update)
+    assert len(coder.prompts) == 1
+    assert "the loop drops the last node" in coder.prompts[0]
+    assert (isolated_run / "linked_list.py").read_text() == V1
+    assert sent.result.explanation == "EXPLANATION-v1"
+    assert update["code"]["linked_list.py"] == V1
+    assert (sent.reflection.version, sent.reflection.high) == (1, 0)
+    for part in ("E2", "linked_list.py: LinkedList.reverse", "the loop drops the last node",
+                 "v0: 1 High, 0 Medium, 0 Low", "v1: 0 High, 0 Medium, 0 Low", "sent v1"):
+        assert part in caplog.text
+
+
+def test_ac_3_3_23_worse_improvement_restored(task, isolated_run, monkeypatch):
+    model = ScriptedChatModel([
+        _reply(_items({"E1": [_bug("missing_edge_case")]}), "e0"),
+        _reply(_items({"E2": [_bug()]}), "e1"),
+    ])
+    coder = FakeCoder(isolated_run, [{"linked_list.py": V1, "helper.py": "X = 1\n"}])
+
+    update = _reflect(_state(task, isolated_run), model, coder, monkeypatch)
+
+    sent = _sent(update)
+    assert sorted(p.name for p in isolated_run.iterdir()) == ["linked_list.py"]
+    assert (isolated_run / "linked_list.py").read_text() == V0
+    assert sent.result.explanation == "EXPLANATION-v0"
+    assert sent.reflection.version == 0
+    assert "helper.py" not in update["code"]
+
+
+def test_ac_3_3_24_regressions_passed_on(task, isolated_run, monkeypatch):
+    regression = _bug("logic_error", "linked_list.py: insert")
+    regression["cause"] = "REGRESSION-CAUSE"
+    model = ScriptedChatModel([
+        _reply(_items({"E1": [_bug("missing_edge_case")]}), "e0"),
+        _reply(_items({"C0": [regression]}), "e1"),
+        _reply(_items({"E1": [_bug("missing_edge_case")]}), "e2"),
+    ])
+    coder = FakeCoder(isolated_run, [{"linked_list.py": V1}, {"linked_list.py": V2}])
+
+    sent = _sent(_reflect(_state(task, isolated_run), model, coder, monkeypatch, rounds=2))
+
+    assert len(coder.prompts) == 2
+    assert coder.seen == [V0, V0]
+    assert "REGRESSION-CAUSE" in coder.prompts[1]
+    assert "EXPLANATION-v1" in coder.prompts[1]
+    assert sent.reflection.version == 2
+
+
+def test_ac_3_3_25_tie_goes_to_improved(task, isolated_run, monkeypatch):
+    model = ScriptedChatModel([
+        _reply(_items({"E1": [_bug("missing_edge_case")]}), "e0"),
+        _reply(_items({"E3": [_bug("unclear_error")]}), "e1"),
+    ])
+    coder = FakeCoder(isolated_run, [{"linked_list.py": V1}])
+
+    sent = _sent(_reflect(_state(task, isolated_run), model, coder, monkeypatch))
+
+    assert sent.result.explanation == "EXPLANATION-v1"
+    assert (isolated_run / "linked_list.py").read_text() == V1
+
+
+def test_ac_3_3_26_limit_pass_evaluated(task, isolated_run, monkeypatch):
+    model = ScriptedChatModel([_reply(_items())])
+    coder = FakeCoder(isolated_run, [])
+
+    sent = _sent(_reflect(_state(task, isolated_run, "max_iterations"), model, coder, monkeypatch))
+
+    assert V0 in _text(model.calls[0])
+    assert sent.result.status == "max_iterations"
+    assert sent.reflection.version == 0
+
+
+def test_dec_196_unchanged_improvement_not_evaluated(task, isolated_run, monkeypatch):
+    model = ScriptedChatModel([_reply(_items({"E2": [_bug()]}))])
+    coder = FakeCoder(isolated_run, [{"linked_list.py": V0}])
+
+    sent = _sent(_reflect(_state(task, isolated_run), model, coder, monkeypatch))
+
+    assert len(model.calls) == 1
+    assert sent.reflection.version == 0
+    assert sent.reflection.high == 1
+
+
+def test_dec_196_improved_unavailable_sends_improved(task, isolated_run, monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
+    model = ScriptedChatModel([
+        _reply(_items({"E2": [_bug()]}), "e0"),
+        _reply(_invalid("missing-item"), "e1"),
+        _reply(_invalid("missing-item"), "e2"),
+    ])
+    coder = FakeCoder(isolated_run, [{"linked_list.py": V1}, {"linked_list.py": V2}])
+
+    sent = _sent(_reflect(_state(task, isolated_run), model, coder, monkeypatch, rounds=2))
+
+    assert len(coder.prompts) == 1
+    assert (isolated_run / "linked_list.py").read_text() == V1
+    assert sent.result.explanation == "EXPLANATION-v1"
+    assert (sent.reflection.version, sent.reflection.high) == (1, None)
+    assert "critique unavailable" in caplog.text
+
+
+def test_dec_196_failed_improvement_restores_best(task, isolated_run, monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
+    model = ScriptedChatModel([_reply(_items({"E2": [_bug()]}))])
+
+    class HalfWritten(FakeCoder):
+        """A pass that writes a file and then fails."""
+
+        def __call__(self, prompt, window, model=None):
+            """Writes a broken file, then raises like an API error.
+
+            Raises:
+                RuntimeError: Always.
+            """
+            (self.workspace / "linked_list.py").write_text("broken")
+            raise RuntimeError("API down")
+
+    sent = _sent(_reflect(_state(task, isolated_run), model, HalfWritten(isolated_run, []), monkeypatch))
+
+    assert (isolated_run / "linked_list.py").read_text() == V0
+    assert sent.result.explanation == "EXPLANATION-v0"
+    assert "API down" in caplog.text
+
+
+@pytest.mark.parametrize("statuses", [("done",), ("in_progress", "in_progress")], ids=["none", "two"])
+def test_dec_196_one_task_in_progress(task, isolated_run, monkeypatch, statuses):
+    state = _state(task, isolated_run)
+    tasks = [state.tasks[0].model_copy(update={"task_id": f"task_{k}", "status": s})
+             for k, s in enumerate(statuses, start=1)]
+    model = ScriptedChatModel([])
+
+    update = _reflect(state.model_copy(update={"tasks": tasks}), model, FakeCoder(isolated_run, []), monkeypatch)
+
+    assert update["error"]
+    assert "tasks" not in update
+    assert model.calls == []
