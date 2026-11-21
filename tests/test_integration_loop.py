@@ -4,7 +4,8 @@ Covers spec `lab_3_3_a2a_loop` AC-3.3-29 .. AC-3.3-34 and AC-3.3-36
 (DEC-163, DEC-164, DEC-168, DEC-169, DEC-170, DEC-176, DEC-178, DEC-197,
 DEC-198), with a fake PM, a fake
 Coder, a clean fake evaluation and a fake QA; AC-3.3-31 runs the real QA
-with a fake test-writing model.
+with a fake test-writing model. AC-3.3-40 runs the whole team with the
+real models and only runs with ``--run-llm`` (DEC-199).
 """
 
 import logging
@@ -390,3 +391,26 @@ def test_ac_3_3_36_out_of_time(loop, monkeypatch):
     assert task_1.result is not None and "file_1.py" in final.code
     assert final.deadline_at and any("out of time" in note for note in final.progress)
     assert "out of time" in final.final_report()
+
+
+LINKED_LIST_REQUIREMENT = (
+    "Implement a Python module that contains a linked list class with insert, delete, search, "
+    "and reverse methods. All methods must be covered by tests."
+)
+
+
+@pytest.mark.llm
+@pytest.mark.timeout(1800)
+def test_ac_3_3_40_linked_list_demo(isolated_run, tmp_path, monkeypatch):
+    qa_dir = tmp_path / "workspace_qa"
+    monkeypatch.setenv("QA_WORKSPACE_DIR", str(qa_dir))
+
+    final = run(LINKED_LIST_REQUIREMENT)
+
+    assert final.outcome == "success", final.final_report() or final.error
+    tests = "\n".join(path.read_text() for path in qa_dir.rglob("test_*.py"))
+    for method in ("insert", "delete", "search", "reverse"):
+        assert f".{method}(" in tests, method
+    requests = {m.correlation_id for m in final.messages if m.intent == "review_request"}
+    approvals = [m.correlation_id for m in final.messages if m.intent == "approved"]
+    assert approvals and set(approvals) <= requests
