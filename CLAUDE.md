@@ -91,7 +91,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Lab 3.2 (QA agent) cerrado: `docs/specs/lab_3_2_qa_agent.md` (DEC-137..DEC-161), T1–T7 y R1 hechas; README aplazado a la entrega del Módulo 3. Activo: Lab 3.3 (A2A), spec `docs/specs/lab_3_3_a2a_loop.md` aprobado (DEC-162..DEC-195), tarea T6. Rama: `week-3`. Lab 3.1 (servidor MCP) cerrado: `docs/specs/lab_3_1_mcp_server.md` (DEC-122..DEC-136); T4 (README) aplazada a la entrega del Módulo 3. Material de los labs del módulo en `Multi-Agent-lab-3-<n>/` (fuera de git). Sin commitear: `docs/floor_plan.html` (pendiente decidir si se versiona).
+Módulo 3: cerrado (C3.1–C3.6), README del Módulo 3 escrito. Lab 3.1 (MCP server, `docs/specs/lab_3_1_mcp_server.md`, DEC-122..DEC-136), Lab 3.2 (QA agent, `docs/specs/lab_3_2_qa_agent.md`, DEC-137..DEC-161) y Lab 3.3 (A2A, `docs/specs/lab_3_3_a2a_loop.md`, DEC-162..DEC-200) cerrados; el revisor independiente del Lab 3.3 no se lanzó (sin créditos de API, decisión del usuario). Rama: `week-3`. **Siguiente:** push (fast-forward de `master` a `week-3`), luego actualizar el mapa de diseño (fichas V1/V9) y empezar el Módulo 4. Sin commitear: `docs/floor_plan.html`, `docs/lab_3_3_loop.html`, `docs/map/` (pendiente decidir si se versionan).
 
 Módulo 2: cerrado y subido (C2.1–C2.6), `master` = `week-2`. PM Agent (Lab 2.1, `docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096), Coder node (Lab 2.2, `docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109) y pipeline PM → Coder (Lab 2.3, `docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-121).
 
@@ -122,6 +122,10 @@ Versiones probadas: langchain 1.4.9, langgraph 1.2.20, langchain-openai 1.7.4, l
 - Cambiar el request con `request.override(model_settings=..., messages=..., system_message=...)`; asignar atributos está deprecado.
 - Salida estructurada: `with_structured_output(Model, method="function_calling")`.
 - Modelos falsos: subclase de `GenericFakeChatModel` con `bind_tools` que devuelve `self`; `AIMessage("", tool_calls=[{"name", "args", "id"}])`.
+
+## Mapa de diseño (en prueba)
+
+Mapa del diseño por verticales en `docs/map/` (`index.html` + `glossary.html`). Cómo se construye y se mantiene: **`docs/map/methodology.md`**. Léelo antes de tocar el mapa o al cerrar una tarea que cambie una vertical.
 
 ## Flujo de trabajo: Producto → Técnico → Spec → Tareas
 
