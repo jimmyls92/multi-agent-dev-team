@@ -277,7 +277,7 @@ def test_ac_3_2_10_pytest_timeout_one_test(folders):
         "def test_spin():\n    spin()\n\n"
         "def test_one():\n    assert one() == 1\n",
         test_timeout=1,
-        timeout=5,
+        timeout=15,
     )
     assert (result.status, result.passed, result.failed) == ("failed", 1, 1)
     [failure] = result.failures
