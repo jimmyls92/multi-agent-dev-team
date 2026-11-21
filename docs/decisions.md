@@ -3480,7 +3480,7 @@ A decision can mix bases; then each part states its own.
   task instead would punish the Coder for a problem of the critique.
 - Alternatives: fail the task (loses a task that may be correct); retry
   more times (more cost for a rare case).
-- Code: —
+- Code: `agents/coder_reflection.py` (`evaluate_version`)
 
 ### DEC-172 Self-reflection scores each version with a rubric and sends the best
 - Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted (context superseded by DEC-173; items, score and trigger by DEC-182)
@@ -3553,7 +3553,7 @@ A decision can mix bases; then each part states its own.
 - Risk: C1.2 says Chroma is queried before every LLM call. It is read as
   the Coder's ReACT agent, which still queries it on every call; this
   evaluator call is documented in the README as the exception and why.
-- Code: —
+- Code: `agents/coder_reflection.py` (`evaluate_version`)
 
 ### DEC-174 Every QA issue comes from an executed test; the LLM only explains failures
 - Date: 2026-11-19 · Area: QA Agent (Lab 3.3) · Status: accepted
@@ -3631,7 +3631,7 @@ A decision can mix bases; then each part states its own.
 - Code: `orchestration/a2a.py` (`ACCEPTED_INTENTS`, payload models)
 
 ### DEC-177 Self-reflection is its own graph node between the Coder and the QA
-- Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted (code location superseded by DEC-192)
 - Basis: Preferred (C3.4 asks for evidence that reflection runs before QA)
 - Context: the cycle of DEC-172 could run inside the Coder node or as a
   node of its own.
@@ -3770,7 +3770,7 @@ A decision can mix bases; then each part states its own.
   as Medium (an improvement pass for a cosmetic gap); the course prompt as
   is (no task given to check correctness against, and catching every
   exception hides bugs and breaks tasks that must raise).
-- Code: —
+- Code: `agents/coder_reflection.py` (`RUBRIC_ITEMS`, `KIND_SEVERITY`, `best_version`)
 
 ### DEC-183 Every bug of the self-evaluation gets a diagnosis with a minimal fix
 - Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
@@ -3794,7 +3794,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: diagnose only High and Medium (Low bugs lost for later
   passes); a free-form critique text (cannot be checked or matched to
   the rubric).
-- Code: —
+- Code: `agents/coder_reflection.py` (`Bug`, `ItemVerdict`)
 
 ### DEC-184 Each task keeps an explicit review history in the state
 - Date: 2026-11-20 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
@@ -3978,3 +3978,42 @@ A decision can mix bases; then each part states its own.
   raise on the old variable (stops runs for a harmless leftover).
 - Code: `orchestration/qa_report.py` (`Issue.test_code`),
   `agents/qa_agent.py` (`_judge_run`, `load_qa_settings`)
+
+### DEC-192 Self-reflection code lives in `agents/coder_reflection.py`
+- Date: 2026-11-21 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Basis: Preferred; supersedes the code location of DEC-177
+- Context: DEC-177 put the `reflect` node's code in `agents/coder_agent.py`
+  because the guide places reflection inside the Coder agent. That file
+  already has about 880 lines, and the rubric, prompt, models and node add
+  about 400 more.
+- Decision: the self-evaluation and the `reflect` node live in
+  `agents/coder_reflection.py`, a module of the Coder agent called from
+  its graph node. The graph order of DEC-177 does not change.
+- Why: the name shows it belongs to the Coder, and it can be read and
+  tested on its own.
+- Alternatives: keep everything in `coder_agent.py` (one file near 1,300
+  lines).
+- Code: `agents/coder_reflection.py`
+
+### DEC-193 The self-evaluation schema is built per task and an item may hold several bugs
+- Date: 2026-11-21 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Basis: Preferred (shape of DEC-182 and DEC-183)
+- Context: one rubric item can fail in more than one place (E2 may break
+  `reverse` with one element and `delete` of the last node). The valid
+  items depend on the task's criteria.
+- Decision: each item verdict has `item`, `verdict` (`ok`, `bug` or
+  `n/a`), a brief `evidence` and a list of `bugs`; a `bug` item holds at
+  least one, `ok` and `n/a` items none. Each bug has `kind`, `location`,
+  `evidence` (concrete input and wrong result), `cause` and `fix`, so the
+  diagnosis of DEC-183 is one per bug by construction. The ranking
+  counts bugs, not items. The schema is built per task like the QA's
+  draft (DEC-148): items C0..Cn of the task plus E1-E11, each exactly
+  once, C items never `n/a`; any failed check goes back to the model as
+  a validation error. The call uses the Coder's model (`LLM_MODEL`)
+  through `get_chat_model`, so it shares `LLM_TIMEOUT`.
+- Why: no bug is lost or merged with another, and a fixed per-task
+  schema makes every evaluation cover the same items.
+- Alternatives: one diagnosis per item (a second bug in the same item is
+  lost); a separate list of diagnoses matched to items by name (two
+  structures to keep consistent).
+- Code: `agents/coder_reflection.py`

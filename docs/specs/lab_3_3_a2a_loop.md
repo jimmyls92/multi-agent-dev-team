@@ -557,9 +557,16 @@ Task status: todo | map | in progress | review | done
   (AC-3.2-4, AC-3.2-5, AC-3.2-6, AC-3.2-19, AC-3.2-21) and marks them
   changed by DEC-174 in `lab_3_2_qa_agent.md`.
 
-### T4 — Self-evaluation: rubric, diagnosis and ranking · todo
+### T4 — Self-evaluation: rubric, diagnosis and ranking · done
 
-- **Covers:** AC-3.3-12 .. AC-3.3-16
+- **Covers:** AC-3.3-12 .. AC-3.3-15; AC-3.3-16 for the evaluation (two
+  calls, None and the WARNING); that v0 is then sent unchanged is checked
+  in T6, once the `reflect` node exists
+- **Review notes:** code in `agents/coder_reflection.py` (DEC-192); an item
+  may hold several bugs (DEC-193). A live probe on a planted `reverse` bug
+  found it as High, but the small model reported it under two items; the
+  prompt asks to report each defect once, and the ranking is unaffected
+  as long as both versions are judged the same way.
 
 ### T5 — Context of each Coder pass and task history · todo
 
