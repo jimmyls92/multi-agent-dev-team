@@ -310,3 +310,21 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   Lab 3.3 split `Issue` and `QAReport` into `orchestration/qa_report.py`
   to break an import cycle with the A2A messages (DEC-188); the user
   raised `models.py` again then.
+
+### IMP-021 All prompts in one `prompts.yaml`
+- Status: idea
+- Area: Project layout (Lab 3.3)
+- Why: prompt texts are spread over the agents (`CODER_SYSTEM_PROMPT`,
+  `PLAN_SYSTEM_PROMPT`, `EVALUATION_SYSTEM_PROMPT`, the PM's and the QA's
+  prompts, `PENDING_NOTE`, section headings). One file would let us tune
+  wording in one place without touching code.
+- Rubric: C1.3/C4.6 (outputs are still validated; the prompts only change
+  wording), C4.8 (the file must ship in the Docker image), C5.3 (layout).
+  Risk: a missing or renamed key breaks an agent at run time.
+- Notes: only fixed texts move, as templates with named placeholders
+  (e.g. `{python_environment}`, `{kind_help}`); how each pass prompt is
+  assembled (DEC-187, DEC-195) stays in code. Load and check every key
+  once at import, failing fast with the key's name, and test that each
+  template formats. Keep the `DEC-NNN` anchors as YAML comments next to
+  each prompt. Needs `pyyaml` pinned in `requirements.txt`. Own commit;
+  the whole suite must stay green.
