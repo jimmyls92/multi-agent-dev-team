@@ -86,6 +86,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 - `config.yaml` es la configuración del IDE (Continue) y no forma parte del sistema. Nunca debe contener una API key real.
 - Remoto: `origin` = https://github.com/jimmyls92/multi-agent-dev-team (público). Se trabaja en la rama de la semana (`week-1`, ...); `master` es la rama por defecto y se adelanta con fast-forward (`git fetch . week-1:master`) a lo que esté listo.
 - Entorno: `.venv` con Python 3.11 vía `uv` y `.env` con la key real (DEC-032); instalar con `UV_LINK_MODE=copy uv pip install -r requirements.txt`. Setup en el README.
+- En esta máquina (WSL), `.venv` es un enlace a `~/.venvs/multi-agent-dev-team` (disco de Linux; excluido en `.git/info/exclude`). Para ejecutar, usar la ruta directa `~/.venvs/multi-agent-dev-team/bin/python`: por `/mnt/c` cada import es lento (suite completa ~1 min frente a ~3–4,5 min). Suite completa siempre con `-rfE` y sin recortar el resumen.
 - El material de los labs (`lab_1_3_src/`, `lab-2-1/`, `Multi-agents-lab-2-2/`) es solo referencia local y **nunca se commitea**.
 
 ## Estado actual
@@ -106,6 +107,7 @@ Tests aplazados por decisión del usuario (como tarde en C4.7; proponer y aproba
 - **Coder** (modelo falso): (a) **prioritario**, un modelo que solo da texto para en 10 con `max_iterations` (fija el orden de DEC-079); (b) uno que llama a tools sin terminar para en 10; (c) argumentos inválidos no ejecutan la tool (DEC-076); (d) `CoderResult` desde mensajes inventados (DEC-078).
 
 Otros:
+- **Módulo 4 (C4.8):** fijar las versiones de `requirements.txt` (ahora sin fijar; una instalación desde cero trae versiones no probadas, p. ej. langchain 1.5.2 frente a la 1.4.9 probada).
 - README del Lab 3.1 (T4 de `docs/specs/lab_3_1_mcp_server.md`): aplazado por decisión del usuario hasta justo antes de la entrega del Módulo 3.
 - Mejoras de memoria IMP-001..IMP-005 en `idea`. "Jev" (IMP-003, IMP-004): modelo que el usuario explicará más adelante.
 - Pregunta abierta: ¿marcar en las fichas `DEC-` cuándo el motivo lo propuso Claude?
