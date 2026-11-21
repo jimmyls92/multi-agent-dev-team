@@ -568,11 +568,16 @@ Task status: todo | map | in progress | review | done
   prompt asks to report each defect once, and the ranking is unaffected
   as long as both versions are judged the same way.
 
-### T5 — Context of each Coder pass and task history · todo
+### T5 — Context of each Coder pass and task history · done
 
 - **Covers:** AC-3.3-17 .. AC-3.3-20
 - `TaskState.history` and its record model; prompt builders for the three
   kinds of pass.
+- **Review notes:** the builders live in `agents/coder_agent.py`, in a
+  "Pass prompts" section (DEC-194); prompts put the file contents last
+  (DEC-195); planned files outside the workspace are never read (DEC-036).
+  The Coder node already uses `first_pass_prompt`, so every task now gets
+  its planned files' contents. Tests in `tests/test_coder_passes.py`.
 
 ### T6 — `reflect` node: improvement, best version and restore · todo
 

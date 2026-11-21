@@ -8,6 +8,8 @@ runs before the loop (DEC-071). run_agent() runs one task and returns a
 CoderResult; chat() wraps it for one session message; main() is the command
 line (interactive session or a single task). make_coder_node() wraps it as a
 LangGraph node that runs the next pending task of the shared state (Lab 2.2).
+In the Coder-QA loop each pass gets its own prompt: first_pass_prompt(),
+improvement_prompt() or correction_prompt() (Lab 3.3, DEC-187).
 
 Attributes:
     MODEL: OpenRouter model id, from the LLM_MODEL environment variable.
@@ -19,11 +21,12 @@ Attributes:
     PLAN_SYSTEM_PROMPT: System prompt of the planning step.
     NUDGE_MESSAGE: Error sent back when the model answers without a tool.
     MAX_ITERATIONS_MESSAGE: Reply of chat() when a task hits the limit.
+    PENDING_NOTE: How a pass prompt asks for the pending bugs (DEC-187).
 """
 
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -50,11 +53,22 @@ from langchain_core.messages import (
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+import tools.file_io
 import tools.handlers
+from agents.coder_reflection import Bug, SelfEvaluationBase
 from agents.llm_helpers import PYTHON_ENVIRONMENT
 from llm_client import get_chat_model
 from memory import SlidingWindowBuffer, build_context, store_memory, store_outcome
-from orchestration.state import CoderResult, ProjectSpec, ProjectState, StepRecord, TaskState
+from orchestration.state import (
+    CoderResult,
+    Issue,
+    ProjectSpec,
+    ProjectState,
+    QAReport,
+    ReviewRecord,
+    StepRecord,
+    TaskState,
+)
 from tools import ExecutionResult
 from tools.agent_tools import AGENT_TOOLS, check_tool_call
 from tools.handlers import resolve_in_workspace
@@ -635,31 +649,267 @@ def _next_pending(tasks: list[TaskState]) -> TaskState | None:
     return min(pending, key=lambda task: task.priority, default=None)
 
 
-def _task_prompt(task: TaskState, spec: ProjectSpec | None, existing_files: list[str]) -> str:
-    """Returns the task text the Coder receives for one task (DEC-098, DEC-105).
+# --- Pass prompts (Lab 3.3, DEC-187, DEC-194, DEC-195) -----------------------
+#
+# Every pass prompt has the same order (DEC-195): project and task, what to
+# fix, what is pending, the Background history and the file contents last,
+# so memory recall matches on the task and not on code.
+
+PENDING_NOTE = "Fix these only if trivial and safe; never at the cost of the items to fix."
+
+
+def _ordinal(n: int) -> str:
+    """Returns an English ordinal, e.g. ``2nd``, ``3rd``, ``11th``.
+
+    Args:
+        n: A positive integer.
+
+    Returns:
+        The number with its suffix.
+    """
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _task_header(task: TaskState, spec: ProjectSpec | None, written: list[str]) -> str:
+    """Returns the project, the task, its criteria and its files (DEC-098, DEC-105).
 
     Args:
         task: The task to run.
         spec: The PM's spec; its name and description give the project
             context. None leaves the context out.
-        existing_files: Files already written in this run (keys of
-            ``state.code``).
+        written: Files already written in this run (keys of ``state.code``).
 
     Returns:
-        The task, its Given/When/Then criteria, its planned files and the
-        files that already exist, as plain text.
+        The header every pass prompt starts with; criteria are numbered
+        C0, C1... as in the self-evaluation.
     """
     lines = []
     if spec is not None:
         lines += [f"Project: {spec.name} — {spec.description}", ""]
     lines += [f"Task {task.task_id}: {task.title}", task.description, "", "Acceptance criteria:"]
-    lines += [f"- Given {c.given}, when {c.when}, then {c.then}" for c in task.acceptance_criteria]
+    lines += [
+        f"- C{k}: Given {c.given}, when {c.when}, then {c.then}"
+        for k, c in enumerate(task.acceptance_criteria)
+    ]
     lines += [
         "",
         f"Planned files: {', '.join(task.files)}",
-        f"Files already written in this run: {', '.join(existing_files) or 'none'}",
+        f"Files already written in this run: {', '.join(written) or 'none'}",
     ]
     return "\n".join(lines)
+
+
+def _current_files(task: TaskState) -> str:
+    """Returns the section with the current contents of the task's planned files (DEC-187).
+
+    Only files inside the workspace are read (DEC-036); each is capped like
+    the read tool, with its truncation mark (DEC-041).
+
+    Args:
+        task: The task whose planned files are read.
+
+    Returns:
+        A ``## Current files`` section: the content of each planned file
+        that exists, and the others listed as not written yet.
+    """
+    parts = ["## Current files"]
+    for name in task.files:
+        path = _resolved(name)
+        if path is None or not Path(path).is_file():
+            parts.append(f"{name}: not written yet.")
+            continue
+        parts.append(f"### {name}\n```python\n{tools.file_io.read_file(path)}\n```")
+    return "\n\n".join(parts)
+
+
+def _render_bugs(bugs: list[Bug]) -> str:
+    """Returns bugs as a numbered list with their diagnosis (DEC-183).
+
+    Args:
+        bugs: The bugs to list.
+
+    Returns:
+        One entry per bug: severity, kind, location, evidence, cause, fix.
+    """
+    return "\n".join(
+        f"{k}. [{bug.severity} {bug.kind}] {bug.location}\n"
+        f"   Evidence: {bug.evidence}\n   Cause: {bug.cause}\n   Fix: {bug.fix}"
+        for k, bug in enumerate(bugs, start=1)
+    )
+
+
+def _test_name(issue: Issue) -> str:
+    """Returns the test name of a ``test`` issue, e.g. ``test_reverse_single``.
+
+    Args:
+        issue: An issue of the QA report.
+
+    Returns:
+        The part of the location after ``::``, or the whole location.
+    """
+    return issue.location.split("::")[-1]
+
+
+def render_history(history: list[ReviewRecord], failing_now: list[str]) -> str:
+    """Returns the Background section with the task's earlier reviews (DEC-184).
+
+    Args:
+        history: The task's review records, oldest first.
+        failing_now: Tests failing in the review being answered; one that
+            also failed before is marked with how many times it has failed.
+
+    Returns:
+        A ``## Background`` section, or an empty string without history.
+    """
+    if not history:
+        return ""
+    lines = ["## Background", "Earlier reviews of this task, oldest first. Do not repeat an "
+             "approach that already failed."]
+    for record in history:
+        if record.high is None:
+            evaluation = "self-review unavailable"
+        else:
+            evaluation = f"self-review {record.high} High, {record.medium} Medium, {record.low} Low"
+        failed = "; ".join(
+            f"{test.name} ({test.criterion})" if test.criterion else test.name
+            for test in record.failed_tests
+        )
+        lines.append(
+            f"- Review {record.review}: sent version v{record.version} "
+            f"(\"{record.explanation or 'no explanation'}\"); {evaluation}; QA "
+            f"{record.tests_passed} passed, {record.tests_failed} failed"
+            + (f" — failed: {failed}" if failed else "")
+        )
+    for name in failing_now:
+        times = 1 + sum(name == test.name for record in history for test in record.failed_tests)
+        if times > 1:
+            lines.append(f"- {name} fails for the {_ordinal(times)} time.")
+    return "\n".join(lines)
+
+
+def _prompt(task: TaskState, spec: ProjectSpec | None, written: list[str], *sections: str) -> str:
+    """Returns a pass prompt with its sections in the fixed order (DEC-195).
+
+    Args:
+        task: The task to run.
+        spec: The PM's spec, or None.
+        written: Files already written in this run.
+        *sections: The pass's sections, in order; empty ones are skipped.
+
+    Returns:
+        Header, the sections and the current files.
+    """
+    parts = [_task_header(task, spec, written), *sections, _current_files(task)]
+    return "\n\n".join(part for part in parts if part)
+
+
+def first_pass_prompt(task: TaskState, spec: ProjectSpec | None, written: list[str]) -> str:
+    """Returns the prompt of the task's first pass (DEC-187).
+
+    Args:
+        task: The task to run.
+        spec: The PM's spec; None leaves the project context out.
+        written: Files already written in this run (keys of ``state.code``).
+
+    Returns:
+        The task, its criteria and the current planned files; no history.
+    """
+    return _prompt(task, spec, written)
+
+
+def improvement_prompt(
+    task: TaskState,
+    spec: ProjectSpec | None,
+    written: list[str],
+    evaluation: SelfEvaluationBase,
+    regressions: Sequence[Bug] = (),
+    discarded_explanation: str = "",
+) -> str:
+    """Returns the prompt of an improvement pass after the self-evaluation (C3.4, DEC-187).
+
+    Args:
+        task: The task to run; its history goes in the Background section.
+        spec: The PM's spec, or None.
+        written: Files already written in this run.
+        evaluation: The self-evaluation of the version to improve.
+        regressions: Bugs a discarded attempt added (DEC-172).
+        discarded_explanation: The ``explanation`` of that attempt.
+
+    Returns:
+        The High and Medium bugs and the regressions to fix, then the Low
+        bugs as pending, the history and the current files.
+    """
+    bugs = evaluation.bugs()
+    to_fix = [
+        "## To fix",
+        "Your self-review of the current version found these bugs. Fix each with the "
+        "smallest change that keeps every acceptance criterion met.",
+        _render_bugs([bug for bug in bugs if bug.severity != "Low"]),
+    ]
+    if regressions:
+        to_fix += [
+            "Your last attempt was discarded because it was worse; the files below are the "
+            f"better version. That attempt said: \"{discarded_explanation or 'no explanation'}\". "
+            "It introduced these regressions; do not repeat them:",
+            _render_bugs(list(regressions)),
+        ]
+    low = [bug for bug in bugs if bug.severity == "Low"]
+    pending = ["## Pending", PENDING_NOTE, _render_bugs(low)] if low else []
+    return _prompt(
+        task, spec, written, "\n".join(to_fix), "\n".join(pending), render_history(task.history, [])
+    )
+
+
+def correction_prompt(
+    task: TaskState,
+    spec: ProjectSpec | None,
+    written: list[str],
+    report: QAReport,
+    pending: list[Bug],
+) -> str:
+    """Returns the prompt of a correction pass after a ``fix_instruction`` (C3.2, DEC-187).
+
+    Args:
+        task: The task to run; its history goes in the Background section.
+        spec: The PM's spec, or None.
+        written: Files already written in this run.
+        report: The QA's report of the last review.
+        pending: Medium and Low bugs left by the last self-evaluation.
+
+    Returns:
+        The failed tests to fix, then the pending bugs, the history and the
+        current files.
+    """
+    entries = []
+    for k, issue in enumerate(report.issues, start=1):
+        if issue.source == "test":
+            entry = f"{k}. {_test_name(issue)} ({issue.location})"
+            if issue.criterion:
+                entry += f"\n   Criterion: {issue.criterion}"
+        else:
+            entry = f"{k}. {issue.location}"
+        entry += f"\n   Error: {issue.description}\n   Fix: {issue.fix}"
+        if issue.test_code:
+            entry += f"\n   Test source:\n```python\n{issue.test_code.rstrip()}\n```"
+        entries.append(entry)
+    to_fix = [
+        "## To fix",
+        f"The QA ran its tests on your last version: {report.tests_passed} passed, "
+        f"{report.tests_failed} failed. Make the failing tests pass without breaking the others.",
+        *entries,
+    ]
+    pending_part = ["## Pending", PENDING_NOTE, _render_bugs(list(pending))] if pending else []
+    failing_now = [_test_name(issue) for issue in report.issues if issue.source == "test"]
+    return _prompt(
+        task,
+        spec,
+        written,
+        "\n".join(to_fix),
+        "\n".join(pending_part),
+        render_history(task.history, failing_now),
+    )
 
 
 def _written_files(result: CoderResult) -> dict[str, str]:
@@ -745,7 +995,7 @@ def make_coder_node(
 
         started = f"Coder Agent: starting {task.task_id} — {task.title}."
         try:
-            prompt = _task_prompt(task, state.spec, list(state.code))
+            prompt = first_pass_prompt(task, state.spec, list(state.code))
             result = run_agent(prompt, runtime.context.window, model)
         except Exception as exc:  # DEC-102: the node never raises out of the graph
             error = f"{type(exc).__name__}: {exc}"

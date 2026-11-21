@@ -3816,7 +3816,7 @@ A decision can mix bases; then each part states its own.
   final report (DEC-181).
 - Alternatives: rely on the window and Chroma only (loses early reviews,
   no order); pass the previous ReACT traces (many tokens, mostly noise).
-- Code: —
+- Code: `orchestration/state.py` (`ReviewRecord`, `FailedTest`, `TaskState.history`), `agents/coder_agent.py` (`render_history`)
 
 ### DEC-185 The sliding window keeps whole passes during the loop
 - Date: 2026-11-20 · Area: Coder memory (Lab 3.3) · Status: accepted
@@ -3887,7 +3887,7 @@ A decision can mix bases; then each part states its own.
 - Alternatives: file contents only from the second pass on (the Coder
   reads by hand what an earlier task wrote); no test source (the Coder
   guesses the expected behaviour from the assertion message).
-- Code: —
+- Code: `agents/coder_agent.py` (`first_pass_prompt`, `improvement_prompt`, `correction_prompt`)
 
 ### DEC-188 The QA report models live in their own module
 - Date: 2026-11-20 · Area: A2A (Lab 3.3) · Status: accepted
@@ -4017,3 +4017,45 @@ A decision can mix bases; then each part states its own.
   lost); a separate list of diagnoses matched to items by name (two
   structures to keep consistent).
 - Code: `agents/coder_reflection.py`
+
+### DEC-194 The pass prompts live in the Coder module; the history keeps plain counts
+- Date: 2026-11-21 · Area: Coder-QA loop (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: the three kinds of Coder pass (DEC-187) need prompt builders,
+  and the review history (DEC-184) needs the self-evaluation's bug counts.
+  The state (`orchestration/`) does not import from `agents/` (DEC-188),
+  and `BugCounts` lives in `agents/coder_reflection.py`.
+- Decision: the prompt builders of the first, improvement and correction
+  passes and the rendering of the history live in `agents/coder_agent.py`,
+  in their own section ("Pass prompts") separate from the agent itself.
+  `ReviewRecord` stores the bug counts as plain `high`, `medium` and `low`
+  integers, all None when the self-evaluation was unavailable (DEC-171).
+- Why: the user prefers one script for the Coder; the builders are plain
+  functions, tested the same way wherever they live. Plain counts keep
+  the state free of agent imports and JSON-serializable.
+- Alternatives: a separate `agents/coder_passes.py` module (smaller files,
+  one more module); `BugCounts` in the state (the state would depend on
+  the agents, or the type would move away from the ranking that uses it).
+- Revisit when: IMP-008 (shared `models.py`) is done; the counts can then
+  share one type.
+- Code: `agents/coder_agent.py` ("Pass prompts" section), `orchestration/state.py` (`ReviewRecord`)
+
+### DEC-195 Pass prompts put the task first and the file contents last
+- Date: 2026-11-21 · Area: Coder memory (Lab 3.3) · Status: accepted
+- Basis: Preferred
+- Context: each pass's prompt is also the Chroma query and the text stored
+  in Chroma (DEC-019, DEC-186). With DEC-187 it holds file contents of up
+  to `READ_MAX_CHARS` each, and Chroma's default embedding model only uses
+  the start of a text (about 256 tokens).
+- Decision: every pass prompt has a fixed order: project and task,
+  acceptance criteria, what to fix, what is pending, the Background
+  history, and the file contents last. The whole prompt is still stored
+  in Chroma.
+- Why: recall keeps matching on the task and not on code, and the Coder
+  reads what to fix before the long file contents.
+- Alternatives: a separate short memory query (a second text to keep in
+  step with the prompt, and a change to the Module 1 memory flow); store
+  only the task header (changes DEC-019 and the C1.2 evidence).
+- Revisit when: Module 4 (C4.4) shows Chroma documents or prompt tokens
+  are too large; see IMP-020.
+- Code: `agents/coder_agent.py` (`_prompt`)

@@ -23,11 +23,13 @@ from orchestration.qa_report import Issue, NonEmptyStr, QAReport, Severity
 
 __all__ = [
     "CoderResult",
+    "FailedTest",
     "Issue",
     "NonEmptyStr",
     "ProjectSpec",
     "ProjectState",
     "QAReport",
+    "ReviewRecord",
     "Severity",
     "SpecCriterion",
     "StepRecord",
@@ -164,6 +166,44 @@ class CoderResult(BaseModel):
     steps: list[StepRecord] = Field(default_factory=list)
 
 
+class FailedTest(BaseModel):
+    """A test of the QA that failed in one review (DEC-184).
+
+    Attributes:
+        name: The test's name, e.g. ``test_reverse_single``.
+        criterion: The acceptance criterion the test checks; empty if
+            unknown.
+    """
+    name: NonEmptyStr
+    criterion: str = ""
+
+
+class ReviewRecord(BaseModel):
+    """What happened in one QA review of a task (DEC-184, DEC-194).
+
+    Attributes:
+        review: Review number n, starting at 1.
+        explanation: The ``explanation`` of the version sent to the QA.
+        high: High bugs of the sent version by the self-evaluation; None
+            when the evaluation was unavailable (DEC-171).
+        medium: Medium bugs, as ``high``.
+        low: Low bugs, as ``high``.
+        version: Index of the version sent, 0 for the pass before any
+            improvement (DEC-172).
+        tests_passed: Tests of the QA that passed.
+        tests_failed: Tests of the QA that failed.
+        failed_tests: Each failed test with its criterion.
+    """
+    review: int = Field(ge=1)
+    explanation: str = ""
+    high: int | None = Field(default=None, ge=0)
+    medium: int | None = Field(default=None, ge=0)
+    low: int | None = Field(default=None, ge=0)
+    version: int = Field(default=0, ge=0)
+    tests_passed: int = Field(default=0, ge=0)
+    tests_failed: int = Field(default=0, ge=0)
+    failed_tests: list[FailedTest] = Field(default_factory=list)
+
 
 class TaskState(TaskSpec):
     """A task plus its execution status and result, updated by the Coder (C2.2).
@@ -172,9 +212,12 @@ class TaskState(TaskSpec):
         status: Where the task stands in the execution.
         result: The Coder's output for the task; None until the Coder runs
             it, or after a fatal error (DEC-102, DEC-107).
+        history: One record per QA review of the task, oldest first
+            (DEC-184).
     """
     status: TaskStatus = "pending"
     result: CoderResult | None = None
+    history: list[ReviewRecord] = Field(default_factory=list)
 
 
 class ProjectState(BaseModel):
