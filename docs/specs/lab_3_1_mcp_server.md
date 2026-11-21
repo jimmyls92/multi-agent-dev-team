@@ -1,6 +1,6 @@
 # Spec: Lab 3.1 — MCP file server
 
-- **Status:** done (T4, the README, deferred to the Module 3 delivery)
+- **Status:** done
 - **Sources:** lab handout `docs/labs/lab_3_1_mcp_server.md`, project guide
   (Module 3, `docs/course_reference.txt`, instruction 18), rubric C3.5,
   C1.3, C4.6, C4.7
@@ -288,11 +288,10 @@ so no earlier criterion regresses.
 - **Map:** to approve before writing code. `tools/mcp_client.py` with the
   lab's three functions, `connect_and_run` and the `__main__` demo.
 
-### T4 — README · todo (deferred)
+### T4 — README · done
 
-- **Deferred:** written just before the Module 3 delivery, together with
-  the rest of the module's documentation; it does not block closing the
-  spec.
+- **Done:** written at the Module 3 delivery, together with the rest of
+  the module's documentation (README, "MCP file server").
 - **Covers:** documentation of what Lab 3.1 adds — `manual`
 - **Map:** to approve before writing. MCP server section: what it exposes,
   safety rules, how to run the demo and the tests, where the server log

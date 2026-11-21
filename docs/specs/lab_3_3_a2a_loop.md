@@ -1,6 +1,6 @@
 # Spec: Lab 3.3 — A2A Coder↔QA review loop
 
-- **Status:** approved
+- **Status:** done (independent review not run, see below)
 - **Sources:** lab handout `docs/labs/lab_3_3_a2a_loop.md`, project guide
   (Module 3, `docs/course_reference.txt`, instructions 16-20 and the
   linked-list demo task), rubric C3.2-C3.6; regressions of C1.2, C1.4,
@@ -636,10 +636,13 @@ Task status: todo | map | in progress | review | done
   check's output, since the Coder may leave debug prints (IMP-022).
 
 README (three-agent diagram, A2A justification, how to tell success from
-unresolved, the memory exception of DEC-173): at the Module 3 delivery,
-with Lab 3.1's T4.
+unresolved, the memory exception of DEC-173): written at the Module 3
+delivery, with Lab 3.1's T4.
 
 ## Independent review
 
-- **Date:**
-- **Findings and triage:**
+- **Date:** 2026-11-21
+- **Not run:** the reviewer agent failed for lack of API credits
+  (HTTP 402); by the user's decision the spec is closed without it, so
+  there is no R1 task.
+- **Findings and triage:** none.

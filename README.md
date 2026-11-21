@@ -5,28 +5,35 @@ Institute): an autonomous software team of LLM agents that takes a natural
 language requirement and produces tested, working Python code, with no human
 intervention after the first prompt.
 
-The project is built one module at a time. **Current state: Module 2 —
-Multi-Agent System v2.0**: a PM Agent turns the requirement into a spec and
-at most 8 tasks, and the Coder Agent (Module 1: two-tier memory, validated
-tools, ReACT loop, structured output) implements them in order, both in one
-LangGraph graph over a typed shared state. The QA agent
-(`agents/qa_agent.py`), Docker and observability arrive in Modules 3-4.
+The project is built one module at a time. **Current state: Module 3 —
+Agent Team v3.0**: a PM Agent turns the requirement into a spec and at most
+8 tasks; for each task the Coder Agent (Module 1: two-tier memory, validated
+tools, ReACT loop, structured output) writes the code, evaluates its own
+version and improves it, and sends it to a QA & Debugger Agent that writes
+and runs pytest tests and answers over **A2A** messages: approved, or a fix
+instruction that sends the task back to the Coder, at most
+`QA_MAX_ITERATIONS` times. Everything runs in one LangGraph graph over a
+typed shared state. Docker and observability arrive in Module 4.
 
 ## Framework
 
 **[LangGraph](https://langchain-ai.github.io/langgraph/)**, for every agent and
-for the orchestration (DEC-068); unchanged in Module 2. The Coder's ReACT loop is LangChain's
-`create_agent`, which builds a LangGraph graph, with native tool calling and
-our own middleware (DEC-069). The PM's two structured calls also use
-`create_agent`, with `ToolStrategy` to get Pydantic-validated outputs
-(DEC-091), and the team graph is a LangGraph `StateGraph` (DEC-094).
+for the orchestration (DEC-068); unchanged in Modules 2 and 3. The Coder's
+ReACT loop is LangChain's `create_agent`, which builds a LangGraph graph,
+with native tool calling and our own middleware (DEC-069). The PM's
+structured calls, the Coder's self-evaluation and the QA's test drafts use
+Pydantic-validated outputs (`create_agent` with `ToolStrategy` or
+`with_structured_output`, DEC-091). The team graph is a LangGraph
+`StateGraph` (DEC-094) whose nodes are `pm`, `coder`, `reflect`, `qa` and
+`out_of_time`.
 
 Why LangGraph:
 - **Explicit control flow.** Nodes and conditional edges decide what runs
   next, so the limits the assessor forces (10 ReACT iterations, the QA→Coder
-  loop limit, task order) are conditions in the graph, not left to the LLM.
-- **Typed shared state** is native, as the PM → Coder → QA handoff needs
-  (Modules 2-3).
+  loop limit, the run's time limit, task order) are conditions in the
+  graph, not left to the LLM.
+- **Typed shared state** is native, as the PM → Coder → QA handoff needs;
+  the A2A messages travel in it too (DEC-175).
 - **The standard agent loop with hooks.** `create_agent` brings the loop, a
   model-call limit and a validated final answer; middleware adds what a
   Coder needs on top: memory injected on every call, tool arguments
@@ -41,10 +48,15 @@ Why LangGraph:
 **LLM:** any model with tool calling through [OpenRouter](https://openrouter.ai),
 used with LangChain's `ChatOpenAI` because OpenRouter speaks the OpenAI API
 for every model (DEC-075); an equivalent of the GPT-4o / Claude Sonnet options
-in the course guide. The Coder uses a small, fast model,
-`openai/gpt-4.1-mini` (`LLM_MODEL`); the PM, which makes only 2-4 calls per
-run but plans the whole project, uses a larger one, `openai/gpt-4.1`
-(`PM_MODEL`) (DEC-086, DEC-093).
+in the course guide. Each LLM call has its own timeout, `LLM_TIMEOUT`
+(DEC-166). Models per role:
+
+| Role | Variable | Default | Why |
+|---|---|---|---|
+| Coder (ReACT passes) | `LLM_MODEL` | `openai/gpt-4.1-mini` | Many calls per task: small and fast (DEC-086) |
+| QA (test drafts, fixes) | `QA_MODEL` | `openai/gpt-4.1-mini` | Small and fast; executed tests decide, not the model (DEC-150) |
+| PM | `PM_MODEL` | `openai/gpt-4.1` | 2-4 calls per run that plan the whole project (DEC-093) |
+| Coder's self-evaluation | `EVALUATION_MODEL` | `openai/gpt-4.1` | 1-2 calls per review; the small model was not reliable at judging code (DEC-200) |
 
 ## Setup
 
@@ -58,51 +70,76 @@ cp .env.example .env    # then set OPENROUTER_API_KEY
 ```
 
 Credentials only come from environment variables (`.env`, never committed).
-Every setting in `.env.example` is documented there: Coder and PM models, log
-level, window size, memories per call, Chroma location, script timeout (10 s by default,
-30 s maximum) and the Coder's workspace directory.
+Every setting in `.env.example` is documented there: the models and the LLM
+timeout, log level, memory (window size, memories per call, Chroma
+location), tools (script timeout, 10 s by default and 30 s maximum, read
+limit, the Coder's workspace), the MCP client's timeout, the QA (its
+folder, model, attempts and per-test timeout) and the Coder-QA loop
+(`QA_MAX_ITERATIONS`, `RUN_TIMEOUT`, `REFLECTION_MAX_ROUNDS`). The loop
+settings are read and validated when each run starts (DEC-180).
 
 ## Running the team
 
 ```bash
-python main.py                  # the graded demo task: a Flask API with /health and /echo
-python main.py "Build a CLI tool that counts word frequency in a file"
-python main.py --json           # the whole final ProjectState as JSON
+python main.py                  # the graded Module 2 demo task: a Flask API with /health and /echo
+python main.py "Implement a Python module that contains a linked list class with insert, delete, search, and reverse methods. All methods must be covered by tests."
+python main.py --json           # the whole final ProjectState as JSON, outcome included
+QA_MAX_ITERATIONS=2 RUN_TIMEOUT=600 python main.py   # tighter loop limits for one run
 ```
 
 Each run goes from the requirement to the code with no human input
 (DEC-096). Before it starts, everything an earlier run left in `workspace_coder/`
-is **moved, never deleted**, to `workspace_history/<timestamp>/`, so each
+is **moved, never deleted**, to `workspace_coder_history/<timestamp>/`, so each
 run starts with an empty workspace (DEC-114). The output lists:
 
 - `[PROGRESS]`: one note per step, in order: the PM's spec and tasks
-  ("handoff ready"), then "starting task_N" and "task_N done/failed" for each
-  task. With the default `LOG_LEVEL=INFO`, each note is also logged live to
-  the console as soon as its step ends (DEC-120).
+  ("handoff ready"), then for each task the Coder's pass, the version
+  `reflect` sends ("Reflect: task_1 sends v1 for review 1") and the QA's
+  verdict ("QA: task_1 done — approved at review 1", or "review 2 of 5 not
+  approved; back to the Coder"). With the default `LOG_LEVEL=INFO`, each
+  note is also logged live as soon as its step ends (DEC-120), together
+  with one line per A2A message.
 - `[SPEC]`, `[ACCEPTANCE CRITERIA]` and `[TASKS]`: the PM's spec and each
   task with its priority, status, files, the spec criteria it covers, the
   tasks it was merged from (when more than 8 were consolidated), its
   Given/When/Then criteria and a `result:` line (main file, iterations,
   first line of the last run's output).
 - `[WORKSPACE]`: the folder and the files the run wrote.
-- `ERROR:` if the run ended with an error.
-- The **verdict**, always the last line (DEC-111).
+- `[FINAL REPORT]` when a task was not approved, or `ERROR:` if the run
+  ended with an error.
+- The **verdict**, always the last line (DEC-181).
 
 ### Success or unresolved issues
 
-A run succeeds **only** when there is no error and every task is `done`
-(the Coder's result for that task was `success`: its code ran without error).
-The last line and the exit code say which:
+A run succeeds **only** when there is no error and **the QA approved every
+task** (`ProjectState.outcome == "success"`, DEC-165). A task is `done` only
+when the QA's executed tests all passed; the Coder alone never closes a task
+(DEC-178). The last line and the exit code say which:
 
 | Last line | Exit code | Meaning |
 |---|---|---|
-| `RESULT: success` | 0 | Every task done. |
-| `RESULT: incomplete — task_2 failed` | 1 | The run finished, but the listed tasks failed (the remaining tasks still ran, DEC-097); or `no tasks were planned`. |
+| `RESULT: success` | 0 | The QA approved every task. |
+| `RESULT: unresolved — task_2 not approved` | 1 | The run finished, but the listed tasks were not approved; `[FINAL REPORT]` above it says why. Also `no tasks were planned`. |
 | `RESULT: error — <message>` | 1 | The run stopped: the PM failed, the workspace could not be archived, the Coder hit a fatal error or the step limit was reached. |
 | (usage message) | 2 | Invalid usage, e.g. an empty requirement. |
 
-With `--json` only the state is printed; the exit code still gives the
-verdict, and the state's `error` and each task's `status` give the details.
+An unresolved run **never** says success. Its final report has one block
+per task that is not approved: why it closed, the review it stopped at and
+its blocking issues from the QA's last report (DEC-181):
+
+```
+[FINAL REPORT] tasks not approved
+- task_2 — review limit reached; stopped at review 5
+    [High] test_task_2.py::test_reverse_single: reverse() on a one-node list raised AttributeError
+```
+
+The reasons are `review limit reached` (review `QA_MAX_ITERATIONS` not
+approved), `the QA could not review it` (the QA failed twice, DEC-169),
+`A2A protocol error` (DEC-170), `out of time` (`RUN_TIMEOUT` spent,
+DEC-168) and `not run` (a task the run never reached). The remaining tasks
+still run after a task fails (DEC-164). With `--json` only the state is
+printed; the exit code still gives the verdict, and `outcome`, each task's
+`status`, `closed_reason` and `qa_report` give the details.
 
 ### Trying the generated API
 
@@ -118,64 +155,236 @@ curl http://127.0.0.1:5000/health
 curl -X POST -H "Content-Type: application/json" -d '{"a": 1}' http://127.0.0.1:5000/echo
 ```
 
-## How the team works (Module 2)
+## How the team works (Module 3)
 
 ```mermaid
 flowchart TD
     START([START]) --> PM["pm<br/>PM Agent"]
-    PM -->|"tasks and no error"| CODER["coder<br/>Coder Agent: next pending task"]
+    PM -->|"tasks and no error"| CODER["coder<br/>Coder Agent: one ReACT pass<br/>(task sent back, else next pending)"]
     PM -->|"error or no tasks"| END([END])
-    CODER -->|"a task is pending and no error"| CODER
-    CODER -->|"no task pending, or error"| END
-    STATE[("ProjectState (Pydantic)<br/>requirement · spec · tasks + status + result<br/>code · progress · error")]
-    PM -. "writes spec, tasks, progress" .-> STATE
-    STATE -. "reads next pending task, spec, code" .-> CODER
-    CODER -. "writes task status and result, code, progress" .-> STATE
+    CODER -->|"pass ended"| REFLECT["reflect<br/>self-evaluation, improvement,<br/>best version"]
+    REFLECT -->|"A2A review_request"| QA["qa<br/>QA Agent: pytest tests"]
+    QA -->|"fix_instruction: same task<br/>approved / unresolved: next task"| CODER
+    QA -->|"no task open"| END
+    CODER & REFLECT & QA -.->|"error"| END
+    PM & CODER & REFLECT & QA -->|"RUN_TIMEOUT spent"| OOT["out_of_time<br/>open tasks failed"]
+    OOT --> END
+    STATE[("ProjectState (Pydantic)<br/>requirement · spec · tasks + status, result,<br/>history, reviews, qa_report · code ·<br/>messages (A2A) · progress · error · outcome")]
 ```
 
-Solid arrows are the graph's edges (`orchestration/graph.py`); dotted arrows
-are reads and writes of the shared state (`orchestration/state.py`). Both
-agents are nodes of the **same graph**; nothing is copied by hand between
-them.
+Every node reads and writes the shared state (`orchestration/state.py`);
+nothing is copied by hand between agents. The edges are in
+`orchestration/graph.py`.
 
-1. **`run()`** archives the workspace, creates the state with the
-   `requirement` and streams the graph with a step limit of 11 (the PM, one
-   step per task and a margin) that ends a runaway loop with the state kept
-   (DEC-114, DEC-115).
+1. **`run()`** archives the workspace, reads the loop settings, sets the
+   run's deadline (`RUN_TIMEOUT`, monotonic clock) and streams the graph
+   with a step limit of `1 + 8 × QA_MAX_ITERATIONS × 3 + 3` (124 by
+   default), a guard against routing bugs that keeps the state (DEC-114,
+   DEC-180, DEC-198).
 2. **`pm`** (`agents/pm_agent.py`) makes two structured calls: the spec
    (name, description, markdown details, acceptance criteria), then the
    tasks, each with an ID, description, Given/When/Then criteria, the spec
-   criteria it covers, files (at least one `.py`: every task changes code
-   that can be run) and priority. Every output is validated with Pydantic
-   and gets one corrective retry (DEC-083, DEC-087, DEC-088, DEC-095,
-   DEC-117). More than 8 tasks are merged deterministically into 8 groups of
-   consecutive tasks, keeping every covered criterion (DEC-082, DEC-092).
-   The PM never raises: a failure is written to `error`.
+   criteria it covers, files (at least one `.py`) and priority. Every
+   output is validated with Pydantic and gets one corrective retry
+   (DEC-083, DEC-087, DEC-088, DEC-095, DEC-117). More than 8 tasks are
+   merged deterministically into 8 groups of consecutive tasks, keeping
+   every covered criterion (DEC-082, DEC-092). The PM never raises: a
+   failure is written to `error`.
 3. **Handoff** (`route_after_pm`): the Coder runs only when the PM left no
    error and at least one task. The tasks in the state, with status
    `pending`, are the handoff; they are JSON-serializable (`--json`)
    (DEC-110).
-4. **`coder`** (`agents/coder_agent.py`) runs **one task per step**: the
-   `pending` task with the lowest priority (DEC-085, DEC-103, DEC-119). It turns the
-   task, its criteria, the project context and the files already written
-   into the Coder's prompt and runs the Module 1 ReACT agent (DEC-098,
-   DEC-105). It then sets the task's status (`done` only for a `success`
-   result) and its `CoderResult`, adds the files the task wrote to `code`
-   and appends progress notes (DEC-101, DEC-106, DEC-107). All the tasks of a
-   run share one memory window, passed in the run context (DEC-099,
-   DEC-104).
-5. **`route_after_coder`** loops back while a task is pending and there is no
-   error. A failed task does not stop the next ones; a fatal error does
-   (DEC-097, DEC-102).
+4. **`coder`** (`agents/coder_agent.py`) runs **one ReACT pass** of the
+   Module 1 agent: on the task the QA sent back, else on the `pending` task
+   with the lowest priority (DEC-085, DEC-103, DEC-119). A first pass gets
+   the task, its criteria, the project context and its files; a correction
+   pass also gets the QA's fix instructions with the failing tests' code
+   and the task's review history (DEC-184, DEC-187, DEC-195). The task
+   stays `in_progress`; only the QA closes it (DEC-178).
+5. **`reflect`** (`agents/coder_reflection.py`) is the Coder's
+   **self-reflection before QA**: it evaluates the version, improves it
+   when it finds High or Medium bugs, puts the best version on disk and
+   sends it to the QA in an A2A `review_request` (see below).
+6. **`qa`** (`agents/qa_agent.py`) reviews that version with executed
+   pytest tests and answers over A2A: `approved` (task `done`),
+   `fix_instruction` (back to the Coder for review n + 1) or `unresolved`
+   (review n = `QA_MAX_ITERATIONS` not approved: task `failed` with the
+   QA's report). One review is one iteration of the loop; each task has
+   its own limit, and review `QA_MAX_ITERATIONS + 1` never starts (DEC-163,
+   DEC-176).
+7. **`route_after_qa`** goes back to the Coder while a task is open; a
+   failed task does not stop the next ones (DEC-164). Every router sends
+   the run to **`out_of_time`** once the deadline has passed, which closes
+   the open tasks `failed` ("out of time") and keeps the work done
+   (DEC-168, DEC-198).
 
 | `ProjectState` field | Written by | Read by |
 |---|---|---|
 | `requirement` | `run()` | PM |
 | `spec`: name, description, details, acceptance criteria, tasks as planned | PM | Coder (project context), `main.py` |
-| `tasks`: each `TaskSpec` plus `status` (`pending`/`done`/`failed`) and `result` (`CoderResult`) | PM creates them; the Coder updates status and result | Coder (pending task with the lowest priority), routers, `main.py` |
+| `tasks`: each `TaskSpec` plus `status` (`pending`/`in_progress`/`done`/`failed`), `result` (`CoderResult`), `reflection`, `reviews`, `history`, `qa_report`, `closed_reason` | PM creates them; Coder, `reflect` and QA update them | every node, routers, `main.py` |
 | `code`: file path → content on disk, every file the run wrote | Coder | Coder (files already written), `main.py` |
-| `progress`: notes, appended by each step | `run()`, PM, Coder | `main.py` |
+| `messages`: the A2A messages of the run | `reflect` (`review_request`), QA (answers) | QA, Coder, tests |
+| `progress`: notes, appended by each step | every node | `main.py` |
 | `error`: empty unless the run must stop | `run()`, PM, Coder | routers, `main.py` |
+| `deadline`, `deadline_at`: end of the run's time budget | `run()` | routers |
+| `outcome`: `success` or `unresolved`, computed from the tasks | — | `main.py`, `--json` |
+
+### Coder ↔ QA over A2A (C3.5)
+
+The graded protocol route is **A2A**, used for the Coder ↔ QA review loop
+(DEC-162). Why: the review loop is a dialogue between two agents, which is
+what A2A models; MCP models an agent's access to tools, so through it the
+agents would only talk indirectly through shared files. The loop had to be
+built anyway, so A2A is its envelope, and the Coder's Module 1 tools stay
+untouched. The QA still reads the Coder's files through the Lab 3.1 MCP
+server (below), but that pathway is not the graded route.
+
+Every message is an `A2AMessage` (Pydantic, `orchestration/a2a.py`) with
+**`sender`**, **`receiver`**, **`intent`**, **`payload`** and
+**`correlation_id`**. It validates itself: known agents, `sender ≠
+receiver`, an intent its receiver accepts (the QA accepts only
+`review_request`; the Coder only `fix_instruction`, `approved` and
+`unresolved`) and a payload of the model its intent requires (DEC-176,
+DEC-189). `send` also checks that a reply answers the open request with
+the same `correlation_id`. Messages travel in `ProjectState.messages`, a
+mailbox in the shared state, so the loop stays inside the one graph
+(C2.3) and every message is in `--json` (DEC-175).
+
+| Intent | From → to | Payload |
+|---|---|---|
+| `review_request` | coder → qa | task ID, review number n, limit |
+| `fix_instruction` | qa → coder | the QA report: one issue and fix per failing test |
+| `approved` | qa → coder | the QA report (all tests passed) |
+| `unresolved` | qa → coder | the final report, at the limit or after the QA failed twice |
+
+An invalid message is never acted on: it is logged at ERROR and its task
+closes `failed` with a protocol-error issue (DEC-170). Each message is
+logged when sent, one INFO line:
+
+```
+A2A coder -> qa intent=review_request task=task_2 review=1 correlation_id=e0c26eaf-...
+A2A qa -> coder intent=fix_instruction task=task_2 review=1 correlation_id=e0c26eaf-...
+```
+
+### Self-reflection before QA (C3.4)
+
+The `reflect` node runs after every Coder pass and before every QA review
+(DEC-172, DEC-177, DEC-196):
+
+1. **Evaluate** the version with one structured call (`EVALUATION_MODEL`)
+   against a fixed rubric: one item per acceptance criterion of the task
+   (C0..Cn) plus E1-E11 (empty input, boundaries, repeated values, invalid
+   input, interface, state across calls, safe import, security, type
+   annotations, style, any other defect). Each item is `ok`, `bug` or `n/a`
+   with evidence; each bug names its defect kind and carries a diagnosis
+   (location, concrete input, cause, minimal fix). The code maps each kind
+   to a severity: High (`logic_error`, `crash`, `security`), Medium
+   (`missing_edge_case`, `unclear_error`), Low (annotations, style, naming,
+   docstrings) (DEC-182, DEC-183, DEC-200).
+2. **Improve** only if the version has High or Medium bugs: a ReACT pass
+   of the Coder gets the diagnosis and fixes and runs the code, so `result`
+   still comes from a real execution (C1.5). Up to `REFLECTION_MAX_ROUNDS`
+   rounds per submission.
+3. **Rank** the versions by their bug counts compared in order (High, then
+   Medium, then Low; a tie goes to the improved version), **restore the
+   best one on disk** and send it to the QA. A worse improvement is never
+   sent (DEC-182, DEC-196).
+
+A version with only Low bugs (or none) is sent unchanged: an improvement
+pass costs up to 11 LLM calls, and annotations, style and docstrings are
+not what the QA's tests check (DEC-182). The log shows every step
+(`critique v0: C2 High logic_error ...`, `v0: 1 High, 0 Medium, 2 Low`,
+`v1: 0 High, 0 Medium, 0 Low`, `sent v1`). Evidence that the critique
+drives a revision and the revised artifact is the one sent: the
+planted-bug test AC-3.3-41 (`tests/test_reflection.py`, a `reverse` that
+loses nodes is found as High, fixed in v1 and v1 is sent) and its log in
+[`docs/evidence/lab_3_3/`](docs/evidence/lab_3_3/). If the evaluation gives
+no valid output in two calls, the version goes to the QA as it is and the
+log says so (DEC-171).
+
+### QA & Debugger Agent (C3.1)
+
+`run_qa` (`agents/qa_agent.py`) is a fixed pipeline, not a ReACT agent
+(DEC-144):
+
+1. Reads the task's files from the Coder's workspace **through the MCP
+   server** (DEC-145); it never writes the Coder's code (DEC-122).
+2. Asks `QA_MODEL` for a draft of pytest tests, one per acceptance
+   criterion or edge case, written from the criteria and the code's
+   interface, not its bodies; the draft is validated with a per-task
+   Pydantic schema (DEC-148, DEC-157, DEC-158).
+3. Writes the tests to its own folder, `workspace_qa/`, never overlapping
+   the Coder's, and runs pytest in the shared sandbox: a subprocess with a
+   timeout (`QA_TEST_TIMEOUT` per test), no credentials and isolated from
+   the project's pytest configuration (DEC-140, DEC-146, DEC-155, DEC-161).
+   Results come from pytest's JUnit XML report and exit code (DEC-147).
+4. **Only executed tests create issues**: each failing test is a High
+   issue with its location, description, the test's code, the criterion
+   and a fix instruction written by a second call that reads the whole code
+   (`review_code`); the LLM explains failures but never adds issues or
+   decides approval (DEC-174, DEC-191).
+5. Returns a `QAReport` whose `approved` is computed: tests ran and none
+   failed (DEC-149, DEC-153).
+
+A broken draft of its own (collection error, skipped test) makes it write a
+new one within `QA_MAX_ATTEMPTS` model calls; anything that stops the QA
+becomes an unapproved report with `qa` issues, never a crash (DEC-141,
+DEC-142, DEC-152). In the loop, a review that failed because of the QA is
+repeated once without charging the Coder a review (DEC-169).
+
+```bash
+python -m agents.qa_agent    # demo: reviews a bundled buggy linked list with the real model
+```
+
+### MCP file server (Lab 3.1)
+
+`tools/mcp_server.py` is an MCP server built with the official Python SDK
+(`mcp>=1.30,<2`, low-level `Server`, DEC-129, DEC-130). It serves the
+Coder's workspace (`CODER_WORKSPACE_DIR`) over stdio (DEC-124, DEC-125):
+
+- tool **`read_file`** (`path` relative to the workspace): the file's
+  content, capped at `READ_MAX_CHARS`;
+- resource **`file://project/listing`**: every file of the workspace,
+  recursive, as relative paths.
+
+It reuses the safety rules of the Coder's tools: strict Pydantic arguments,
+confinement to the workspace (`..`, absolute paths and symlinks that leave
+it are rejected), hidden entries (`.env`, `.git/`) and `__pycache__/` are
+neither listed nor read, and the file really read is checked, not only the
+name asked for (DEC-126, DEC-131, DEC-136). Errors are `isError` results
+whose text starts with `ERROR:` and names only relative paths; the server
+never crashes on a bad request. Each request is logged once to **stderr**
+(stdout carries the protocol) with the server's PID, rejected ones at
+WARNING; client values are escaped and file contents are never logged
+(DEC-127, DEC-136).
+
+`tools/mcp_client.py` starts the server as a child process
+(`python -m tools.mcp_server`) with the workspace set explicitly, and waits
+at most `MCP_TIMEOUT` seconds per request (DEC-132, DEC-135). The QA uses
+its `read_multiple_files`. Demo:
+
+```bash
+python -m tools.mcp_client app.py   # prints the tools, the resources, the listing and app.py
+```
+
+The demo prints its own PID; the server's log lines, with the server's
+PID, appear on stderr, which shows the file was read by another process
+through the protocol.
+
+### Memory in the loop
+
+Every Coder pass keeps both memory layers of Module 1: the sliding window
+and the Chroma store, queried before each of its LLM calls and injected
+into the prompt (C1.2, DEC-186). The QA's fix instructions reach Chroma
+through the Coder's correction prompts, so a later task can recall them.
+Two LLM calls use no memory on purpose: the PM and the QA, as before, and
+the **Coder's self-evaluation**, which sees only the version's files and
+the task, with no window and no Chroma. An evaluator that cannot read the
+author's reasoning judges the code that is there instead of agreeing with
+it, and its opinions never leak into the Coder's memory (DEC-173). The
+window keeps whole passes during the loop; compacting them is left for
+Module 4's cost data (DEC-185).
 
 ## Running the Coder Agent alone (Module 1)
 
@@ -237,51 +446,71 @@ request:
 | `answered` | `Finish` without code from this task (for example a question, even one about a file from an earlier task); nothing was executed (DEC-056, DEC-080). |
 | `max_iterations` | 10 model calls without `Finish`. |
 
-Only `success` means the code was checked by a real execution.
+Only `success` means the code was checked by a real execution. In the team
+graph it is the QA's verdict, not this status, that closes a task
+(DEC-178).
 
 ## Tests
 
 ```bash
 pytest tests/                                      # every mocked test, no LLM calls
 pytest tests/ --run-llm                            # also the tests with the real LLM (costs tokens)
-pytest tests/test_integration_pipeline.py --run-llm -k graded_demo   # only the graded demo
+pytest tests/test_integration_pipeline.py --run-llm -k graded_demo   # only the Module 2 graded demo
+pytest tests/test_integration_loop.py --run-llm -k 40                # the Module 3 linked-list demo
+pytest tests/test_reflection.py --run-llm -k 41                      # self-reflection on a planted bug
 CHROMA_PATH=.chroma-test python -m tests.test_memory   # Lab 1.1 recall test, real LLM
 ```
 
-Every test runs in a temporary workspace, so your `workspace_coder/` is never
-touched. Without `--run-llm`, a test that would reach a real model fails
-instead of calling it; the tests marked `llm` are skipped, and with
-`--run-llm` and no API key they fail.
+Every test runs in temporary workspaces, so your `workspace_coder/` and
+`workspace_qa/` are never touched. Without `--run-llm`, a test that would
+reach a real model fails instead of calling it; the tests marked `llm` are
+skipped, and with `--run-llm` and no API key they fail. Test names start
+with the acceptance criterion they check (`test_ac_3_3_30_...` checks
+AC-3.3-30 of `docs/specs/lab_3_3_a2a_loop.md`).
 
 | Area | Files | What they check |
 |---|---|---|
-| Tools | `test_file_io.py`, `test_code_executor.py`, `test_server_guard.py` | File reads and writes, script output, errors and timeouts, and that a file starting a web server is never run (DEC-116) |
+| Tools | `test_file_io.py`, `test_code_executor.py`, `test_server_guard.py`, `test_workspace.py`, `test_workspace_settings.py` | File reads and writes, script and pytest output, errors and timeouts, a file starting a web server is never run (DEC-116), workspace archive and folder settings |
+| MCP | `test_mcp_server.py`, `test_mcp_client.py` | The real server in memory and over stdio: `read_file`, the listing, rejected paths (outside, hidden, symlinks), truncation, errors, the log lines, the client's timeout |
 | PM | `test_pm_agent.py`, `test_llm_helpers.py` | Spec and task schemas (every task has a `.py` file), the corrective retry, consolidation of more than 8 tasks with every criterion still covered |
-| Shared state | `test_state.py` | Invalid values are rejected and the state survives a JSON round trip |
-| Coder node | `test_coder_node.py` | One task per step: its prompt, status, result and accumulated code; failures and fatal errors |
-| Graph | `test_pipeline.py`, `test_integration_pm.py`, `test_integration_coder.py`, `test_integration_pipeline.py` | The PM → Coder handoff in one graph (after the PM step the state holds a non-empty, valid task list, and the Coder receives each task's ID, description and criteria), task order, progress after each task, 8 tasks within the step limit, the step limit itself, workspace archive |
-| Entry point | `test_main.py` | Output, `RESULT:` verdict and exit codes |
-| Real LLM (`llm`) | `test_smoke.py`, `test_integration_pm.py`, `test_integration_coder.py`, `test_integration_pipeline.py` | A Coder task run and its code executed; the PM's spec for the demo task; the **graded demo** run through PM and Coder, whose API passes the request fixture in `tests/api_fixture.py` (`GET /health`, `POST /echo`, and 400 for each body that is not JSON) both in-process and as a real server |
+| Shared state and A2A | `test_state.py`, `test_a2a.py`, `test_qa_report.py` | Invalid values are rejected and the state survives a JSON round trip; A2A messages with an unknown intent or agent, `sender == receiver`, a wrong payload or a wrong `correlation_id` are rejected; the **QA issue schema** and its computed `approved` |
+| Coder node | `test_coder_node.py`, `test_coder_passes.py` | One task per step: its prompt, status, result and accumulated code; the prompts of first, improvement and correction passes |
+| Self-reflection | `test_reflection.py` | The rubric schema, kind → severity, the ranking, improvement only on High/Medium bugs, the best version restored and sent, an unavailable evaluation |
+| QA | `test_qa_agent.py` | Real pytest runs on mocked code input: correct code approved, failing tests become High issues with their fix and code, broken drafts retried, timeouts, the Coder's folder untouched |
+| Graph and loop | `test_pipeline.py`, `test_integration_pm.py`, `test_integration_coder.py`, `test_integration_pipeline.py`, `test_integration_loop.py`, `test_loop_settings.py` | The PM → Coder handoff in one graph; **loop success** (AC-3.3-29), **loop max iterations**: exactly `QA_MAX_ITERATIONS` reviews, task failed, run unresolved (AC-3.3-30); QA feedback driving a revision with the real QA (AC-3.3-31); QA failure retried, protocol error, next task after a failure, out of time; loop settings from the environment |
+| Entry point | `test_main.py` | Output, final report, `RESULT:` verdict and exit codes |
+| Real LLM (`llm`) | `test_smoke.py`, `test_integration_pm.py`, `test_integration_coder.py`, `test_integration_pipeline.py`, `test_qa_agent.py`, `test_reflection.py`, `test_integration_loop.py` | A Coder task run; the PM's spec; the **Module 2 graded demo**, whose API passes the request fixture in `tests/api_fixture.py`; the live QA; the planted-bug self-reflection (AC-3.3-41); the **linked-list demo** through the whole team, whose QA tests call `insert`, `delete`, `search` and `reverse` and pass (AC-3.3-40) |
 | Request fixture | `test_api_fixture.py` | The fixture passes a correct API and fails one that answers 415 to a body that is not JSON (DEC-118) |
 
 The mocked tests use scripted fake chat models (`tests/fakes.py`), so they
 check the agents' and the graph's behavior without an API key.
 
+**Live evidence** of Module 3 (INFO logs of real runs) is in
+[`docs/evidence/lab_3_3/`](docs/evidence/lab_3_3/) (DEC-199): the planted-bug
+self-reflection, the linked-list demo from pytest and from `main.py`
+(`RESULT: success`), and a run where the QA sent a task back four times
+and approved it at review 5, the last allowed.
+
 ## Repository layout
 
 ```
 main.py          entry point: runs the team for a requirement
-agents/          coder_agent.py (Coder and its graph node), pm_agent.py (PM node),
-                 llm_helpers.py (validated structured calls), qa_agent.py (Module 3)
+agents/          pm_agent.py (PM node), coder_agent.py (Coder and its graph node),
+                 coder_reflection.py (self-reflection, reflect node),
+                 qa_agent.py (QA and its graph node), llm_helpers.py (validated structured calls)
 tools/           file_io.py, code_executor.py, handlers.py (validation, dispatch), schemas.py,
-                 agent_tools.py (LangChain adapter)
-orchestration/   graph.py (team graph and run()), state.py (shared state), workspace.py (archive)
+                 agent_tools.py (LangChain adapter), mcp_server.py, mcp_client.py
+orchestration/   graph.py (team graph and run()), state.py (shared state), a2a.py (A2A messages),
+                 qa_report.py (QA issues and report), settings.py (loop settings),
+                 workspace.py (archive)
 tests/           pytest tests, fakes, the API request fixture (api_fixture.py)
-docs/            decisions.md, improvements.md, specs/ (one per lab), labs/, course_reference.txt
+docs/            decisions.md, improvements.md, specs/ (one per lab), labs/, evidence/,
+                 course_reference.txt
 memory.py        two-tier memory
 llm_client.py    shared chat model (ChatOpenAI → OpenRouter)
 workspace_coder/ the Coder's working folder (git-ignored)
-workspace_history/  files of earlier runs (git-ignored)
+workspace_qa/    the QA's tests (git-ignored)
+workspace_coder_history/  files of earlier runs (git-ignored)
 ```
 
 `Dockerfile` and `docker-compose.yml` are placeholders until Module 4.
@@ -406,8 +635,8 @@ Specs with the acceptance criteria and tests of each lab:
   DEC-102
 - One memory window per run, shared by its tasks and passed in the run
   context — DEC-099, DEC-104, DEC-109
-- A step limit of 11 (the PM, 8 tasks and a margin) ends a runaway loop and
-  keeps the state — DEC-115
+- A step limit ends a runaway loop and keeps the state; since Module 3 it
+  follows the loop limit — DEC-115, superseded by DEC-180
 
 **C2.5 Working two-agent system**
 - Flask is a project dependency, so generated APIs can run — DEC-108
@@ -419,7 +648,8 @@ Specs with the acceptance criteria and tests of each lab:
 - Every agent is told that Flask is the only third-party package
   installed, so no plan asks for FastAPI or other packages — DEC-121
 - A run succeeds only with no error and every task done; the verdict line
-  and the exit code say so — DEC-111
+  and the exit code say so — DEC-111, superseded in Module 3 by DEC-181
+  (`done` now means approved by the QA)
 
 **C2.6 Explanation**
 - Framework unchanged from Module 1 (LangGraph) — DEC-068
@@ -428,6 +658,64 @@ Specs with the acceptance criteria and tests of each lab:
 
 **Known simplifications** (provisional, to revisit)
 - Each run starts with an empty workspace (earlier files are archived to
-  `workspace_history/`); continuing an existing project is a future
+  `workspace_coder_history/`); continuing an existing project is a future
   improvement (IMP-011) — DEC-114
 - After a fatal error, `code` may miss files the failed task wrote (IMP-009)
+
+## Design decisions (Module 3)
+
+Specs: [`docs/specs/lab_3_1_mcp_server.md`](docs/specs/lab_3_1_mcp_server.md),
+[`lab_3_2_qa_agent.md`](docs/specs/lab_3_2_qa_agent.md) and
+[`lab_3_3_a2a_loop.md`](docs/specs/lab_3_3_a2a_loop.md).
+
+**C3.1 QA agent**
+- The QA writes real pytest tests from each task's acceptance criteria and
+  runs them in the sandbox with a timeout — DEC-137, DEC-138, DEC-146
+- Only executed tests create issues and grant approval; the LLM only
+  writes the fix of each failing test — DEC-149, DEC-174
+- A fixed pipeline on a small model, reading through MCP, writing only in
+  its own folder — DEC-122, DEC-140, DEC-144, DEC-145, DEC-150
+- A QA that cannot do its job returns an unapproved report, never a crash —
+  DEC-141, DEC-142
+
+**C3.2 Review loop**
+- Each task is reviewed in its own loop; a failing review sends the task
+  back to the Coder with the QA's fix instructions and the test code —
+  DEC-163, DEC-187, DEC-191
+- Each task keeps its review history in the state — DEC-184
+- Only the QA's verdict closes a task — DEC-178
+
+**C3.3 Termination**
+- `QA_MAX_ITERATIONS` (default 5) reviews per task, read per run; at the
+  limit the QA answers `unresolved` with the report of unresolved issues —
+  DEC-163, DEC-176, DEC-180
+- The task stays failed and the run goes on; the run is `success` only if
+  every task was approved, with a final report and exit code 1 otherwise —
+  DEC-164, DEC-165, DEC-181
+- `RUN_TIMEOUT` per run and `LLM_TIMEOUT` per call bound the whole run —
+  DEC-166, DEC-168, DEC-198
+- A failure of the QA itself is retried once and never charged to the Coder
+  — DEC-169
+
+**C3.4 Self-reflection**
+- A `reflect` node between the Coder and the QA evaluates every version
+  against a rubric, improves it on High/Medium bugs and sends the best —
+  DEC-172, DEC-177, DEC-182, DEC-183, DEC-196
+- A version with only Low bugs is sent unchanged; the critique-driven
+  revision is shown by AC-3.3-41 and `docs/evidence/lab_3_3/` — DEC-182
+- The evaluation uses a larger model and no memory — DEC-173, DEC-200
+
+**C3.5 Protocol**
+- A2A for the Coder ↔ QA loop; MCP stays as the QA's file access — DEC-162
+- Five-field messages that validate their intent and payload, in a mailbox
+  in the shared state, each one logged — DEC-175, DEC-176, DEC-189
+- An invalid message closes its task as a protocol error — DEC-170
+
+**C3.6 Tests**
+- Mocked tests of the QA issue schema, loop success and loop max
+  iterations; the live linked-list demo passes the QA's generated tests for
+  all four methods — AC-3.3-29, AC-3.3-30, AC-3.3-40, DEC-199
+
+**Known simplifications** (provisional, to revisit)
+- The window keeps whole ReACT passes during the loop — DEC-185 (IMP-020)
+- A failed task is not re-planned by the PM — DEC-164 (IMP-018)
