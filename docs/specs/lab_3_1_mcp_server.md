@@ -249,7 +249,9 @@ the network.
 #### AC-3.1-17 — The demo runs from the command line
 
 - **Origin:** lab
-- **Verify:** manual — `python -m tools.mcp_client pkg/util.py`
+- **Verify:** manual — `python -m tools.mcp_client pkg/util.py`; run on
+  2026-11-23 with `linked_list.py` and a missing path:
+  `docs/evidence/lab_3_1/ac_3_1_17_mcp_client.log`
 - **Given** a workspace with a file (for example, one left by
   `python main.py`)
 - **When** the user runs the demo

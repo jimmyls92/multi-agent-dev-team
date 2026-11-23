@@ -240,8 +240,8 @@ task.
 
 ### Context of each Coder pass (DEC-184, DEC-187)
 
-All in `tests/test_coder_node.py`, with the fake model and the linked-list
-task.
+All in `tests/test_coder_passes.py`, with the fake model and the
+linked-list task.
 
 #### AC-3.3-17 — The first pass gets the task and the files that already exist
 
@@ -747,11 +747,15 @@ delivery, with Lab 3.1's T4.
   stable `reason=` key so its frequency can be counted; aggregating it in
   the traces is IMP-023 (Module 4), at the user's request.
 
-### R5 — Docs and evidence · pending
+### R5 — Docs and evidence · done
 
-- Finding 8: Verify paths of AC-3.3-17..20, manual evidence of AC-3.1-17
-  and AC-3.2-27, Module 4 note on `EVALUATION_MODEL`, and the live demo
-  log re-captured after R1..R4.
+- **Review notes:** finding 8. The tests of AC-3.3-17..20 live in
+  `tests/test_coder_passes.py`. Manual evidence of AC-3.1-17
+  (`docs/evidence/lab_3_1/`) and AC-3.2-27 (`docs/evidence/lab_3_2/`),
+  run on 2026-11-23. `EVALUATION_MODEL` defaulting to a large model is
+  IMP-024 (Module 4, C4.5). The live linked-list demo was re-captured
+  after R1..R4: task_1 sends v1 after one improvement pass on two Low
+  bugs.
 
 ## Independent review
 

@@ -307,6 +307,20 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   their totals per run to the cost report next to the extra tokens they
   cost.
 
+### IMP-024 A smaller model for the Coder's self-evaluation
+- Status: planned (Module 4)
+- Area: Coder self-reflection (Lab 3.3)
+- Why: `EVALUATION_MODEL` defaults to `openai/gpt-4.1`, a large model, in
+  the Coder's path, while C4.5 asks for small, fast models for the Coder
+  and the QA. It was chosen because the small model was not reliable at
+  judging code (DEC-200). Found by the independent review of Module 3.
+- Rubric: C4.5 (model per agent and its justification); risk to C3.4 if a
+  smaller model misses bugs again, so it needs the AC-3.3-41 planted-bug
+  run to pass with the new model.
+- Notes: in Module 4, either measure a smaller model on the planted bug
+  and the linked-list demo, or keep gpt-4.1 and justify it in the README
+  and the cost report as the critic call, outside the Coder's own model.
+
 ## General
 
 ### IMP-008 One module for the models shared between agents

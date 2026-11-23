@@ -373,7 +373,8 @@ the linked-list task.
 #### AC-3.2-27 — Demo
 
 - **Origin:** lab
-- **Verify:** manual — `python -m agents.qa_agent`
+- **Verify:** manual — `python -m agents.qa_agent`; run on 2026-11-23:
+  `docs/evidence/lab_3_2/ac_3_2_27_qa_agent.log`
 - **Given** a key in `.env`
 - **When** the demo runs
 - **Then** it runs the QA on a bundled buggy linked list in a temporary

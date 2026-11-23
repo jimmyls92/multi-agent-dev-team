@@ -91,7 +91,7 @@ El proyecto se construye de forma incremental, un módulo cada vez, y **cada mó
 
 ## Estado actual
 
-Módulo 3: cerrado (C3.1–C3.6), README del Módulo 3 escrito. Lab 3.1 (MCP server, `docs/specs/lab_3_1_mcp_server.md`, DEC-122..DEC-136), Lab 3.2 (QA agent, `docs/specs/lab_3_2_qa_agent.md`, DEC-137..DEC-161) y Lab 3.3 (A2A, `docs/specs/lab_3_3_a2a_loop.md`, DEC-162..DEC-200) cerrados; el revisor independiente del Lab 3.3 no se lanzó (sin créditos de API, decisión del usuario). Rama: `week-3`. **Siguiente:** push (fast-forward de `master` a `week-3`), luego actualizar el mapa de diseño (fichas V1/V9) y empezar el Módulo 4. Sin commitear: `docs/floor_plan.html`, `docs/lab_3_3_loop.html`, `docs/map/` (pendiente decidir si se versionan).
+Módulo 3: cerrado (C3.1–C3.6), README del Módulo 3 escrito. Lab 3.1 (MCP server, `docs/specs/lab_3_1_mcp_server.md`, DEC-122..DEC-136), Lab 3.2 (QA agent, `docs/specs/lab_3_2_qa_agent.md`, DEC-137..DEC-161) y Lab 3.3 (A2A, `docs/specs/lab_3_3_a2a_loop.md`, DEC-162..DEC-200) cerrados. Revisión independiente del Módulo 3 hecha (2026-11-23): 8 hallazgos arreglados en R1..R5 (DEC-201..DEC-206, IMP-023, IMP-024). Rama: `week-3`. **Siguiente:** push (fast-forward de `master` a `week-3`), luego actualizar el mapa de diseño (fichas V1/V9) y empezar el Módulo 4. Sin commitear: `docs/floor_plan.html`, `docs/map/` (pendiente decidir si se versionan).
 
 Módulo 2: cerrado y subido (C2.1–C2.6), `master` = `week-2`. PM Agent (Lab 2.1, `docs/specs/lab_2_1_pm_agent.md`, DEC-081..DEC-096), Coder node (Lab 2.2, `docs/specs/lab_2_2_coder_node.md`, DEC-097..DEC-109) y pipeline PM → Coder (Lab 2.3, `docs/specs/lab_2_3_pipeline.md`, DEC-110..DEC-121).
 

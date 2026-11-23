@@ -1,0 +1,189 @@
+$ python -m tools.mcp_client linked_list.py
+[mcp-server pid=156499] INFO started, serving <repo>/workspace_coder
+[mcp-server pid=156499] INFO listing: 2 files
+[mcp-server pid=156499] INFO read_file 'linked_list.py': 4052 chars
+Client pid=156498 (the server logs its own pid on stderr)
+
+=== Tools ===
+  read_file
+
+=== Resources ===
+  Project Directory Listing (file://project/listing)
+
+=== Workspace listing ===
+  linked_list.py
+  test_linked_list.py
+
+=== read_file('linked_list.py') ===
+class Node:
+    """
+    A Node in a singly linked list.
+    """
+    def __init__(self, value: int):
+        self.value = value
+        self.next = None
+
+class LinkedList:
+    """
+    A singly linked list that supports insertion at the end, deletion, search, and reversal.
+    Only integer values can be inserted.
+    """
+    def __init__(self):
+        self.head = None
+
+    def insert(self, value: int) -> None:
+        """
+        Append an integer value at the end of the list.
+
+        :param value: integer to insert
+        :raises ValueError: if value is None or not an integer
+        """
+        if value is None or not isinstance(value, int):
+            raise ValueError("Only non-None integer values can be inserted")
+
+        new_node = Node(value)
+        if self.head is None:
+            self.head = new_node
+            return
+
+        current = self.head
+        while current.next:
+            current = current.next
+        current.next = new_node
+
+    def delete(self, value: int) -> bool:
+        """
+        Remove the first node with the specified value from the list.
+
+        :param value: integer value to remove
+        :return: True if a node was removed, False otherwise
+        """
+        current = self.head
+        previous = None
+
+        while current:
+            if current.value == value:
+                if previous is None:  # head node
+                    self.head = current.next
+                else:
+                    previous.next = current.next
+                return True
+            previous = current
+            current = current.next
+        return False
+
+    def search(self, value: int) -> bool:
+        """
+        Search for a value in the list.
+
+        :param value: integer to search for
+        :return: True if value is found, False otherwise
+        """
+        current = self.head
+        while current:
+            if current.value == value:
+                return True
+            current = current.next
+        return False
+
+    def reverse(self) -> None:
+        """
+        Reverse the linked list in place.
+        Handles empty and single-node lists correctly.
+        """
+        previous = None
+        current = self.head
+        while current:
+            nxt = current.next
+            current.next = previous
+            previous = current
+            current = nxt
+        self.head = previous
+
+
+if __name__ == '__main__':
+    # Basic tests to validate each method and edge cases
+    ll = LinkedList()
+
+    # Test insert and that the nodes are appended at the end
+    ll.insert(1)
+    assert ll.head.value == 1
+    ll.insert(2)
+    assert ll.head.next.value == 2
+    ll.insert(3)
+    assert ll.head.next.next.value == 3
+
+    # Test insert raises ValueError on None or non-integer
+    try:
+        ll.insert(None)
+        assert False, "ValueError not raised for None"
+    except ValueError:
+        pass
+
+    try:
+        ll.insert("string")
+        assert False, "ValueError not raised for non-integer"
+    except ValueError:
+        pass
+
+    # Test search
+    assert ll.search(1) == True
+    assert ll.search(3) == True
+    assert ll.search(4) == False
+
+    # Test delete deletes first occurrence and returns True
+    ll.insert(2)  # list now: 1->2->3->2
+    assert ll.delete(2) == True
+    assert ll.search(2) == True  # one 2 remains
+
+    # Delete non-existing value returns False
+    assert ll.delete(99) == False
+
+    # Delete all to empty
+    assert ll.delete(1) == True
+    assert ll.delete(3) == True
+    assert ll.delete(2) == True
+    assert ll.head is None
+
+    # Reverse empty list
+    ll.reverse()
+    assert ll.head is None
+
+    # Reverse single-node list
+    ll.insert(5)
+    ll.reverse()
+    assert ll.head.value == 5
+    assert ll.head.next is None
+
+    # Reverse multi-node list
+    ll.insert(6)
+    ll.insert(7)  # List is 5->6->7
+    ll.reverse()  # Should become 7->6->5
+    assert ll.head.value == 7
+    assert ll.head.next.value == 6
+    assert ll.head.next.next.value == 5
+    assert ll.head.next.next.next is None
+
+    print("All tests passed.")
+
+exit code: 0
+
+$ python -m tools.mcp_client missing.py
+[mcp-server pid=156505] INFO started, serving <repo>/workspace_coder
+[mcp-server pid=156505] INFO listing: 2 files
+[mcp-server pid=156505] WARNING read_file rejected: 'missing.py: no such file'
+Client pid=156504 (the server logs its own pid on stderr)
+
+=== Tools ===
+  read_file
+
+=== Resources ===
+  Project Directory Listing (file://project/listing)
+
+=== Workspace listing ===
+  linked_list.py
+  test_linked_list.py
+
+=== read_file('missing.py') ===
+ERROR: missing.py: no such file
+exit code: 0
