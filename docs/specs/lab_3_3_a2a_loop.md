@@ -540,6 +540,34 @@ fake Coder, fake evaluation and fake QA.
   an improvement pass runs; the version sent fixes it (a `reverse` of
   `[1, 2, 3]` gives `[3, 2, 1]`)
 
+#### AC-3.3-43 — The team starts with a low `EXEC_TIMEOUT`
+
+- **Origin:** C1.3, DEC-203 (review R2)
+- **Verify:** unit — `tests/test_main.py::test_ac_3_3_43_main_imports_with_low_exec_timeout`,
+  `tests/test_qa_report.py::test_ac_3_3_43_default_test_timeout_follows_exec_timeout`,
+  `tests/test_qa_report.py::test_ac_3_3_43_explicit_test_timeout_still_checked`
+- **Given** `EXEC_TIMEOUT` set to 1 and to 2, and `QA_TEST_TIMEOUT` unset
+- **When** `main` is imported in a fresh process, and the QA settings are
+  loaded
+- **Then** the import succeeds; the per-test timeout is 1 for an
+  `EXEC_TIMEOUT` of 1 or 2 and 2 for 3 or more; a `QA_TEST_TIMEOUT` set
+  explicitly to a value not lower than `EXEC_TIMEOUT` is still rejected
+
+#### AC-3.3-44 — A node that raises ends the run with `error`, never a traceback
+
+- **Origin:** ours, DEC-202 (review R2)
+- **Verify:** unit — `tests/test_node_guard.py`; integration —
+  `tests/test_integration_loop.py::test_ac_3_3_44_reflect_raises`,
+  `::test_ac_3_3_44_qa_raises`
+- **Given** a run whose `reflect` node raises `OSError`, or whose QA
+  raises `RuntimeError`
+- **When** `run()` runs the requirement
+- **Then** `run()` returns; `error` holds the exception; the task in work
+  is `failed` with `closed_reason` "<node> error: …"; the next task is
+  still `pending`; the outcome is `unresolved`; an ERROR record carries
+  the traceback; a guarded node that does not raise returns its update
+  unchanged and still receives the runtime from LangGraph
+
 ## Tasks
 
 Task status: todo | map | in progress | review | done
@@ -651,11 +679,13 @@ delivery, with Lab 3.1's T4.
   critique with only Low bugs sent v0 unchanged, a C3.4 Not Yet risk.
   DEC-201 makes any bug start an improvement pass.
 
-### R2 — Robust start and nodes that never raise · pending
+### R2 — Robust start and nodes that never raise · done
 
-- Findings 2 and 6: no QA settings read at import, the per-test timeout
-  kept below `EXEC_TIMEOUT` instead of raising, and one shared wrapper
-  for the `coder`, `reflect` and `qa` nodes (DEC-102).
+- **Covers:** AC-3.3-43, AC-3.3-44
+- **Review notes:** findings 2 and 6. `QA_SETTINGS` removed; the default
+  per-test timeout follows a low `EXEC_TIMEOUT` (DEC-203). One shared
+  `guard_node` wraps the PM, Coder, `reflect` and QA nodes, replacing the
+  PM's and the Coder's own `try/except` (DEC-202).
 
 ### R3 — The Coder reads its A2A inbox · pending
 

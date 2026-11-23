@@ -189,7 +189,11 @@ nothing is copied by hand between agents. The edges are in
    (DEC-083, DEC-087, DEC-088, DEC-095, DEC-117). More than 8 tasks are
    merged deterministically into 8 groups of consecutive tasks, keeping
    every covered criterion (DEC-082, DEC-092). The PM never raises: a
-   failure is written to `error`.
+   failure is written to `error`. Every node of the team graph (PM, Coder,
+   `reflect`, QA) is wrapped in the same guard, `guard_node`
+   (`orchestration/node_guard.py`): an exception is logged with its
+   traceback, the task in work is closed `failed` and the run ends with
+   `RESULT: error`, never a traceback (DEC-202).
 3. **Handoff** (`route_after_pm`): the Coder runs only when the PM left no
    error and at least one task. The tasks in the state, with status
    `pending`, are the handoff; they are JSON-serializable (`--json`)
@@ -317,7 +321,7 @@ log says so (DEC-171).
    Pydantic schema (DEC-148, DEC-157, DEC-158).
 3. Writes the tests to its own folder, `workspace_qa/`, never overlapping
    the Coder's, and runs pytest in the shared sandbox: a subprocess with a
-   timeout (`QA_TEST_TIMEOUT` per test), no credentials and isolated from
+   timeout (`QA_TEST_TIMEOUT` per test; unset, 2 s lowered to fit a low `EXEC_TIMEOUT`, DEC-203), no credentials and isolated from
    the project's pytest configuration (DEC-140, DEC-146, DEC-155, DEC-161).
    Results come from pytest's JUnit XML report and exit code (DEC-147).
 4. **Only executed tests create issues**: each failing test is a High
@@ -633,7 +637,7 @@ Specs with the acceptance criteria and tests of each lab:
 - More than 8 tasks are merged into 8 even groups of consecutive tasks,
   keeping their criteria and `merged_from` — DEC-082, DEC-092
 - A failed task does not stop the others; a fatal error ends the run — DEC-097,
-  DEC-102
+  DEC-102; since Module 3 one shared guard does this for every node — DEC-202
 - One memory window per run, shared by its tasks and passed in the run
   context — DEC-099, DEC-104, DEC-109
 - A step limit ends a runaway loop and keeps the state; since Module 3 it

@@ -58,6 +58,7 @@ import tools.handlers
 from agents.llm_helpers import PYTHON_ENVIRONMENT
 from llm_client import get_chat_model
 from memory import SlidingWindowBuffer, build_context, store_memory, store_outcome
+from orchestration.node_guard import guard_node
 from orchestration.settings import LoopSettings, load_loop_settings
 from orchestration.state import (
     Bug,
@@ -1013,8 +1014,8 @@ def make_coder_node(
             state: Current state; reads ``tasks``, ``spec`` and ``code``.
             runtime: The run's runtime; its context holds the window.
 
-        Never raises: a fatal error marks the task failed and is returned in
-        ``error``, which ends the run (DEC-102).
+        Never raises: ``guard_node`` turns a fatal error into the task
+        failed and ``error``, which ends the run (DEC-202).
 
         Returns:
             Update with ``tasks``, ``code``, ``progress`` and ``error``;
@@ -1022,8 +1023,7 @@ def make_coder_node(
             and ``error`` are returned when no task is pending or the run
             has no context.
         """
-        current = [task for task in state.tasks if task.status == "in_progress"]
-        task = current[0] if current and not close_tasks else _next_pending(state.tasks)
+        task = current_task(state)
         if task is None:
             error = "Coder Agent: no pending task to run."
             return {"progress": [error], "error": error}
@@ -1033,16 +1033,7 @@ def make_coder_node(
             return {"progress": [error], "error": error}
 
         prompt, started = _pass_prompt(state, task)
-        try:
-            result = run_agent(prompt, runtime.context.window, model)
-        except Exception as exc:  # DEC-102: the node never raises out of the graph
-            error = f"{type(exc).__name__}: {exc}"
-            logger.error("Coder Agent failed on %s: %s", task.task_id, error)
-            return {
-                "tasks": _with_task(state.tasks, task.task_id, status="failed", result=None),
-                "progress": [started, f"Coder Agent: {task.task_id} failed — {error}"],
-                "error": error,
-            }
+        result = run_agent(prompt, runtime.context.window, model)
         if close_tasks:
             status = "done" if result.status == "success" else "failed"  # DEC-101
             finished = f"Coder Agent: {task.task_id} {status}. File: {result.main_file or 'none'}."
@@ -1057,7 +1048,20 @@ def make_coder_node(
             "error": "",
         }
 
-    return coder_node
+    def current_task(state: ProjectState) -> TaskState | None:
+        """Returns the task the node runs: the one in progress (a correction pass), or the next pending one.
+
+        Args:
+            state: Current state.
+
+        Returns:
+            The task, or None when there is none to run.
+        """
+        current = [task for task in state.tasks if task.status == "in_progress"]
+        return current[0] if current and not close_tasks else _next_pending(state.tasks)
+
+    # DEC-202: the node never raises out of the graph; a fatal error fails its task.
+    return guard_node("Coder Agent", coder_node, task_of=current_task)
 
 
 MAX_ITERATIONS_MESSAGE = (

@@ -142,3 +142,15 @@ def test_ac_3_3_11_no_review_source(tmp_path, caplog):
 
     env_example = (_REPO_ROOT / ".env.example").read_text(encoding="utf-8")
     assert "QA_BLOCKING_SEVERITY" not in env_example
+
+
+@pytest.mark.parametrize(("exec_timeout", "expected"), [(1, 1), (2, 1), (3, 2), (10, 2)])
+def test_ac_3_3_43_default_test_timeout_follows_exec_timeout(tmp_path, exec_timeout, expected):
+    settings = load_qa_settings({}, exec_timeout=exec_timeout, coder_dir=(tmp_path / "coder").resolve())
+
+    assert settings.test_timeout == expected
+
+
+def test_ac_3_3_43_explicit_test_timeout_still_checked(tmp_path):
+    with pytest.raises(ValueError, match="QA_TEST_TIMEOUT"):
+        load_qa_settings({"QA_TEST_TIMEOUT": "2"}, exec_timeout=2, coder_dir=(tmp_path / "coder").resolve())

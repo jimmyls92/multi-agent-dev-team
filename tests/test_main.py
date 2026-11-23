@@ -4,8 +4,13 @@ AC-2.1-21, and `lab_2_3_pipeline`, AC-2.3-12..AC-2.3-14).
 Since Lab 2.3 ``main`` runs the Coder after the PM, so a run that reaches
 the Coder uses a fake Coder in ``isolated_run``; since Lab 3.3 it also
 evaluates clean and has a QA that approves, unless a test says otherwise
-(DEC-197).
+(DEC-197). AC-3.3-43 imports ``main`` with a low ``EXEC_TIMEOUT`` (DEC-203).
 """
+
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -210,3 +215,14 @@ def test_ac_3_3_39_verdict(monkeypatch, capsys, state, verdict, code):
         assert "[FINAL REPORT]" not in out
     else:
         assert "[FINAL REPORT]" in out and "ISSUE-X" in out and "review 5" in out
+
+
+@pytest.mark.parametrize("exec_timeout", ["1", "2"])
+def test_ac_3_3_43_main_imports_with_low_exec_timeout(exec_timeout):
+    env = {**os.environ, "EXEC_TIMEOUT": exec_timeout}
+    env.pop("QA_TEST_TIMEOUT", None)
+
+    done = subprocess.run([sys.executable, "-c", "import main"], cwd=Path(__file__).resolve().parents[1],
+                          env=env, capture_output=True, text=True, timeout=120)
+
+    assert done.returncode == 0, done.stderr

@@ -1687,7 +1687,7 @@ A decision can mix bases; then each part states its own.
 - Code: `agents/coder_agent.py` — `_touched_paths`, `result_from_messages`
 
 ### DEC-081 The PM creates 2 to 8 tasks, as few as the requirement allows
-- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted
+- Date: 2026-11-09 · Area: PM Agent (Lab 2.1) · Status: accepted (where the try/except lives moved to DEC-202)
 - Basis: Required (C2.1: at least two tasks for the API task; C2.4: at most
   eight); "as few as possible" — Preferred
 - Context: the lab asks for 2–4 tasks. Each task is solved by the Coder
@@ -1975,7 +1975,7 @@ A decision can mix bases; then each part states its own.
 - Code: `main.py` — `DEMO_REQUIREMENT`, `main`
 
 ### DEC-097 A failed task does not stop the remaining tasks
-- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted
+- Date: 2026-11-10 · Area: Coder node (Lab 2.2) · Status: accepted (where the try/except lives moved to DEC-202)
 - Basis: Preferred
 - Context: the Coder runs the PM's tasks in order. A task can end without
   success (iteration limit, failed or unverified execution) while later
@@ -2753,7 +2753,7 @@ A decision can mix bases; then each part states its own.
   `_is_servable_name`, `_read_file`, `_reject`)
 
 ### DEC-137 Lab 3.2 builds a QA that writes and runs pytest tests
-- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted
+- Date: 2026-11-17 · Area: QA Agent (Lab 3.2) · Status: accepted (default test timeout refined by DEC-203)
 - Basis: Required (C3.1)
 - Context: the Lab 3.2 handout builds a QA that only sends the code to an
   LLM for review and returns an `IssueList`. C3.1 marks "QA is only an LLM
@@ -4241,3 +4241,58 @@ A decision can mix bases; then each part states its own.
   Yet risk in typical runs).
 - Cost: one more Coder pass in the reviews where only Low bugs are found.
 - Code: `agents/coder_reflection.py` (`Evaluation.needs_improvement`)
+
+### DEC-202 One shared guard keeps every graph node from raising
+- Date: 2026-11-23 · Area: Orchestration (Lab 3.3, review R2) · Status: accepted
+- Basis: Required (a run never crashes; the assessor forces failures);
+  generalizes the mechanism of DEC-087 and DEC-102
+- Context: the PM (DEC-087) and the Coder (DEC-102) each had their own
+  `try/except`; `reflect` and `qa` had none. The independent review of
+  Module 3 found exceptions that could escape them: an `OSError` while
+  snapshotting or restoring files, a missing key for the evaluation
+  model, and `asyncio.run` inside a running event loop. Any of them would
+  stop the run with a traceback instead of `RESULT: error`.
+- Decision: `guard_node(name, node, task_of)` in
+  `orchestration/node_guard.py` wraps the node function returned by each
+  factory (`make_pm_node`, `make_coder_node`, `make_reflect_node`,
+  `make_qa_node`). On any exception it logs at ERROR with the traceback,
+  marks the task the node worked on `failed` with `closed_reason`
+  "<name> error: <error>", adds the note "<name>: failed — <error>" and
+  sets `error`, which every router reads to end the run. `task_of`
+  defaults to the task in progress; the Coder passes its own selector
+  (in progress, or the next pending on a first pass); the PM has no task.
+  The wrapper keeps the node's signature (`functools.wraps`), so
+  LangGraph still injects `runtime`.
+- Why: one rule for every node, tested once, that a new node cannot
+  forget; the factories return guarded nodes, so a node called directly
+  in a test behaves as in the graph.
+- Alternatives: a `try/except` per node (four copies that drift, as they
+  already had); wrapping only in `build_graph` (nodes called directly
+  would still raise); on a `reflect` failure, sending v0 to the QA (the
+  files on disk may be half restored, so stopping is safer).
+- Cost: on a PM failure its intermediate progress notes ("spec
+  complete…") are no longer returned; the error and the traceback are in
+  the log and in `error`.
+- Code: `orchestration/node_guard.py` (`guard_node`, `task_in_progress`);
+  the four `make_*_node` factories
+
+### DEC-203 The default per-test timeout follows a low EXEC_TIMEOUT
+- Date: 2026-11-23 · Area: QA Agent (Lab 3.3, review R2) · Status: accepted
+- Basis: Required (C1.3: the assessor lowers `EXEC_TIMEOUT`); refines DEC-152
+- Context: `QA_TEST_TIMEOUT` defaulted to 2 s and had to be lower than
+  `EXEC_TIMEOUT`, and `agents/qa_agent.py` loaded its settings at import
+  (`QA_SETTINGS`, unused). With `EXEC_TIMEOUT` of 1 or 2, `import main`
+  failed with a `ValueError` traceback, so the team could not start.
+- Decision: the import-time `QA_SETTINGS` is removed; settings are read
+  per QA run, where an invalid value becomes a `qa` issue (DEC-142).
+  When `QA_TEST_TIMEOUT` is unset its default is `max(1, min(2,
+  EXEC_TIMEOUT - 1))`; a value set explicitly must still be lower than
+  `EXEC_TIMEOUT` (AC-3.2-4 unchanged). `.env.example` leaves it commented
+  out, so a copied `.env` keeps the adaptive default.
+- Why: a low `EXEC_TIMEOUT` is a valid setting and must not stop the
+  team. With `EXEC_TIMEOUT=1` the per-test timeout equals it (1 s); the
+  whole pytest run still gets `EXEC_TIMEOUT + tests × QA_TEST_TIMEOUT`
+  (DEC-161), so a single test still times out before the run does.
+- Alternatives: drop the "lower than" check altogether (changes AC-3.2-4
+  for no gain); clamp an explicit value silently (hides a wrong setting).
+- Code: `agents/qa_agent.py` (`load_qa_settings`), `.env.example`

@@ -1,7 +1,7 @@
 """Integration tests of the Coder-QA loop through ``run()`` (Lab 3.3, T7).
 
-Covers spec `lab_3_3_a2a_loop` AC-3.3-29 .. AC-3.3-34 and AC-3.3-36
-(DEC-163, DEC-164, DEC-168, DEC-169, DEC-170, DEC-176, DEC-178, DEC-197,
+Covers spec `lab_3_3_a2a_loop` AC-3.3-29 .. AC-3.3-34, AC-3.3-36 and AC-3.3-44
+(DEC-163, DEC-164, DEC-168, DEC-169, DEC-170, DEC-176, DEC-178, DEC-197, DEC-202,
 DEC-198), with a fake PM, a fake
 Coder, a clean fake evaluation and a fake QA; AC-3.3-31 runs the real QA
 with a fake test-writing model. AC-3.3-40 runs the whole team with the
@@ -414,3 +414,44 @@ def test_ac_3_3_40_linked_list_demo(isolated_run, tmp_path, monkeypatch):
     requests = {m.correlation_id for m in final.messages if m.intent == "review_request"}
     approvals = [m.correlation_id for m in final.messages if m.intent == "approved"]
     assert approvals and set(approvals) <= requests
+
+
+def test_ac_3_3_44_reflect_raises(loop, monkeypatch):
+    def broken(*args, **kwargs):
+        """Raises, as a disk error inside the self-reflection would.
+
+        Raises:
+            OSError: Always.
+        """
+        raise OSError("disk full")
+
+    monkeypatch.setattr(coder_reflection, "evaluate_version", broken)
+
+    final = run(REQUIREMENT, pm_model=_pm(_task_draft(1)), coder_model=ScriptedChatModel([]), qa_review=FakeQA({}))
+
+    assert final.error == "OSError: disk full"
+    assert [t.status for t in final.tasks] == ["failed", "pending"]
+    assert final.tasks[0].closed_reason == "Reflect error: OSError: disk full"
+    assert final.outcome == "unresolved"
+
+
+def test_ac_3_3_44_qa_raises(loop):
+    class BrokenQA:
+        """Replaces the QA's work with one that raises."""
+
+        def __call__(self, task: TaskSpec) -> QAReport:
+            """Raises, as an event-loop error inside the QA would.
+
+            Args:
+                task: The task to review; unused.
+
+            Raises:
+                RuntimeError: Always.
+            """
+            raise RuntimeError("event loop is running")
+
+    final = run(REQUIREMENT, pm_model=_pm(_task_draft(1)), coder_model=ScriptedChatModel([]), qa_review=BrokenQA())
+
+    assert final.error == "RuntimeError: event loop is running"
+    assert [t.status for t in final.tasks] == ["failed", "pending"]
+    assert final.outcome == "unresolved"

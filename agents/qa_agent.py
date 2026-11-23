@@ -25,7 +25,6 @@ the real model and prints the report.
 Attributes:
     DEFAULT_QA_MODEL: Small, fast model used when ``QA_MODEL`` is unset
         (C4.5, DEC-150).
-    QA_SETTINGS: Settings read at import time from the environment.
     TESTS_SYSTEM_PROMPT: Instructions for writing the tests of a task.
     REVIEW_SYSTEM_PROMPT: Instructions for writing the fix of each failing test.
 
@@ -59,6 +58,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from agents.llm_helpers import PYTHON_ENVIRONMENT, StructuredOutputError, structured_call
 from llm_client import get_chat_model
 from orchestration.a2a import A2AMessage, A2AProtocolError, inbox, payload_model, send
+from orchestration.node_guard import guard_node
 from orchestration.settings import int_setting
 from orchestration.state import (
     FailedTest,
@@ -73,7 +73,7 @@ from orchestration.state import (
     TaskState,
 )
 from tools import code_executor, handlers
-from tools.code_executor import EXEC_TIMEOUT, PytestResult, run_pytest
+from tools.code_executor import PytestResult, run_pytest
 from tools.mcp_client import read_multiple_files
 
 load_dotenv()
@@ -111,8 +111,9 @@ def load_qa_settings(
 
     Args:
         env: Environment variables, usually ``os.environ``.
-        exec_timeout: The whole run's timeout (``EXEC_TIMEOUT``); each test's
-            timeout must be lower.
+        exec_timeout: The whole run's timeout (``EXEC_TIMEOUT``); a
+            ``QA_TEST_TIMEOUT`` set in ``env`` must be lower, and the default
+            (2 s) is lowered to fit, never below 1 s (DEC-203).
         coder_dir: The Coder's folder, which the QA's folder must not
             overlap.
 
@@ -144,9 +145,11 @@ def load_qa_settings(
             "executed test and blocks approval (DEC-174); remove it from .env"
         )
 
-    test_timeout = int_setting(env, "QA_TEST_TIMEOUT", default=2, minimum=1)
+    # DEC-203: the default follows a low EXEC_TIMEOUT instead of failing.
+    default_timeout = max(1, min(2, exec_timeout - 1))
+    test_timeout = int_setting(env, "QA_TEST_TIMEOUT", default=default_timeout, minimum=1)
     # DEC-152: a single test must time out before the whole run does.
-    if test_timeout >= exec_timeout:
+    if "QA_TEST_TIMEOUT" in env and test_timeout >= exec_timeout:
         raise ValueError(
             f"QA_TEST_TIMEOUT must be lower than EXEC_TIMEOUT ({exec_timeout}), "
             f"got {test_timeout}"
@@ -159,8 +162,6 @@ def load_qa_settings(
         test_timeout=test_timeout,
     )
 
-
-QA_SETTINGS = load_qa_settings(os.environ, EXEC_TIMEOUT, handlers.CODER_WORKSPACE_DIR)
 
 
 TESTS_SYSTEM_PROMPT = f"""You are the QA engineer of a software team. Write pytest tests that check
@@ -1666,7 +1667,7 @@ def make_qa_node(review: Review | None = None) -> Callable[[ProjectState, Runtim
         )
         return {"tasks": tasks_update, "progress": [note], "error": "", **update}
 
-    return qa_node
+    return guard_node("QA", qa_node)  # DEC-202: the node never raises out of the graph
 
 
 def _with_task_state(tasks: list[TaskState], task_id: str, **update) -> list[TaskState]:

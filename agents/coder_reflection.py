@@ -54,6 +54,7 @@ from agents.coder_agent import (
 )
 from agents.llm_helpers import PYTHON_ENVIRONMENT, structured_call
 from orchestration.a2a import A2AMessage, send
+from orchestration.node_guard import guard_node
 # DEC-196: the bug models live in the state; re-exported for existing imports.
 from orchestration.state import (
     KIND_SEVERITY,
@@ -654,4 +655,4 @@ def make_reflect_node(
             **send(state, request),
         }
 
-    return reflect_node
+    return guard_node("Reflect", reflect_node)  # DEC-202: the node never raises out of the graph

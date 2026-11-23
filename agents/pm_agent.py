@@ -11,7 +11,6 @@ Typical usage example:
     update = pm_node(ProjectState(requirement="Build a REST API with /health"))
 """
 
-import logging
 import os
 from collections.abc import Callable
 
@@ -20,6 +19,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agents.llm_helpers import PYTHON_ENVIRONMENT, structured_call
 from llm_client import get_chat_model
+from orchestration.node_guard import guard_node
 from orchestration.state import (
     NonEmptyStr,
     ProjectSpec,
@@ -29,8 +29,6 @@ from orchestration.state import (
     TaskSpec,
     TaskState,
 )
-
-logger = logging.getLogger(__name__)
 
 DEFAULT_PM_MODEL = "openai/gpt-4.1"  # DEC-086, DEC-093
 MAX_TASKS = 8  # C2.4
@@ -351,8 +349,8 @@ def make_pm_node(model: BaseChatModel | None = None) -> Callable[[ProjectState],
     def pm_node(state: ProjectState) -> dict:
         """Returns the spec, the tasks and progress notes for the requirement.
 
-        Never raises: any failure is logged and returned in ``error``
-        (DEC-087).
+        Never raises: ``guard_node`` logs any failure and returns it in
+        ``error`` (DEC-087, DEC-202).
 
         Args:
             state: Current state; only ``requirement`` is read.
@@ -361,25 +359,15 @@ def make_pm_node(model: BaseChatModel | None = None) -> Callable[[ProjectState],
             Update with ``spec``, ``tasks``, ``progress`` and ``error``.
         """
         progress = ["PM Agent: analysing requirement."]
-        try:
-            pm_model = model or get_chat_model(os.getenv("PM_MODEL", DEFAULT_PM_MODEL))
-            spec = _build_spec(state.requirement, pm_model)
-            progress.append("PM Agent: spec complete — decomposing into tasks.")
-            planned = _build_tasks(spec, pm_model)
-            tasks = consolidate_tasks(planned)
-            if len(tasks) < len(planned):
-                progress.append(
-                    f"PM Agent: consolidated {len(planned)} tasks into {len(tasks)}."
-                )
-        except Exception as exc:  # DEC-087: the node never raises out of the graph
-            error = f"{type(exc).__name__}: {exc}"
-            logger.error("PM Agent failed: %s", error)
-            return {
-                "spec": None,
-                "tasks": [],
-                "progress": [*progress, f"PM Agent: failed — {error}"],
-                "error": error,
-            }
+        pm_model = model or get_chat_model(os.getenv("PM_MODEL", DEFAULT_PM_MODEL))
+        spec = _build_spec(state.requirement, pm_model)
+        progress.append("PM Agent: spec complete — decomposing into tasks.")
+        planned = _build_tasks(spec, pm_model)
+        tasks = consolidate_tasks(planned)
+        if len(tasks) < len(planned):
+            progress.append(
+                f"PM Agent: consolidated {len(planned)} tasks into {len(tasks)}."
+            )
         progress.append(f"PM Agent: {len(tasks)} tasks created — handoff ready.")
         return {
             "spec": spec.model_copy(update={"tasks": tasks}),
@@ -388,4 +376,4 @@ def make_pm_node(model: BaseChatModel | None = None) -> Callable[[ProjectState],
             "error": "",
         }
 
-    return pm_node
+    return guard_node("PM Agent", pm_node)  # DEC-202: the node never raises out of the graph
