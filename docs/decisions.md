@@ -4296,3 +4296,28 @@ A decision can mix bases; then each part states its own.
 - Alternatives: drop the "lower than" check altogether (changes AC-3.2-4
   for no gain); clamp an explicit value silently (hides a wrong setting).
 - Code: `agents/qa_agent.py` (`load_qa_settings`), `.env.example`
+
+### DEC-204 The Coder's correction pass reads the QA's fix_instruction from its inbox
+- Date: 2026-11-23 · Area: Coder-QA loop (Lab 3.3, review R3) · Status: accepted
+- Basis: Required (C3.5: the A2A messages are used in the workflow)
+- Context: the QA read its `review_request` through `inbox`, but the
+  Coder built its correction prompt from `task.qa_report` in the shared
+  state, so `fix_instruction` was validated and logged but nobody read
+  it. The independent review of Module 3 flagged the return direction as
+  decorative, and the README said the Coder read the messages.
+- Decision: `_pass_prompt` runs a correction pass when the last A2A
+  message to the Coder about the task is a `fix_instruction`, and takes
+  the report from that message's typed payload (`payload_model`); it
+  logs the review and correlation id at INFO. With no such message it is
+  the task's first pass (the Coder-only graph of Module 2 has none).
+  `task.qa_report` stays in the state for the final report and the
+  history. The router after the QA keeps reading the task's status: the
+  QA sets it from the intent in the same step (DEC-176), and reading the
+  intent again would make two sources of truth that could disagree.
+- Why: both directions of the protocol now drive behaviour: the request
+  starts the QA's review and the reply starts and feeds the Coder's
+  correction.
+- Alternatives: keep reading the state (A2A only logged in one
+  direction); route on the reply's intent as well (duplicate source of
+  truth).
+- Code: `agents/coder_agent.py` (`_pass_prompt`)

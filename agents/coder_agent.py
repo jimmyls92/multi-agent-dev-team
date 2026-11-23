@@ -58,6 +58,7 @@ import tools.handlers
 from agents.llm_helpers import PYTHON_ENVIRONMENT
 from llm_client import get_chat_model
 from memory import SlidingWindowBuffer, build_context, store_memory, store_outcome
+from orchestration.a2a import inbox, payload_model
 from orchestration.node_guard import guard_node
 from orchestration.settings import LoopSettings, load_loop_settings
 from orchestration.state import (
@@ -966,23 +967,29 @@ def _with_task(tasks: list[TaskState], task_id: str, **update: Any) -> list[Task
 def _pass_prompt(state: ProjectState, task: TaskState) -> tuple[str, str]:
     """Returns the prompt of the task's next pass and a note saying which pass it is.
 
-    A task in progress whose last review was not approved gets a correction
-    pass with the QA's report and the Medium and Low bugs its last version
-    left (DEC-187); otherwise it is the task's first pass.
+    When the last A2A message to the Coder about the task is a
+    ``fix_instruction``, the pass is a correction with the report that
+    message carries and the Medium and Low bugs the last version left
+    (DEC-187, DEC-204); otherwise it is the task's first pass.
 
     Args:
-        state: Current state; reads ``spec`` and ``code``.
+        state: Current state; reads ``messages``, ``spec`` and ``code``.
         task: The task to run.
 
     Returns:
         The prompt and the progress note that starts the pass.
     """
     written = list(state.code)
-    if task.status == "in_progress" and task.qa_report is not None:
+    # DEC-204: the QA's reply drives the correction; task.qa_report is only the record.
+    replies = [m for m in inbox(state, "coder") if m.payload["task_id"] == task.task_id]
+    if task.status == "in_progress" and replies and replies[-1].intent == "fix_instruction":
+        fix = payload_model(replies[-1])
+        logger.info("%s: Coder read fix_instruction of review %d (correlation_id=%s)",
+                    task.task_id, fix.review, replies[-1].correlation_id)
         pending = [bug for bug in (task.reflection.bugs if task.reflection else [])
                    if bug.severity != "High"]
-        prompt = correction_prompt(task, state.spec, written, task.qa_report, pending)
-        return prompt, f"Coder Agent: correcting {task.task_id} after review {task.reviews}."
+        prompt = correction_prompt(task, state.spec, written, fix.report, pending)
+        return prompt, f"Coder Agent: correcting {task.task_id} after review {fix.review}."
     prompt = first_pass_prompt(task, state.spec, written)
     return prompt, f"Coder Agent: starting {task.task_id} — {task.title}."
 

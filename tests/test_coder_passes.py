@@ -1,15 +1,18 @@
 """Tests of the prompt of each Coder pass and of the task history (Lab 3.3, T5).
 
-Covers spec `lab_3_3_a2a_loop` AC-3.3-17 .. AC-3.3-20 (DEC-184, DEC-185,
-DEC-186, DEC-187, DEC-194, DEC-195), with the linked-list task and a
+Covers spec `lab_3_3_a2a_loop` AC-3.3-17 .. AC-3.3-20 and AC-3.3-45 (DEC-184,
+DEC-185, DEC-186, DEC-187, DEC-194, DEC-195, DEC-204), with the linked-list task and a
 fake model.
 """
+
+import logging
 
 import pytest
 
 import memory
 import tools.file_io
 from agents.coder_agent import (
+    _pass_prompt,
     correction_prompt,
     first_pass_prompt,
     improvement_prompt,
@@ -17,10 +20,12 @@ from agents.coder_agent import (
 )
 from agents.coder_reflection import Bug, ItemVerdict, SelfEvaluationBase
 from memory import MEMORY_HEADING, SlidingWindowBuffer, store_memory
+from orchestration.a2a import A2AMessage
 from orchestration.state import (
     FailedTest,
     Issue,
     ProjectSpec,
+    ProjectState,
     QAReport,
     ReviewRecord,
     SpecCriterion,
@@ -291,3 +296,46 @@ def test_ac_3_3_20_passes_use_memory(task, spec, isolated_run, monkeypatch):
     stored = memory._collection.get()["documents"]
     for prompt in prompts:
         assert prompt in stored
+
+
+def _report(tag: str) -> QAReport:
+    """Returns an unapproved report whose one issue carries a tag.
+
+    Args:
+        tag: Text put in the issue's description and fix.
+
+    Returns:
+        The report.
+    """
+    issue = Issue(severity="High", location="test_task_1.py::test_reverse_single",
+                  description=f"ERROR-{tag}", fix=f"FIX-{tag}", source="test")
+    return QAReport(task_id="task_1", issues=[issue], tests_passed=1, tests_failed=1)
+
+
+def test_ac_3_3_45_correction_reads_fix_instruction(task, spec, isolated_run, caplog):
+    request = A2AMessage(sender="coder", receiver="qa", intent="review_request",
+                         payload={"task_id": "task_1", "review": 1, "limit": 5})
+    reply = A2AMessage(sender="qa", receiver="coder", intent="fix_instruction",
+                       correlation_id=request.correlation_id,
+                       payload={"task_id": "task_1", "review": 1,
+                                "report": _report("FROM-MESSAGE").model_dump(mode="json")})
+    current = task.model_copy(update={"status": "in_progress", "reviews": 1, "qa_report": _report("FROM-STATE")})
+    state = ProjectState(requirement="r", spec=spec, tasks=[current], messages=[request, reply])
+
+    with caplog.at_level(logging.INFO):
+        prompt, note = _pass_prompt(state, current)
+
+    assert "FIX-FROM-MESSAGE" in prompt and "ERROR-FROM-MESSAGE" in prompt
+    assert "FROM-STATE" not in prompt
+    assert "correcting task_1 after review 1" in note
+    assert "fix_instruction" in caplog.text and request.correlation_id in caplog.text
+
+
+def test_ac_3_3_45_no_message_first_pass(task, spec, isolated_run):
+    current = task.model_copy(update={"status": "in_progress", "qa_report": _report("FROM-STATE")})
+    state = ProjectState(requirement="r", spec=spec, tasks=[current])
+
+    prompt, note = _pass_prompt(state, current)
+
+    assert "FROM-STATE" not in prompt
+    assert "starting task_1" in note

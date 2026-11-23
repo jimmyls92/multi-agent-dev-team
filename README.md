@@ -228,7 +228,7 @@ nothing is copied by hand between agents. The edges are in
 | `spec`: name, description, details, acceptance criteria, tasks as planned | PM | Coder (project context), `main.py` |
 | `tasks`: each `TaskSpec` plus `status` (`pending`/`in_progress`/`done`/`failed`), `result` (`CoderResult`), `reflection`, `reviews`, `history`, `qa_report`, `closed_reason` | PM creates them; Coder, `reflect` and QA update them | every node, routers, `main.py` |
 | `code`: file path → content on disk, every file the run wrote | Coder | Coder (files already written), `main.py` |
-| `messages`: the A2A messages of the run | `reflect` (`review_request`), QA (answers) | QA, Coder, tests |
+| `messages`: the A2A messages of the run | `reflect` (`review_request`), QA (answers) | QA (its `review_request`), Coder (the last `fix_instruction`, whose report drives the correction pass, DEC-204), tests |
 | `progress`: notes, appended by each step | every node | `main.py` |
 | `error`: empty unless the run must stop | `run()`, PM, Coder | routers, `main.py` |
 | `deadline`, `deadline_at`: end of the run's time budget | `run()` | routers |
@@ -385,7 +385,10 @@ into the prompt (C1.2, DEC-186). The QA's fix instructions reach Chroma
 through the Coder's correction prompts, so a later task can recall them.
 Two LLM calls use no memory on purpose: the PM and the QA, as before, and
 the **Coder's self-evaluation**, which sees only the version's files and
-the task, with no window and no Chroma. An evaluator that cannot read the
+the task, with no window and no Chroma. It is a separate critic call
+(one structured output, no tools), outside the Coder's ReACT loop: every
+ReACT call of the Coder, including the improvement and correction passes,
+still queries Chroma first (C1.2). An evaluator that cannot read the
 author's reasoning judges the code that is there instead of agreeing with
 it, and its opinions never leak into the Coder's memory (DEC-173). The
 window keeps whole passes during the loop; compacting them is left for

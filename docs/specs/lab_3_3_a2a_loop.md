@@ -568,6 +568,18 @@ fake Coder, fake evaluation and fake QA.
   the traceback; a guarded node that does not raise returns its update
   unchanged and still receives the runtime from LangGraph
 
+#### AC-3.3-45 — The correction pass reads the QA's `fix_instruction`
+
+- **Origin:** C3.5, DEC-204 (review R3)
+- **Verify:** unit — `tests/test_coder_passes.py::test_ac_3_3_45_correction_reads_fix_instruction`,
+  `::test_ac_3_3_45_no_message_first_pass`
+- **Given** a task in progress whose last A2A message to the Coder is a
+  `fix_instruction` with a report that differs from `task.qa_report`
+- **When** the Coder builds the prompt of its next pass
+- **Then** it is a correction pass with the message's report, not the
+  state's; an INFO record names the intent and the correlation id
+- **And given** no message to the Coder, **then** it is the first pass
+
 ## Tasks
 
 Task status: todo | map | in progress | review | done
@@ -687,11 +699,14 @@ delivery, with Lab 3.1's T4.
   `guard_node` wraps the PM, Coder, `reflect` and QA nodes, replacing the
   PM's and the Coder's own `try/except` (DEC-202).
 
-### R3 — The Coder reads its A2A inbox · pending
+### R3 — The Coder reads its A2A inbox · done
 
-- Findings 3 and 4: the correction pass takes the QA report from the last
-  `fix_instruction` addressed to the Coder; README corrected, and the
-  self-evaluation call described as a separate critic call (DEC-173).
+- **Covers:** AC-3.3-45
+- **Review notes:** findings 3 and 4. The correction pass takes the
+  report from the last `fix_instruction` to the Coder (DEC-204); routing
+  still reads the task status set by the QA. README: who reads each
+  message, and the self-evaluation described as a separate critic call
+  outside the ReACT loop (DEC-173).
 
 ### R4 — QA tests that check behaviour and fit the run timeout · pending
 
