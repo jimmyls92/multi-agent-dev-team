@@ -3728,7 +3728,7 @@ A decision can mix bases; then each part states its own.
 - Code: `orchestration/state.py` (`outcome`, `final_report`), `main.py` (`_verdict`)
 
 ### DEC-182 The self-evaluation rubric: fixed items, defect kinds and a strict ranking
-- Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted
+- Date: 2026-11-19 · Area: Coder self-reflection (Lab 3.3) · Status: accepted (improvement trigger superseded by DEC-201)
 - Basis: Preferred; replaces the items, score and trigger of DEC-172
 - Context: DEC-172 left the rubric's items for later and scored versions
   with 2 points per criterion and 1 per edge case. A severity chosen
@@ -4216,3 +4216,28 @@ A decision can mix bases; then each part states its own.
   share of the run's cost.
 - Code: `agents/coder_reflection.py` (`_evaluation_schema`, `ItemCheck`,
   `EVALUATION_MODEL`, `reflect_task`)
+
+### DEC-201 Any bug of the self-evaluation starts an improvement pass
+- Date: 2026-11-23 · Area: Coder self-reflection (Lab 3.3, review R1) · Status: accepted
+- Basis: Required (C3.4); supersedes the improvement trigger of DEC-182
+- Context: DEC-182 started an improvement pass only on a High or Medium
+  bug, so Low bugs (annotations, style, naming, docstrings) were logged
+  and v0 went to the QA unchanged. The independent review of Module 3
+  found that this was the usual case in the live linked-list demo: the
+  critique found a Low bug and v0 was sent. The rubric marks C3.4 Not
+  Yet when "the critique is merely logged, causes no revision", and the
+  guide says the reflection must "produce a revised output".
+- Decision: any bug, Low included, starts an improvement pass, up to
+  `REFLECTION_MAX_ROUNDS`. Only a version with no bug goes to the QA
+  unchanged. Severities, the strict ranking and the best-version rule of
+  DEC-182 stay: a worse improvement is discarded and v0 restored; on a
+  tie the improved version wins.
+- Why: every critique that names a defect now drives a revised artifact,
+  which is what the rubric checks. A clean critique has nothing to
+  revise, so no pass is forced.
+- Alternatives: always run one pass, even on a clean critique (costs up
+  to 10 model calls with no critique item to act on, and the revision
+  would not come from the critique); keep DEC-182's trigger (C3.4 Not
+  Yet risk in typical runs).
+- Cost: one more Coder pass in the reviews where only Low bugs are found.
+- Code: `agents/coder_reflection.py` (`Evaluation.needs_improvement`)

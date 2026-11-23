@@ -203,7 +203,7 @@ nothing is copied by hand between agents. The edges are in
    stays `in_progress`; only the QA closes it (DEC-178).
 5. **`reflect`** (`agents/coder_reflection.py`) is the Coder's
    **self-reflection before QA**: it evaluates the version, improves it
-   when it finds High or Medium bugs, puts the best version on disk and
+   when it finds any bug, puts the best version on disk and
    sends it to the QA in an A2A `review_request` (see below).
 6. **`qa`** (`agents/qa_agent.py`) reviews that version with executed
    pytest tests and answers over A2A: `approved` (task `done`),
@@ -282,7 +282,8 @@ The `reflect` node runs after every Coder pass and before every QA review
    to a severity: High (`logic_error`, `crash`, `security`), Medium
    (`missing_edge_case`, `unclear_error`), Low (annotations, style, naming,
    docstrings) (DEC-182, DEC-183, DEC-200).
-2. **Improve** only if the version has High or Medium bugs: a ReACT pass
+2. **Improve** whenever the version has a bug, Low included (DEC-201), so
+   the critique always drives a revised version: a ReACT pass
    of the Coder gets the diagnosis and fixes and runs the code, so `result`
    still comes from a real execution (C1.5). Up to `REFLECTION_MAX_ROUNDS`
    rounds per submission.

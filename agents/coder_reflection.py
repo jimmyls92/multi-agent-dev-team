@@ -15,7 +15,7 @@ evaluation is unavailable and the version goes to the QA as it is
 The ``reflect`` node runs the whole cycle between the Coder and the QA
 (DEC-172, DEC-177, DEC-196): it evaluates the first pass's version, runs
 up to ``REFLECTION_MAX_ROUNDS`` improvement passes while the best version
-has High or Medium bugs, puts the best version back on disk and sends it.
+has any bug (DEC-201), puts the best version back on disk and sends it.
 
 Attributes:
     EVALUATION_ATTEMPTS: Model calls allowed for one evaluation (DEC-171).
@@ -216,9 +216,9 @@ class SelfEvaluationBase(BaseModel):
         return BugCounts(severities.count("High"), severities.count("Medium"), severities.count("Low"))
 
     def needs_improvement(self) -> bool:
-        """Returns whether a High or Medium bug calls for an improvement pass (DEC-182)."""
+        """Returns whether any bug, Low included, calls for an improvement pass (DEC-201)."""
         counts = self.counts()
-        return counts.high + counts.medium > 0
+        return counts.high + counts.medium + counts.low > 0
 
 
 class _EvaluationSchema(BaseModel):

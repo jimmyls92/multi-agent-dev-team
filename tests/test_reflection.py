@@ -210,13 +210,19 @@ def test_ac_3_3_13_kind_to_severity(task):
     assert evaluation.needs_improvement() is True
 
 
-def test_ac_3_3_13_low_bugs_need_no_improvement(task):
-    model = ScriptedChatModel([_reply(_items({"E9": [_bug("missing_type_annotation")], "E10": [_bug("style")]}))])
+def test_ac_3_3_21_any_bug_needs_improvement(task):
+    model = ScriptedChatModel([
+        _reply(_items({"E9": [_bug("missing_type_annotation")], "E10": [_bug("style")]}), "e0"),
+        _reply(_items(), "e1"),
+    ])
 
-    evaluation = evaluate_version(task, {"linked_list.py": LINKED_LIST}, model)
+    low_only = evaluate_version(task, {"linked_list.py": LINKED_LIST}, model)
+    clean = evaluate_version(task, {"linked_list.py": LINKED_LIST}, model)
 
-    assert evaluation.counts() == BugCounts(high=0, medium=0, low=2)
-    assert evaluation.needs_improvement() is False
+    assert low_only.counts() == BugCounts(high=0, medium=0, low=2)
+    assert low_only.needs_improvement() is True
+    assert clean.counts() == BugCounts(high=0, medium=0, low=0)
+    assert clean.needs_improvement() is False
 
 
 @pytest.mark.parametrize(
@@ -412,19 +418,37 @@ def test_ac_3_3_16_unavailable_sends_v0(task, isolated_run, monkeypatch, caplog)
     assert "critique unavailable" in caplog.text
 
 
-def test_ac_3_3_21_low_only_sent(task, isolated_run, monkeypatch, caplog):
+def test_ac_3_3_21_low_only_improved(task, isolated_run, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
-    model = ScriptedChatModel([_reply(_items({"E9": [_bug("missing_type_annotation")], "E10": [_bug("style")]}))])
+    model = ScriptedChatModel([
+        _reply(_items({"E9": [_bug("missing_type_annotation")], "E10": [_bug("style")]}), "e0"),
+        _reply(_items(), "e1"),
+    ])
+    coder = FakeCoder(isolated_run, [{"linked_list.py": V1}])
+
+    update = _reflect(_state(task, isolated_run), model, coder, monkeypatch)
+
+    sent = _sent(update)
+    assert len(coder.prompts) == 1
+    assert (isolated_run / "linked_list.py").read_text() == V1
+    assert sent.result.explanation == "EXPLANATION-v1"
+    assert (sent.reflection.version, sent.reflection.low) == (1, 0)
+    for part in ("E9", "E10", "v0: 0 High, 0 Medium, 2 Low", "sent v1"):
+        assert part in caplog.text
+
+
+def test_ac_3_3_21_clean_sent_unchanged(task, isolated_run, monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    model = ScriptedChatModel([_reply(_items())])
     coder = FakeCoder(isolated_run, [])
 
     sent = _sent(_reflect(_state(task, isolated_run), model, coder, monkeypatch))
 
     assert coder.prompts == []
+    assert (isolated_run / "linked_list.py").read_text() == V0
     assert sent.result.explanation == "EXPLANATION-v0"
-    assert (sent.reflection.version, sent.reflection.low) == (0, 2)
-    assert [bug.kind for bug in sent.reflection.bugs] == ["missing_type_annotation", "style"]
+    assert (sent.reflection.version, sent.reflection.low) == (0, 0)
     assert "no improvement needed" in caplog.text
-    assert "E9" in caplog.text and "E10" in caplog.text
 
 
 def test_ac_3_3_22_improvement_sent(task, isolated_run, monkeypatch, caplog):

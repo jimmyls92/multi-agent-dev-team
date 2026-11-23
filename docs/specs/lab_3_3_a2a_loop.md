@@ -13,7 +13,7 @@
 
 The team graph runs `pm → coder → reflect → qa` for each task, in a
 bounded loop: the Coder writes the task, evaluates its own version
-against a rubric and improves it when it finds High or Medium bugs, and
+against a rubric and improves it when it finds any bug, and
 sends the best version to the QA in an A2A `review_request`. The QA
 answers `approved`, `fix_instruction` or `unresolved`. The loop repeats
 until the QA approves the task or `QA_MAX_ITERATIONS` reviews are spent,
@@ -28,7 +28,7 @@ ends `unresolved` with a final report and a non-zero exit code.
 | Intents `review_request`, `fix_instruction`, `approved` | C3.3: at the limit the QA returns a final report | Adds `unresolved`, with the final report as payload (DEC-176) |
 | `MAX_ITERATIONS` constant in the Coder | C3.3: env variable, default 5, per the QA loop | `QA_MAX_ITERATIONS`, default 5, per task, counted in QA reviews, read per run (DEC-163, DEC-180) |
 | Coder fixes `word_counter.py` with one LLM call per iteration | C1.4/C1.5: the ReACT Coder, `result` from a real run | Every pass is a ReACT pass of the Coder (DEC-172, DEC-187) |
-| No self-reflection | C3.4: self-critique before QA that drives a revision; guide: "must run at least once and produce a revised output" | `reflect` node: rubric evaluation, diagnosis, improvement on High/Medium bugs, best version sent (DEC-172, DEC-177, DEC-182, DEC-183). A clean version is sent unchanged; C3.4 evidence comes from runs where the critique finds a bug and from the planted-bug test AC-3.3-41 |
+| No self-reflection | C3.4: self-critique before QA that drives a revision; guide: "must run at least once and produce a revised output" | `reflect` node: rubric evaluation, diagnosis, improvement on any bug, Low included, best version sent (DEC-172, DEC-177, DEC-182, DEC-183, DEC-201). Only a version with no bug is sent unchanged; C3.4 evidence comes from runs where the critique finds a bug and from the planted-bug test AC-3.3-41 |
 | QA = LLM review, `approved` when no High issue | C3.1: executed tests decide | Issues only from executed tests; the LLM only explains failures; `QA_BLOCKING_SEVERITY` removed (DEC-174) |
 | Loop stops after `MAX_ITERATIONS` and returns the code | C3.3: never claim success; C2.2: task status in state | Task `failed` with the QA's final report; run `unresolved`, exit code 1 (DEC-164, DEC-165, DEC-181) |
 | Mocked tests of `Message`, `Broker` and the loop | C3.6: tests of the QA issue schema (mocked code input), loop success and loop max-iterations; linked-list demo passes generated tests for all four methods | Schema: AC-3.2-5/6 (updated in T3); loop: AC-3.3-29, AC-3.3-30; demo: AC-3.3-40 |
@@ -301,14 +301,19 @@ task.
 All in `tests/test_reflection.py`, with a fake Coder and the fake
 evaluation model.
 
-#### AC-3.3-21 — A version with only Low bugs goes straight to the QA
+#### AC-3.3-21 — Any bug starts an improvement; only a clean version goes straight to the QA
 
-- **Origin:** C3.4, DEC-182
-- **Verify:** unit — `test_ac_3_3_21_low_only_sent`
-- **Given** an evaluation of v0 with two Low bugs and no High or Medium
-- **When** the `reflect` node runs
-- **Then** no improvement pass runs; v0 is the version sent; an INFO
-  record lists the evaluation's bugs and says no improvement was needed
+- **Origin:** C3.4, DEC-201 (R1; replaces "Low bugs go straight to the QA" of DEC-182)
+- **Verify:** unit — `test_ac_3_3_21_any_bug_needs_improvement`,
+  `test_ac_3_3_21_low_only_improved`, `test_ac_3_3_21_clean_sent_unchanged`
+- **Given** an evaluation of v0 with two Low bugs and no High or Medium,
+  and an improvement pass that writes v1 evaluated with no bugs
+- **When** the `reflect` node runs with `REFLECTION_MAX_ROUNDS=1`
+- **Then** exactly one improvement pass runs; v1 is on disk and is the
+  version sent; INFO records list v0's bugs and say v1 was sent
+- **And given** an evaluation of v0 with no bugs, **then** no
+  improvement pass runs, v0 is sent and an INFO record says no
+  improvement was needed
 
 #### AC-3.3-22 — A High or Medium bug starts one improvement, and the better version is sent
 
@@ -639,10 +644,49 @@ README (three-agent diagram, A2A justification, how to tell success from
 unresolved, the memory exception of DEC-173): written at the Module 3
 delivery, with Lab 3.1's T4.
 
+### R1 — Any bug starts an improvement · done
+
+- **Covers:** AC-3.3-21 (rewritten)
+- **Review notes:** finding 1 of the independent review: with DEC-182 a
+  critique with only Low bugs sent v0 unchanged, a C3.4 Not Yet risk.
+  DEC-201 makes any bug start an improvement pass.
+
+### R2 — Robust start and nodes that never raise · pending
+
+- Findings 2 and 6: no QA settings read at import, the per-test timeout
+  kept below `EXEC_TIMEOUT` instead of raising, and one shared wrapper
+  for the `coder`, `reflect` and `qa` nodes (DEC-102).
+
+### R3 — The Coder reads its A2A inbox · pending
+
+- Findings 3 and 4: the correction pass takes the QA report from the last
+  `fix_instruction` addressed to the Coder; README corrected, and the
+  self-evaluation call described as a separate critic call (DEC-173).
+
+### R4 — QA tests that check behaviour and fit the run timeout · pending
+
+- Findings 5 and 7: a test with no assertion or no call to the task's
+  code is rejected; a draft may not have more tests than fit in
+  `MAX_TIMEOUT`.
+
+### R5 — Docs and evidence · pending
+
+- Finding 8: Verify paths of AC-3.3-17..20, manual evidence of AC-3.1-17
+  and AC-3.2-27, Module 4 note on `EVALUATION_MODEL`, and the live demo
+  log re-captured after R1..R4.
+
 ## Independent review
 
-- **Date:** 2026-11-21
-- **Not run:** the reviewer agent failed for lack of API credits
-  (HTTP 402); by the user's decision the spec is closed without it, so
-  there is no R1 task.
-- **Findings and triage:** none.
+- **Date:** 2026-11-23 (the first attempt on 2026-11-21 failed for lack of
+  API credits).
+- **Scope:** Module 3 as a whole (Labs 3.1–3.3, diff `aa89f93..73688d5`);
+  full suite 265 passed, 7 skipped (`llm`).
+- **Findings and triage (user):** all fixed, in R1..R5.
+  1. C3.4 risk: Low-only critiques caused no revision → R1.
+  2. `main` crashed at import with `EXEC_TIMEOUT` ≤ 2 → R2.
+  3. The Coder did not read its A2A inbox; README said it did → R3.
+  4. The self-evaluation call has no memory (C1.2 reading) → R3, README.
+  5. More than ~10 tests exceed the 30 s cap and get a wrong diagnosis → R4.
+  6. `reflect` and `qa` could raise out of the graph → R2.
+  7. A test with no assertion could be approved → R4.
+  8. Spec paths, missing manual evidence, model size note → R5.
