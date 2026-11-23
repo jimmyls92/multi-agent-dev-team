@@ -529,8 +529,119 @@ def _undefined_names(tree: ast.Module) -> list[str]:
     return sorted(used - defined)
 
 
+def max_tests(criteria_count: int, test_timeout: int) -> int:
+    """Returns the most tests a draft may have so the run fits in the sandbox cap (DEC-206).
+
+    The run gets ``EXEC_TIMEOUT + tests × test_timeout`` (DEC-161), and the
+    sandbox never allows more than ``MAX_TIMEOUT``; with more tests, a hang
+    would be cut by the whole run's limit instead of the test's own.
+
+    Args:
+        criteria_count: Number of acceptance criteria of the task; the
+            limit never goes below it, since each needs a test.
+        test_timeout: Seconds each test may take (``QA_TEST_TIMEOUT``).
+
+    Returns:
+        The limit; 10 with the defaults (30 s cap, 10 s, 2 s per test).
+    """
+    fits = (code_executor.MAX_TIMEOUT - code_executor.EXEC_TIMEOUT) // test_timeout
+    return max(criteria_count, fits)
+
+
+def _reject(task_id: str, reason: str, message: str, **fields: int) -> ValueError:
+    """Returns the validation error of a rejected draft, after logging it with a stable reason.
+
+    The WARNING record has the form ``QA draft rejected: task=<id>
+    reason=<reason> key=value...``, so the rejections can be counted by
+    reason in the logs (DEC-206).
+
+    Args:
+        task_id: The task whose draft is rejected.
+        reason: Stable reason key, e.g. ``too_many_tests``.
+        message: What the model must correct.
+        **fields: Numbers worth counting, e.g. ``tests=11``.
+
+    Returns:
+        The error to raise.
+    """
+    extra = "".join(f" {key}={value}" for key, value in fields.items())
+    logger.warning("QA draft rejected: task=%s reason=%s%s", task_id, reason, extra)
+    return ValueError(message)
+
+
+def _task_names(tree: ast.Module, imports: _ImportContext) -> set[str]:
+    """Returns the names a test file binds to the task's modules or what they define.
+
+    Args:
+        tree: The parsed test file.
+        imports: What the draft may import; gives the task's modules.
+
+    Returns:
+        Local names of task imports, e.g. ``{"LinkedList"}`` or
+        ``{"linked_list"}``.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in imports.modules:
+            names.update(a.asname or a.name for a in node.names)
+        elif isinstance(node, ast.Import):
+            names.update(a.asname or a.name for a in node.names if a.name in imports.modules)
+    return names
+
+
+def _asserts(node: ast.AST) -> bool:
+    """Returns whether code contains an ``assert`` or a ``pytest.raises``.
+
+    Args:
+        node: A function or class.
+
+    Returns:
+        True if it checks something itself.
+    """
+    return any(
+        isinstance(n, ast.Assert)
+        or (isinstance(n, ast.Attribute) and n.attr == "raises")
+        or (isinstance(n, ast.Name) and n.id == "raises")
+        for n in ast.walk(node)
+    )
+
+
+def _names_used(node: ast.AST) -> set[str]:
+    """Returns the names code reads.
+
+    Args:
+        node: A function or class.
+
+    Returns:
+        Every name loaded inside it.
+    """
+    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+
+
+def _reaching(helpers: dict[str, ast.AST], direct: set[str]) -> set[str]:
+    """Returns the helpers that have a property directly or through other helpers.
+
+    Args:
+        helpers: Preamble function and class name to its node.
+        direct: Helpers that have the property themselves.
+
+    Returns:
+        ``direct`` plus every helper that uses one of them, repeated until
+        nothing changes.
+    """
+    found = set(direct)
+    changed = True
+    while changed:
+        changed = False
+        for name, node in helpers.items():
+            if name not in found and _names_used(node) & found:
+                found.add(name)
+                changed = True
+    return found
+
+
 def _pytest_draft_schema(
-    criteria_count: int, imports: _ImportContext
+    criteria_count: int, imports: _ImportContext, test_limit: int | None = None, task_id: str = ""
 ) -> type[PytestDraftBase]:
     """Returns a PytestDraft schema with the checks of one task (DEC-148).
 
@@ -541,6 +652,8 @@ def _pytest_draft_schema(
         criteria_count: Number of acceptance criteria of the task.
         imports: What the draft may import; the QA's import mistakes are
             rejected here, the Coder's are left for ``run_qa`` (DEC-152).
+        test_limit: Most tests allowed (DEC-206); None means no limit.
+        task_id: The task, for the log of rejected drafts.
 
     Returns:
         A subclass of ``PytestDraftBase`` with the checks, named ``PytestDraft``
@@ -562,9 +675,18 @@ def _pytest_draft_schema(
                     one function named like it, a name repeats or lacks the
                     ``test_`` prefix, a criterion index is unknown, a
                     criterion has no test, an import is the QA's mistake, a
-                    name is used without being imported or defined, or a
-                    test is skipped or xfailed.
+                    name is used without being imported or defined, a
+                    test is skipped or xfailed, there are more tests than
+                    fit in the run's time (DEC-206), or a test never
+                    asserts or never uses the task's code (DEC-205).
             """
+            if test_limit is not None and len(self.tests) > test_limit:
+                raise _reject(
+                    task_id, "too_many_tests",
+                    f"the draft has {len(self.tests)} tests; at most {test_limit} tests fit "
+                    f"in the run's time: merge checks of the same criterion into one test",
+                    tests=len(self.tests), max_tests=test_limit,
+                )
             for node in _parse(self.preamble, "the preamble").body:
                 if not isinstance(node, _PREAMBLE_NODES):
                     raise ValueError(
@@ -614,7 +736,41 @@ def _pytest_draft_schema(
                     f"names used but never imported or defined: {', '.join(undefined)}; "
                     f"import them in the preamble"
                 )
+            self._check_behaviour(tree)
             return self
+
+        def _check_behaviour(self, tree: ast.Module) -> None:
+            """Checks that every test asserts and uses the task's code, itself or through a helper (DEC-205).
+
+            Args:
+                tree: The assembled test file.
+
+            Raises:
+                ValueError: If a test never asserts or never uses the
+                    task's code.
+            """
+            helpers = {
+                node.name: node for node in ast.parse(self.preamble or "").body
+                if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+            }
+            task_names = _task_names(tree, imports)
+            asserting = _reaching(helpers, {n for n, node in helpers.items() if _asserts(node)})
+            using = _reaching(helpers, {n for n, node in helpers.items() if _names_used(node) & task_names})
+            for test in self.tests:
+                node = ast.parse(test.code).body[0]
+                used = _names_used(node)
+                if not (_asserts(node) or used & asserting):
+                    raise _reject(
+                        task_id, "no_assert",
+                        f"{test.name} never asserts: check the criterion's expected "
+                        f"result with assert or pytest.raises",
+                    )
+                if not (used & task_names or used & using):
+                    raise _reject(
+                        task_id, "no_task_code",
+                        f"{test.name} never uses the task's code: call what the task "
+                        f"imports from its modules",
+                    )
 
     return PytestDraft
 
@@ -808,10 +964,12 @@ def write_tests(
         Exception: Errors of the model call propagate.
     """
     rejected = rejected or {}
+    limit = max_tests(len(task.acceptance_criteria), settings.test_timeout)
     schema = _pytest_draft_schema(
-        len(task.acceptance_criteria), _import_context(task, sources, rejected)
+        len(task.acceptance_criteria), _import_context(task, sources, rejected), limit, task.task_id
     )
     request = _render_task(task, sources, rejected)
+    request += f"\n\nWrite at most {limit} tests in total (DEC-206)."
     if feedback:
         request += f"\n\n## Your previous draft could not be used\n{feedback}"
     draft = structured_call(model, schema, TESTS_SYSTEM_PROMPT, request, max_attempts=1)

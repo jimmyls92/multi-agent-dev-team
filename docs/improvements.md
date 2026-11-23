@@ -292,6 +292,21 @@ each idea has a stable ID (`IMP-NNN`, never reused).
   Risk: regression of the Module 1 memory evidence.
 - Notes: decide with Module 4 cost reports.
 
+### IMP-023 Count the QA's rejected drafts by reason in the traces
+- Status: planned (Module 4)
+- Area: Coder-QA loop (Lab 3.3)
+- Why: the user wants to know how often the QA writes more tests than fit
+  in the run's time (DEC-206), or tests that check nothing (DEC-205), to
+  act on it (e.g. raise the cap, change `QA_TEST_TIMEOUT` or the prompt).
+  Today each rejection is a WARNING record `QA draft rejected: task=<id>
+  reason=<reason> ...`, countable with `grep`, but not aggregated.
+- Rubric: C4.1 (span attributes), C4.4 (cost of the extra drafts); no
+  risk to earlier criteria.
+- Notes: in Module 4, add the rejections to the QA span as attributes or
+  a counter per reason (`qa.draft_rejected.too_many_tests`, ...), and
+  their totals per run to the cost report next to the extra tokens they
+  cost.
+
 ## General
 
 ### IMP-008 One module for the models shared between agents

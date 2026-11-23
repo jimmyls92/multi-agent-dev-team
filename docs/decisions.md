@@ -4321,3 +4321,52 @@ A decision can mix bases; then each part states its own.
   direction); route on the reply's intent as well (duplicate source of
   truth).
 - Code: `agents/coder_agent.py` (`_pass_prompt`)
+
+### DEC-205 Every QA test must assert and use the task's code
+- Date: 2026-11-23 · Area: QA Agent (Lab 3.3, review R4) · Status: accepted
+- Basis: Required (C3.1: "tests assert behavior rather than merely
+  checking that code exists")
+- Context: the draft schema checked syntax, names, imports, coverage of
+  criteria and skips, but a test such as `def test_x(): assert True`
+  passed and could approve a task. Only the prompt asked for behavioural
+  asserts. Found by the independent review of Module 3.
+- Decision: the `PytestDraft` schema rejects a test that has no `assert`
+  and no `pytest.raises`, or that never reads a name bound to the task's
+  modules (`from linked_list import LinkedList`, `import linked_list`).
+  A test that calls a preamble helper (function or class) that asserts or
+  uses the task's code counts, followed through helpers that call other
+  helpers. The model gets the reason and tries again within
+  `QA_MAX_ATTEMPTS`.
+- Why: a cheap, deterministic filter against empty tests, without
+  rejecting well-written tests that share a check helper.
+- Limits: a test that asserts something trivial about the task's code
+  (`assert LinkedList is not None`) still passes; judging what an assert
+  means is left to the prompt and the criteria the expected values come
+  from.
+- Alternatives: an LLM judge of each test (cost, and it varies between
+  calls); require the assert in the test itself (rejects shared helpers).
+- Code: `agents/qa_agent.py` (`PytestDraft._check_behaviour`,
+  `_task_names`, `_asserts`, `_reaching`)
+
+### DEC-206 A QA draft has at most as many tests as fit in the sandbox cap
+- Date: 2026-11-23 · Area: QA Agent (Lab 3.3, review R4) · Status: accepted
+- Basis: Preferred; completes DEC-161
+- Context: pytest gets `EXEC_TIMEOUT + tests × QA_TEST_TIMEOUT` (DEC-161),
+  but the sandbox caps every run at `MAX_TIMEOUT` (30 s). With more than
+  10 tests at the defaults, several hanging tests reached the cap first,
+  and the report said "importing the task's code or a test hangs" instead
+  of naming the test. Found by the independent review of Module 3.
+- Decision: `max_tests = max(criteria, (MAX_TIMEOUT - EXEC_TIMEOUT) //
+  QA_TEST_TIMEOUT)`, 10 with the defaults. The request tells the model the
+  limit, and a draft over it is rejected with "N tests; at most M ...:
+  merge checks of the same criterion". Every rejection of a draft by
+  these checks (DEC-205 too) is logged at WARNING as `QA draft rejected:
+  task=<id> reason=<too_many_tests|no_assert|no_task_code>` with its
+  numbers (`tests=`, `max_tests=`), so its frequency can be counted;
+  aggregating it in the traces is IMP-023 (Module 4).
+- Why: within the limit, a hang is always cut by the test's own timeout,
+  so the report names the test that hung. The limit never drops below the
+  number of criteria, since each needs a test.
+- Alternatives: only reword the issue when the cap is hit (the hung test
+  stays unknown); raise `MAX_TIMEOUT` (a lab limit, DEC-037).
+- Code: `agents/qa_agent.py` (`max_tests`, `_reject`, `write_tests`)

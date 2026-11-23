@@ -3,7 +3,8 @@
 Covers spec `lab_3_2_qa_agent` AC-3.2-12 .. AC-3.2-26 and AC-3.2-28 ..
 AC-3.2-31 (DEC-139, DEC-141, DEC-142, DEC-145, DEC-148, DEC-149, DEC-152,
 DEC-157 .. DEC-161), as changed by DEC-174, and spec `lab_3_3_a2a_loop`
-AC-3.3-8 .. AC-3.3-10 (DEC-174, DEC-191), with a
+AC-3.3-8 .. AC-3.3-10, AC-3.3-46 and AC-3.3-47 (DEC-174, DEC-191, DEC-205,
+DEC-206), with a
 fake model, the linked-list task and, for ``run_qa``, the real MCP server
 over stdio and the real pytest sandbox. AC-3.2-26 uses the real model.
 
@@ -30,6 +31,7 @@ from agents.qa_agent import (
     QASettings,
     WrittenTests,
     _judge_run,
+    max_tests,
     run_qa,
     write_tests,
 )
@@ -207,6 +209,16 @@ def _invalid(change: str) -> dict:
         first["code"] = "ll = LinkedList()\n" + first["code"]
     elif change == "missing-import":
         draft["preamble"] = ""
+    elif change == "no-assert":
+        first["code"] = "def test_insert_search():\n    ll = LinkedList()\n    ll.insert(5)\n"
+    elif change == "no-task-code":
+        first["code"] = "def test_insert_search():\n    assert True\n"
+    elif change == "too-many-tests":
+        draft["tests"] += [
+            {"criterion_index": 0, "name": f"test_extra_{k}",
+             "code": f"def test_extra_{k}():\n    assert LinkedList().search({k}) is False\n"}
+            for k in range(9)
+        ]
     return draft
 
 
@@ -593,7 +605,10 @@ async def test_ac_3_2_22_timeouts(task, settings, coder_dir, tmp_path, monkeypat
         )
     elif case == "b-test-hangs":
         first = copy.deepcopy(VALID_DRAFT)
-        first["tests"][1]["code"] = "def test_insert_order():\n    while True:\n        pass\n"
+        first["tests"][1]["code"] = (
+            "def test_insert_order():\n    ll = LinkedList()\n    while True:\n        pass\n"
+            "    assert ll.to_list() == []\n"
+        )
     else:
         (coder_dir / "linked_list.py").write_text(LINKED_LIST + "\nwhile True:\n    pass\n")
     model = ScriptedChatModel([_draft_reply(first, "d1"), _draft_reply(VALID_DRAFT, "d2")])
@@ -928,3 +943,71 @@ async def test_review_fixes_match_by_failure_number(task, settings, coder_dir, t
     report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
 
     assert [issue.fix for issue in report.issues] == ["Add LinkedList.", "Add Node."]
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize(
+    ("change", "error_text"),
+    [
+        ("no-assert", "test_insert_search never asserts"),
+        ("no-task-code", "test_insert_search never uses the task's code"),
+    ],
+)
+async def test_ac_3_3_46_empty_test_rejected(task, settings, coder_dir, tmp_path, caplog, change, error_text):
+    model = ScriptedChatModel(
+        [_draft_reply(_invalid(change), "draft_1"), _draft_reply(VALID_DRAFT, "draft_2")]
+    )
+    caplog.set_level(logging.WARNING, logger="agents.qa_agent")
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert len(_test_calls(model)) == 2
+    assert error_text in _text(_test_calls(model)[1])
+    assert report.approved is True
+    reason = change.replace("-", "_")
+    assert any(f"reason={reason}" in r.getMessage() for r in caplog.records), caplog.text
+
+
+def test_ac_3_3_46_helper_counts(task, settings):
+    draft = copy.deepcopy(VALID_DRAFT)
+    draft["preamble"] = (
+        "from linked_list import LinkedList\n\n\n"
+        "def check_found(values, wanted):\n"
+        "    ll = LinkedList()\n"
+        "    for v in values:\n"
+        "        ll.insert(v)\n"
+        "    assert ll.search(wanted) is True\n"
+    )
+    draft["tests"][0]["code"] = "def test_insert_search():\n    check_found([5], 5)\n"
+    model = ScriptedChatModel([_draft_reply(draft)])
+
+    written = write_tests(task, {"linked_list.py": LINKED_LIST}, model, settings)
+
+    assert written.criteria == {"test_insert_search": 0, "test_insert_order": 1}
+
+
+@pytest.mark.timeout(120)
+async def test_ac_3_3_47_too_many_tests_rejected(task, settings, coder_dir, tmp_path, caplog, monkeypatch):
+    monkeypatch.setattr(tools.code_executor, "EXEC_TIMEOUT", 10)
+    model = ScriptedChatModel(
+        [_draft_reply(_invalid("too-many-tests"), "draft_1"), _draft_reply(VALID_DRAFT, "draft_2")]
+    )
+    caplog.set_level(logging.WARNING, logger="agents.qa_agent")
+
+    report = await _run_qa(task, model, settings, coder_dir, tmp_path / "server.log")
+
+    assert "at most 10 tests" in _text(_test_calls(model)[0])
+    assert "11 tests; at most 10" in _text(_test_calls(model)[1])
+    assert report.approved is True and report.tests_passed == 2
+    assert any("reason=too_many_tests" in r.getMessage() and "tests=11" in r.getMessage()
+               and "max_tests=10" in r.getMessage() for r in caplog.records), caplog.text
+
+
+@pytest.mark.parametrize(
+    ("criteria", "exec_timeout", "test_timeout", "expected"),
+    [(2, 10, 2, 10), (2, 10, 1, 20), (2, 1, 1, 29), (12, 10, 2, 12)],
+)
+def test_ac_3_3_47_max_tests(monkeypatch, criteria, exec_timeout, test_timeout, expected):
+    monkeypatch.setattr(tools.code_executor, "EXEC_TIMEOUT", exec_timeout)
+
+    assert max_tests(criteria, test_timeout) == expected

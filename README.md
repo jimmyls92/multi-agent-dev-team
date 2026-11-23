@@ -318,7 +318,13 @@ log says so (DEC-171).
 2. Asks `QA_MODEL` for a draft of pytest tests, one per acceptance
    criterion or edge case, written from the criteria and the code's
    interface, not its bodies; the draft is validated with a per-task
-   Pydantic schema (DEC-148, DEC-157, DEC-158).
+   Pydantic schema (DEC-148, DEC-157, DEC-158). Every test must assert
+   (`assert` or `pytest.raises`) and use the task's code, itself or
+   through a preamble helper (DEC-205), and a draft may have at most as
+   many tests as fit in the sandbox's 30 s cap, 10 with the defaults
+   (DEC-206). Each rejection is logged at WARNING as `QA draft rejected:
+   task=<id> reason=<too_many_tests|no_assert|no_task_code> ...`, so its
+   frequency can be counted.
 3. Writes the tests to its own folder, `workspace_qa/`, never overlapping
    the Coder's, and runs pytest in the shared sandbox: a subprocess with a
    timeout (`QA_TEST_TIMEOUT` per test; unset, 2 s lowered to fit a low `EXEC_TIMEOUT`, DEC-203), no credentials and isolated from

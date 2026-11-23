@@ -580,6 +580,36 @@ fake Coder, fake evaluation and fake QA.
   state's; an INFO record names the intent and the correlation id
 - **And given** no message to the Coder, **then** it is the first pass
 
+#### AC-3.3-46 — A test that asserts nothing or never uses the task's code is rejected
+
+- **Origin:** C3.1, DEC-205 (review R4)
+- **Verify:** integration — `tests/test_qa_agent.py::test_ac_3_3_46_empty_test_rejected`;
+  unit — `::test_ac_3_3_46_helper_counts`
+- **Given** a first draft where one test has no `assert` (parametrized),
+  or one test is `assert True` without the task's code, and a valid
+  second draft
+- **When** `run_qa` runs the task
+- **Then** only the second draft runs; the second model call contains
+  the reason; a WARNING record says `reason=no_assert` or
+  `reason=no_task_code`
+- **And given** a test that only calls a preamble helper which uses
+  `LinkedList` and asserts, **then** the draft is accepted
+
+#### AC-3.3-47 — A draft has at most as many tests as fit in the sandbox cap
+
+- **Origin:** ours, DEC-206 (review R4)
+- **Verify:** integration — `tests/test_qa_agent.py::test_ac_3_3_47_too_many_tests_rejected`;
+  unit — `::test_ac_3_3_47_max_tests`
+- **Given** `EXEC_TIMEOUT=10`, `QA_TEST_TIMEOUT=2` and a first draft of
+  11 tests, then a valid draft
+- **When** `run_qa` runs the task
+- **Then** the first request says "at most 10 tests"; the second model
+  call contains "11 tests; at most 10"; only the second draft runs; a
+  WARNING record holds `reason=too_many_tests tests=11 max_tests=10`
+- **And** the limit is `(MAX_TIMEOUT - EXEC_TIMEOUT) // QA_TEST_TIMEOUT`,
+  never below the number of criteria (10, 20, 29 and 12 in the
+  parametrized cases)
+
 ## Tasks
 
 Task status: todo | map | in progress | review | done
@@ -708,11 +738,14 @@ delivery, with Lab 3.1's T4.
   message, and the self-evaluation described as a separate critic call
   outside the ReACT loop (DEC-173).
 
-### R4 — QA tests that check behaviour and fit the run timeout · pending
+### R4 — QA tests that check behaviour and fit the run timeout · done
 
-- Findings 5 and 7: a test with no assertion or no call to the task's
-  code is rejected; a draft may not have more tests than fit in
-  `MAX_TIMEOUT`.
+- **Covers:** AC-3.3-46, AC-3.3-47
+- **Review notes:** findings 5 and 7 (DEC-205, DEC-206). The hanging test
+  of AC-3.2-22 (b) now uses `LinkedList` and asserts after its loop, so it
+  passes the new checks and still hangs. Each rejection is logged with a
+  stable `reason=` key so its frequency can be counted; aggregating it in
+  the traces is IMP-023 (Module 4), at the user's request.
 
 ### R5 — Docs and evidence · pending
 
